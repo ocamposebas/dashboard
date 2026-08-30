@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex,nofollow" />
-    <meta name="theme-color" content="#07090c" />
+    <meta name="theme-color" content="#03112d" />
     <title>Phase One — Live Monitor</title>
   </head>
   <body>
@@ -27,9 +27,26 @@
       </header>
 
       <main>
+        <section class="hero-copy">
+          <div><p class="eyebrow">Phase One intelligence</p><h1>Traffic command center</h1></div>
+          <p>Live attention, cumulative reach and the pages driving the most interest.</p>
+        </section>
+
+        <section class="metric-grid" aria-label="Traffic statistics">
+          <article class="metric-card metric-card--primary"><span>Total page views</span><strong id="total-views">—</strong><small>Since tracking began</small></article>
+          <article class="metric-card"><span>Unique visitors</span><strong id="unique-visitors">—</strong><small>Anonymous browser sessions</small></article>
+          <article class="metric-card"><span>Online now</span><strong id="online-summary">—</strong><small>Active in the last 45 seconds</small></article>
+          <article class="metric-card"><span>Top destination</span><strong class="metric-text" id="top-destination">—</strong><small id="top-destination-views">Waiting for traffic</small></article>
+        </section>
+
+        <section class="ranking-panel" aria-labelledby="ranking-title">
+          <div class="panel-heading"><div><p class="eyebrow">Audience interest</p><h2 id="ranking-title">Most visited pages</h2></div><span>All-time views</span></div>
+          <div class="page-ranking" id="page-ranking"><p class="empty-state">Waiting for the first page view…</p></div>
+        </section>
+
         <section class="overview" aria-labelledby="online-label">
           <div>
-            <p class="eyebrow" id="online-label">Online now</p>
+            <p class="eyebrow" id="online-label">Live presence</p>
             <div class="total" id="total" aria-live="polite">—</div>
           </div>
           <div class="overview-meta">

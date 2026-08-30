@@ -39,6 +39,12 @@ const connectionElement = requiredElement<HTMLElement>("#connection");
 const connectionLabel = requiredElement<HTMLElement>("#connection-label");
 const footerConnection = requiredElement<HTMLElement>("#footer-connection");
 const announcement = requiredElement<HTMLElement>("#announcement");
+const totalViewsElement = requiredElement<HTMLElement>("#total-views");
+const uniqueVisitorsElement = requiredElement<HTMLElement>("#unique-visitors");
+const onlineSummaryElement = requiredElement<HTMLElement>("#online-summary");
+const topDestinationElement = requiredElement<HTMLElement>("#top-destination");
+const topDestinationViewsElement = requiredElement<HTMLElement>("#top-destination-views");
+const pageRankingElement = requiredElement<HTMLElement>("#page-ranking");
 
 for (const section of PRESENCE_SECTIONS) {
   const article = document.createElement("article");
@@ -168,7 +174,52 @@ function applySnapshot(snapshot: PresenceSnapshot): void {
     displayedTotal = value;
   });
   previousCounts = { ...snapshot.counts };
+  renderAnalytics(snapshot);
   updateRelativeTime();
+}
+
+function pageLabel(path: string): string {
+  if (path === "/") return "Home";
+  return path
+    .replace(/^\//, "")
+    .replace(/\/$/, "")
+    .split("/")
+    .map((part) => decodeURIComponent(part).replace(/[-_]+/g, " "))
+    .map((part) => part.replace(/\b\w/g, (letter) => letter.toUpperCase()))
+    .join(" / ");
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
+  })[character] || character);
+}
+
+function renderAnalytics(snapshot: PresenceSnapshot): void {
+  const { analytics } = snapshot;
+  totalViewsElement.textContent = formatNumber(analytics.totalViews);
+  uniqueVisitorsElement.textContent = formatNumber(analytics.uniqueVisitors);
+  onlineSummaryElement.textContent = formatNumber(snapshot.total);
+  const leader = analytics.topPages[0];
+  topDestinationElement.textContent = leader ? pageLabel(leader.path) : "—";
+  topDestinationViewsElement.textContent = leader ? `${formatNumber(leader.views)} views` : "Waiting for traffic";
+
+  if (!leader) {
+    pageRankingElement.innerHTML = '<p class="empty-state">Waiting for the first page view…</p>';
+    return;
+  }
+  pageRankingElement.innerHTML = analytics.topPages.map((page, index) => {
+    const width = Math.max(4, Math.round((page.views / leader.views) * 100));
+    return `<div class="rank-row"><span class="rank-index">${String(index + 1).padStart(2, "0")}</span><div class="rank-data"><div><strong>${escapeHtml(pageLabel(page.path))}</strong><code>${escapeHtml(page.path)}</code><b>${formatNumber(page.views)}</b></div><span class="rank-track"><i style="width:${width}%"></i></span></div></div>`;
+  }).join("");
 }
 
 function updateRelativeTime(): void {
@@ -191,6 +242,10 @@ function isSnapshot(value: unknown): value is PresenceSnapshot {
     data.type === "presence:snapshot" &&
     typeof data.total === "number" &&
     typeof data.serverTime === "string" &&
+    Boolean(data.analytics) &&
+    typeof data.analytics?.totalViews === "number" &&
+    typeof data.analytics?.uniqueVisitors === "number" &&
+    Array.isArray(data.analytics?.topPages) &&
     Boolean(data.counts) &&
     PRESENCE_SECTIONS.every(
       (section) => typeof data.counts?.[section] === "number",

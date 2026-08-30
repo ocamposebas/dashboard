@@ -16,6 +16,11 @@ export interface PresenceSnapshot {
   counts: PresenceCounts;
   total: number;
   serverTime: string;
+  analytics: {
+    totalViews: number;
+    uniqueVisitors: number;
+    topPages: Array<{ path: string; views: number }>;
+  };
 }
 
 export function isPresenceSection(value: unknown): value is PresenceSection {

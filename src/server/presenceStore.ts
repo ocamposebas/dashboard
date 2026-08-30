@@ -54,6 +54,9 @@ export class PresenceStore {
   private readonly recordsKey: string;
   private readonly expiriesKey: string;
   private readonly channelKey: string;
+  private readonly totalViewsKey: string;
+  private readonly uniqueVisitorsKey: string;
+  private readonly pageViewsKey: string;
   private cleanupTimer: NodeJS.Timeout | undefined;
 
   constructor(
@@ -66,6 +69,9 @@ export class PresenceStore {
     this.recordsKey = `${keyPrefix}:records`;
     this.expiriesKey = `${keyPrefix}:expiries`;
     this.channelKey = `${keyPrefix}:events`;
+    this.totalViewsKey = `${keyPrefix}:analytics:views`;
+    this.uniqueVisitorsKey = `${keyPrefix}:analytics:visitors`;
+    this.pageViewsKey = `${keyPrefix}:analytics:pages`;
 
     this.client.on("error", (error) => console.error("Redis error", error));
     this.subscriber.on("error", (error) =>
@@ -110,9 +116,23 @@ export class PresenceStore {
     });
   }
 
+  async recordPageView(visitorId: string, path: string): Promise<void> {
+    const transaction = this.client.multi();
+    transaction.incr(this.totalViewsKey);
+    transaction.pfAdd(this.uniqueVisitorsKey, visitorId);
+    transaction.hIncrBy(this.pageViewsKey, path, 1);
+    transaction.publish(this.channelKey, "changed");
+    await transaction.exec();
+  }
+
   async snapshot(): Promise<PresenceSnapshot> {
     await this.cleanupExpired();
-    const values = await this.client.hVals(this.recordsKey);
+    const [values, totalViewsRaw, uniqueVisitors, pageViews] = await Promise.all([
+      this.client.hVals(this.recordsKey),
+      this.client.get(this.totalViewsKey),
+      this.client.pfCount(this.uniqueVisitorsKey),
+      this.client.hGetAll(this.pageViewsKey),
+    ]);
     const counts = emptyPresenceCounts();
 
     for (const value of values) {
@@ -129,6 +149,14 @@ export class PresenceStore {
       counts,
       total: Object.values(counts).reduce((sum, count) => sum + count, 0),
       serverTime: new Date().toISOString(),
+      analytics: {
+        totalViews: Number(totalViewsRaw || 0),
+        uniqueVisitors,
+        topPages: Object.entries(pageViews)
+          .map(([path, views]) => ({ path, views: Number(views) }))
+          .sort((a, b) => b.views - a.views)
+          .slice(0, 8),
+      },
     };
   }
 

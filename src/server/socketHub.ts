@@ -13,6 +13,11 @@ interface TrackerState {
   visitorId: string;
   connectionId: string;
   section: PresenceSection;
+  path: string;
+}
+
+function validPagePath(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith("/") && value.length <= 240 && !value.includes("?");
 }
 
 interface RateEntry {
@@ -194,7 +199,8 @@ export class SocketHub {
             typeof payload.connectionId !== "string" ||
             !VISITOR_ID_PATTERN.test(payload.visitorId) ||
             !CONNECTION_ID_PATTERN.test(payload.connectionId) ||
-            !isPresenceSection(payload.section)
+            !isPresenceSection(payload.section) ||
+            !validPagePath(payload.path)
           ) {
             socket.close(4400, "Invalid presence identity");
             return;
@@ -203,6 +209,7 @@ export class SocketHub {
             visitorId: payload.visitorId,
             connectionId: payload.connectionId,
             section: payload.section,
+            path: payload.path,
           };
           clearTimeout(helloTimeout);
           await this.store.touch(
@@ -210,6 +217,7 @@ export class SocketHub {
             state.connectionId,
             state.section,
           );
+          await this.store.recordPageView(state.visitorId, state.path);
           return;
         }
 
@@ -221,6 +229,10 @@ export class SocketHub {
         ) {
           if (!isPresenceSection(payload.section)) return;
           state.section = payload.section;
+          if (validPagePath(payload.path) && payload.path !== state.path) {
+            state.path = payload.path;
+            await this.store.recordPageView(state.visitorId, state.path);
+          }
           await this.store.touch(
             state.visitorId,
             state.connectionId,
@@ -269,7 +281,7 @@ export class SocketHub {
     if (this.dashboardSockets.size === 0) return;
     try {
       const snapshot = await this.store.snapshot();
-      const signature = JSON.stringify(snapshot.counts);
+      const signature = JSON.stringify([snapshot.counts, snapshot.analytics]);
       if (!force && signature === this.lastSnapshotSignature) return;
       this.lastSnapshotSignature = signature;
       const serialized = JSON.stringify(snapshot);
