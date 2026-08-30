@@ -1,0 +1,42 @@
+services:
+  monitor:
+    build: .
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      REDIS_URL: redis://redis:6379
+      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-phaseone:live}
+      PRESENCE_TTL_SECONDS: ${PRESENCE_TTL_SECONDS:-45}
+      TRACKER_ORIGINS: ${TRACKER_ORIGINS:?Set the Phase One Labz public origins}
+      DASHBOARD_ORIGIN: ${DASHBOARD_ORIGIN:?Set the monitor HTTPS origin}
+      MONITOR_USERNAME: ${MONITOR_USERNAME:?Set the private monitor username}
+      MONITOR_PASSWORD_HASH: ${MONITOR_PASSWORD_HASH:?Set a scrypt password hash}
+      SESSION_SECRET: ${SESSION_SECRET:?Set a random secret with at least 32 characters}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      COOKIE_SECURE: "true"
+      TRUST_PROXY: "true"
+    depends_on:
+      redis:
+        condition: service_healthy
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - type: tmpfs
+        target: /data

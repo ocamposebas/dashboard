@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex,nofollow" />
+    <meta name="theme-color" content="#07090c" />
+    <title>Phase One — Live Monitor</title>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="masthead">
+        <div class="identity">
+          <div class="wordmark" aria-label="Phase One">PHASE ONE</div>
+          <div class="product-name">Live Monitor</div>
+        </div>
+
+        <div class="masthead-actions">
+          <div class="connection" id="connection" data-state="connecting" role="status" aria-live="polite">
+            <span class="connection-dot" aria-hidden="true"></span>
+            <span id="connection-label">Connecting</span>
+          </div>
+          <form method="post" action="/logout">
+            <button class="sign-out" type="submit">Sign out</button>
+          </form>
+        </div>
+      </header>
+
+      <main>
+        <section class="overview" aria-labelledby="online-label">
+          <div>
+            <p class="eyebrow" id="online-label">Online now</p>
+            <div class="total" id="total" aria-live="polite">—</div>
+          </div>
+          <div class="overview-meta">
+            <span>Current presence</span>
+            <strong id="updated">Awaiting live state</strong>
+          </div>
+        </section>
+
+        <section class="section-grid" id="section-grid" aria-label="Visitors by site section"></section>
+
+        <footer class="system-footer">
+          <div><span>Connection</span><strong id="footer-connection">Connecting</strong></div>
+          <div><span>Updated</span><strong id="footer-updated">Waiting</strong></div>
+          <p>Anonymous, temporary presence only</p>
+        </footer>
+      </main>
+    </div>
+
+    <div class="sr-only" id="announcement" aria-live="polite"></div>
+    <script type="module" src="/main.ts"></script>
+  </body>
+</html>

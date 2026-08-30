@@ -1,0 +1,35 @@
+{
+  "name": "phase-one-live-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "scripts": {
+    "predev": "npm run build:dashboard",
+    "dev": "concurrently -k -n server,dashboard -c blue,green \"npm:dev:server\" \"npm:dev:dashboard:watch\"",
+    "build": "npm run build:dashboard && npm run build:server",
+    "build:dashboard": "vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "dev:dashboard": "vite",
+    "dev:dashboard:watch": "vite build --watch",
+    "dev:server": "tsx --env-file-if-exists=.env watch src/server/index.ts",
+    "start": "node --env-file-if-exists=.env dist/server/server/index.js",
+    "test": "tsx --test test/**/*.test.ts",
+    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.dashboard.json --noEmit",
+    "password:hash": "tsx scripts/hash-password.ts"
+  },
+  "dependencies": {
+    "redis": "^5.8.2",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3"
+  }
+}
