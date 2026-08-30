@@ -196,12 +196,6 @@ export function createMonitorServer(config: AppConfig, store: PresenceStore) {
       }
 
       if (url.pathname === "/login" && request.method === "POST") {
-        if (!isLoginOriginAllowed(request, config)) {
-          response.statusCode = 403;
-          response.end("Forbidden");
-          return;
-        }
-
         const ip = requestIp(request, config.trustProxy);
         const now = Date.now();
         const attempt = loginAttempts.get(ip);
