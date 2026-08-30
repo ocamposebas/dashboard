@@ -119,6 +119,50 @@ function requestIp(request: IncomingMessage, trustProxy: boolean): string {
   return request.socket.remoteAddress || "unknown";
 }
 
+function firstHeaderValue(value: string | string[] | undefined): string {
+  const raw = Array.isArray(value) ? value[0] || "" : value || "";
+  return raw.split(",")[0]?.trim() || "";
+}
+
+function normalizeOrigin(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+function requestOrigin(request: IncomingMessage, config: AppConfig): string | null {
+  const host = config.trustProxy
+    ? firstHeaderValue(request.headers["x-forwarded-host"]) || request.headers.host || ""
+    : request.headers.host || "";
+  const protocol = config.trustProxy
+    ? firstHeaderValue(request.headers["x-forwarded-proto"]) ||
+      (config.cookieSecure ? "https" : "http")
+    : config.cookieSecure
+      ? "https"
+      : "http";
+
+  return host ? normalizeOrigin(`${protocol}://${host}`) : null;
+}
+
+export function isLoginOriginAllowed(
+  request: IncomingMessage,
+  config: AppConfig,
+): boolean {
+  const fetchSite = firstHeaderValue(request.headers["sec-fetch-site"]);
+  if (fetchSite === "cross-site") return false;
+
+  const suppliedOrigin = firstHeaderValue(request.headers.origin);
+  if (!suppliedOrigin) return fetchSite === "same-origin" || fetchSite === "none";
+
+  const normalizedSuppliedOrigin = normalizeOrigin(suppliedOrigin);
+  return (
+    normalizedSuppliedOrigin === config.dashboardOrigin ||
+    normalizedSuppliedOrigin === requestOrigin(request, config)
+  );
+}
+
 export function createMonitorServer(config: AppConfig, store: PresenceStore) {
   const loginAttempts = new Map<string, AttemptState>();
 
@@ -152,7 +196,7 @@ export function createMonitorServer(config: AppConfig, store: PresenceStore) {
       }
 
       if (url.pathname === "/login" && request.method === "POST") {
-        if (request.headers.origin !== config.dashboardOrigin) {
+        if (!isLoginOriginAllowed(request, config)) {
           response.statusCode = 403;
           response.end("Forbidden");
           return;
