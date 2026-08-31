@@ -56,8 +56,11 @@ function deriveKey(
 }
 
 export function parseScryptHash(encodedHash: string): ScryptParameters {
+  const normalizedHash = encodedHash.startsWith("b64:")
+    ? Buffer.from(encodedHash.slice(4), "base64url").toString("utf8")
+    : encodedHash;
   const [algorithm, cost, blockSize, parallelization, salt, hash] =
-    encodedHash.split("$");
+    normalizedHash.split("$");
 
   if (
     algorithm !== "scrypt" ||

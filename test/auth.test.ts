@@ -16,6 +16,10 @@ test("scrypt password hashes verify without exposing the password", async () => 
   assert.equal(await verifyPassword("wrong password", hash), false);
   assert.equal(hash.includes(password), false);
   assert.equal(parseScryptHash(hash).cost, 32_768);
+
+  const portableHash = `b64:${Buffer.from(hash).toString("base64url")}`;
+  assert.equal(await verifyPassword(password, portableHash), true);
+  assert.equal(await verifyPassword("wrong password", portableHash), false);
 });
 
 test("signed session cookies reject tampering", () => {
