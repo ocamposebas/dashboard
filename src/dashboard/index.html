@@ -28,8 +28,8 @@
 
       <main>
         <section class="hero-copy">
-          <div><p class="eyebrow">Phase One intelligence</p><h1>Traffic command center</h1></div>
-          <p>Live attention, cumulative reach and the pages driving the most interest.</p>
+          <div><p class="eyebrow">Phase One intelligence</p><h1>Real-time analytics</h1></div>
+          <p>See how visitors interact with the storefront right now.</p>
         </section>
 
         <section class="metric-grid" aria-label="Traffic statistics">
@@ -42,8 +42,19 @@
         </section>
 
         <nav class="dashboard-nav" aria-label="Dashboard sections">
-          <a href="#traffic-overview">Traffic overview</a><a href="#behavior">Behavior</a><a href="#recent-sessions">Recent sessions</a><a href="#live-presence">Live now</a>
+          <a href="#live-presence">Live now</a><a href="#traffic-overview">Traffic overview</a><a href="#behavior">Behavior</a><a href="#recent-sessions">Recent sessions</a>
         </nav>
+
+        <section class="realtime-layout" id="live-presence">
+          <article class="realtime-panel">
+            <div class="overview" aria-labelledby="online-label">
+              <div><p class="eyebrow" id="online-label">Live visitors</p><div class="total" id="total" aria-live="polite">—</div></div>
+              <div class="overview-meta"><span>Current presence</span><strong id="updated">Awaiting live state</strong></div>
+            </div>
+            <section class="section-grid" id="section-grid" aria-label="Visitors by site section"></section>
+          </article>
+          <article class="insight-panel recent-panel" id="recent-sessions"><div class="panel-heading"><div><p class="eyebrow">Journey stream</p><h2>Recent visitors</h2></div><span>Live activity</span></div><div class="session-list" id="session-list"></div></article>
+        </section>
 
         <section class="analytics-grid" id="traffic-overview">
           <article class="insight-panel trend-panel"><div class="panel-heading"><div><p class="eyebrow">Last 14 days</p><h2>Traffic over time</h2></div><strong id="trend-total">0 views</strong></div><div class="trend-chart" id="trend-chart"></div></article>
@@ -53,26 +64,8 @@
 
         <section class="behavior-grid" id="behavior">
           <article class="insight-panel"><div class="panel-heading"><div><p class="eyebrow">Conversion signals</p><h2>Top buttons & links</h2></div><span>Tracked clicks</span></div><div class="click-list" id="click-list"></div></article>
-          <article class="insight-panel" id="recent-sessions"><div class="panel-heading"><div><p class="eyebrow">Journey stream</p><h2>Recent sessions</h2></div><span>Last 30 days</span></div><div class="session-list" id="session-list"></div></article>
+          <article class="ranking-panel" aria-labelledby="ranking-title"><div class="panel-heading"><div><p class="eyebrow">Audience interest</p><h2 id="ranking-title">Most visited pages</h2></div><span>All-time views</span></div><div class="page-ranking" id="page-ranking"><p class="empty-state">Waiting for the first page view…</p></div></article>
         </section>
-
-        <section class="ranking-panel" aria-labelledby="ranking-title">
-          <div class="panel-heading"><div><p class="eyebrow">Audience interest</p><h2 id="ranking-title">Most visited pages</h2></div><span>All-time views</span></div>
-          <div class="page-ranking" id="page-ranking"><p class="empty-state">Waiting for the first page view…</p></div>
-        </section>
-
-        <section class="overview" id="live-presence" aria-labelledby="online-label">
-          <div>
-            <p class="eyebrow" id="online-label">Live presence</p>
-            <div class="total" id="total" aria-live="polite">—</div>
-          </div>
-          <div class="overview-meta">
-            <span>Current presence</span>
-            <strong id="updated">Awaiting live state</strong>
-          </div>
-        </section>
-
-        <section class="section-grid" id="section-grid" aria-label="Visitors by site section"></section>
 
         <footer class="system-footer">
           <div><span>Connection</span><strong id="footer-connection">Connecting</strong></div>
