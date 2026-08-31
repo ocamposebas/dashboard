@@ -31,12 +31,28 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --save
+      - "900 1"
+      - --save
+      - "300 10"
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - noeviction
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
     volumes:
-      - type: tmpfs
-        target: /data
+      - monitor_redis_data:/data
+
+volumes:
+  monitor_redis_data:
+    name: phaseone_monitor_redis_data
