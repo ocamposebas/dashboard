@@ -38,6 +38,23 @@ function originAllowed(origin: string | undefined, allowed: Set<string>): boolea
   }
 }
 
+function dashboardOriginAllowed(origin: string | undefined, configured: string): boolean {
+  if (!origin) return false;
+  try {
+    const supplied = new URL(origin);
+    const expected = new URL(configured);
+    const suppliedHost = supplied.hostname.replace(/^www\./i, "");
+    const expectedHost = expected.hostname.replace(/^www\./i, "");
+    return (
+      supplied.protocol === expected.protocol &&
+      supplied.port === expected.port &&
+      suppliedHost === expectedHost
+    );
+  } catch {
+    return false;
+  }
+}
+
 function requestPath(request: IncomingMessage): string {
   try {
     return new URL(request.url || "/", "http://localhost").pathname;
@@ -111,13 +128,15 @@ export class SocketHub {
       }
 
       if (path === "/ws/dashboard") {
-        const dashboardOrigins = new Set([this.config.dashboardOrigin]);
         const authenticated = verifySessionCookie(request.headers.cookie, {
           username: this.config.monitorUsername,
           sessionSecret: this.config.sessionSecret,
         });
         if (
-          !originAllowed(request.headers.origin, dashboardOrigins) ||
+          !dashboardOriginAllowed(
+            request.headers.origin,
+            this.config.dashboardOrigin,
+          ) ||
           !authenticated
         ) {
           socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
