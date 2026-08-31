@@ -412,3 +412,104 @@ main { padding-top: 45px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
 }
+
+/* Shopify-inspired information architecture, Phase One palette */
+.live-console,
+.behavior-overview,
+.flat-panel {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(5, 16, 39, .92);
+}
+
+.live-head {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--line);
+  padding: 25px 28px;
+}
+.headline-stat + .headline-stat { border-left: 1px solid var(--line); padding-left: 30px; }
+.headline-stat > span { display: block; margin-bottom: 12px; color: #6f8abd; font: 600 10px/1.3 ui-monospace, monospace; letter-spacing: .06em; }
+.headline-stat > strong { display: flex; align-items: center; gap: 10px; color: #f4f8ff; font-size: 30px; font-weight: 570; letter-spacing: -.045em; }
+.headline-stat strong i { width: 8px; height: 8px; border-radius: 50%; background: #3ac07d; box-shadow: 0 0 0 5px rgba(58,192,125,.1); }
+.headline-stat strong b { font: inherit; }
+.headline-stat small { display: block; margin-top: 8px; color: #48648f; font: 500 9px/1 monospace; }
+
+.live-body { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(300px, .78fr); }
+.live-charts { min-width: 0; padding: 28px; }
+.activity-rail { border-left: 1px solid var(--line); padding: 28px; }
+.section-title { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
+.section-title h2,
+.today-block h2,
+.behavior-heading h2 { margin: 0; color: #dfe9f8; font-size: 13px; font-weight: 670; letter-spacing: -.01em; }
+.section-title > span,
+.section-title > strong,
+.behavior-heading > span { color: #496892; font: 600 9px/1 monospace; letter-spacing: .05em; }
+
+.live-console .section-grid { margin: 0; border: 0; border-radius: 0; background: transparent; }
+.live-console .presence-card { min-height: 125px; border-color: rgba(91,137,222,.15); padding: 15px 16px; background: transparent; }
+.live-console .card-heading h2 { font-size: 10px; }
+.live-console .card-heading p { margin-top: 5px; font-size: 8px; }
+.live-console .card-reading { inset: auto 16px 15px; }
+.live-console .count { font-size: 38px; }
+.live-console .index { font-size: 8px; }
+
+.live-split { display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin-top: 28px; border-top: 1px solid var(--line); }
+.live-split .flat-section { min-width: 0; padding-top: 27px; }
+.live-split .flat-section + .flat-section { border-left: 1px solid var(--line); padding-left: 28px; }
+.live-split .flat-section:first-child { padding-right: 28px; }
+.live-split .device-layout { grid-template-columns: 104px 1fr; align-items: center; gap: 18px; }
+.live-split .device-donut { width: 96px; height: 96px; margin: 0; }
+.live-split .device-donut::after { inset: 16px; }
+.live-split .device-donut span { font-size: 20px; }
+.live-split .insight-list { gap: 12px; }
+
+.today-block { border-bottom: 1px solid var(--line); padding-bottom: 25px; }
+.today-block > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 20px; }
+.today-block span { color: #526f9d; font: 600 8px/1.3 monospace; text-transform: uppercase; }
+.today-block strong { display: block; margin-top: 9px; color: #e8f1ff; font-size: 22px; font-weight: 570; letter-spacing: -.04em; }
+.activity-rail #recent-sessions { padding-top: 27px; }
+.activity-rail .session-row { grid-template-columns: 7px minmax(90px, 1fr); }
+.activity-rail .session-row > div:last-child { grid-column: 2; margin-top: -7px; text-align: left; }
+
+.behavior-overview { margin-top: 14px; }
+.behavior-heading { display: flex; justify-content: space-between; align-items: end; gap: 24px; padding: 27px 28px 22px; }
+.behavior-heading h2 { font-size: 18px; }
+.summary-strip { display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.summary-strip > div { min-width: 0; min-height: 118px; border-right: 1px solid var(--line); padding: 20px; }
+.summary-strip > div:last-child { border-right: 0; }
+.summary-strip span { color: #5d7aa8; font: 600 9px/1.3 monospace; }
+.summary-strip strong { display: block; margin-top: 17px; color: #edf4ff; font-size: 30px; font-weight: 560; letter-spacing: -.05em; }
+.summary-strip strong.summary-text { overflow: hidden; color: #8fc7ff; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.summary-strip small { display: block; margin-top: 8px; color: #46638e; font: 500 8px/1 monospace; }
+.trend-section { padding: 27px 28px 22px; }
+.trend-section .trend-chart { min-height: 220px; }
+
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+.flat-panel { padding: 27px 28px; }
+
+@media (max-width: 920px) {
+  .live-body { grid-template-columns: 1fr; }
+  .activity-rail { border-top: 1px solid var(--line); border-left: 0; }
+  .summary-strip { grid-template-columns: repeat(3, 1fr); }
+  .summary-strip > div:nth-child(3) { border-right: 0; }
+  .summary-strip > div:nth-child(-n+3) { border-bottom: 1px solid var(--line); }
+  .detail-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 560px) {
+  .hero-copy { padding-bottom: 24px; }
+  .live-head { grid-template-columns: 1fr; padding: 22px 20px; }
+  .headline-stat + .headline-stat { margin-top: 20px; border-top: 1px solid var(--line); border-left: 0; padding: 20px 0 0; }
+  .live-charts, .activity-rail, .trend-section, .flat-panel { padding: 21px 18px; }
+  .live-split { grid-template-columns: 1fr; }
+  .live-split .flat-section:first-child { padding-right: 0; }
+  .live-split .flat-section + .flat-section { margin-top: 24px; border-top: 1px solid var(--line); border-left: 0; padding-left: 0; }
+  .summary-strip { grid-template-columns: 1fr 1fr; }
+  .summary-strip > div, .summary-strip > div:nth-child(3) { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .summary-strip > div:nth-child(2n) { border-right: 0; }
+  .summary-strip > div:last-child { grid-column: 1 / -1; border-right: 0; border-bottom: 0; }
+  .behavior-heading { align-items: start; padding: 22px 20px 18px; }
+  .behavior-heading > span { display: none; }
+}

@@ -21,6 +21,7 @@ export interface PresenceSnapshot {
     uniqueVisitors: number;
     totalSessions: number;
     totalClicks: number;
+    visitorsLast30Minutes: number;
     topPages: Array<{ path: string; views: number }>;
     topSources: Array<{ label: string; count: number }>;
     topDevices: Array<{ label: string; count: number }>;

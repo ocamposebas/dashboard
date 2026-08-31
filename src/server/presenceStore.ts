@@ -216,7 +216,7 @@ export class PresenceStore {
 
   async snapshot(): Promise<PresenceSnapshot> {
     await this.cleanupExpired();
-    const [values, totalViewsRaw, uniqueVisitors, pageViews, totalSessionsRaw, totalClicksRaw, sources, devices, clicks, dailyViews, recentIds] = await Promise.all([
+    const [values, totalViewsRaw, uniqueVisitors, pageViews, totalSessionsRaw, totalClicksRaw, sources, devices, clicks, dailyViews, recentIds, visitorsLast30Minutes] = await Promise.all([
       this.client.hVals(this.recordsKey),
       this.client.get(this.totalViewsKey),
       this.client.pfCount(this.uniqueVisitorsKey),
@@ -228,6 +228,7 @@ export class PresenceStore {
       this.client.hGetAll(this.clicksKey),
       this.client.hGetAll(this.dailyViewsKey),
       this.client.zRange(this.recentSessionsKey, 0, 9, { REV: true }),
+      this.client.zCount(this.recentSessionsKey, Date.now() - 30 * 60_000, "+inf"),
     ]);
     const recentRaw = recentIds.length
       ? await this.client.mGet(recentIds.map((id) => `${this.sessionKeyPrefix}${id}`))
@@ -257,6 +258,7 @@ export class PresenceStore {
         uniqueVisitors,
         totalSessions: Number(totalSessionsRaw || 0),
         totalClicks: Number(totalClicksRaw || 0),
+        visitorsLast30Minutes,
         topPages: Object.entries(pageViews)
           .map(([path, views]) => ({ path, views: Number(views) }))
           .sort((a, b) => b.views - a.views)

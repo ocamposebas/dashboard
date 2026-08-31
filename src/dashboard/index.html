@@ -28,43 +28,44 @@
 
       <main>
         <section class="hero-copy">
-          <div><p class="eyebrow">Phase One intelligence</p><h1>Real-time analytics</h1></div>
-          <p>See how visitors interact with the storefront right now.</p>
+          <div><p class="eyebrow">Phase One intelligence</p><h1>Real-time analytics</h1></div><p>Live storefront activity</p>
         </section>
 
-        <section class="metric-grid" aria-label="Traffic statistics">
-          <article class="metric-card metric-card--primary"><span>Total page views</span><strong id="total-views">—</strong><small>Since tracking began</small></article>
-          <article class="metric-card"><span>Unique visitors</span><strong id="unique-visitors">—</strong><small>Anonymous browser sessions</small></article>
-          <article class="metric-card"><span>Online now</span><strong id="online-summary">—</strong><small>Active in the last 45 seconds</small></article>
-          <article class="metric-card"><span>Top destination</span><strong class="metric-text" id="top-destination">—</strong><small id="top-destination-views">Waiting for traffic</small></article>
-          <article class="metric-card"><span>Total sessions</span><strong id="total-sessions">—</strong><small>Visits since tracking began</small></article>
-          <article class="metric-card"><span>Tracked clicks</span><strong id="total-clicks">—</strong><small>Buttons and links selected</small></article>
-        </section>
-
-        <nav class="dashboard-nav" aria-label="Dashboard sections">
-          <a href="#live-presence">Live now</a><a href="#traffic-overview">Traffic overview</a><a href="#behavior">Behavior</a><a href="#recent-sessions">Recent sessions</a>
-        </nav>
-
-        <section class="realtime-layout" id="live-presence">
-          <article class="realtime-panel">
-            <div class="overview" aria-labelledby="online-label">
-              <div><p class="eyebrow" id="online-label">Live visitors</p><div class="total" id="total" aria-live="polite">—</div></div>
-              <div class="overview-meta"><span>Current presence</span><strong id="updated">Awaiting live state</strong></div>
+        <section class="live-console" id="live-presence">
+          <header class="live-head">
+            <div class="headline-stat"><span>Visitors in the last 30 minutes</span><strong id="visitors-30">—</strong></div>
+            <div class="headline-stat"><span>Live visitors</span><strong><i></i><b id="total">—</b></strong><small id="updated">Awaiting live state</small></div>
+          </header>
+          <div class="live-body">
+            <div class="live-charts">
+              <section class="flat-section"><div class="section-title"><h2>Page views</h2><span>Current visitors</span></div><div class="section-grid" id="section-grid" aria-label="Visitors by site section"></div></section>
+              <div class="live-split">
+                <section class="flat-section"><div class="section-title"><h2>Traffic source</h2><span>Sessions</span></div><div class="insight-list" id="source-list"></div></section>
+                <section class="flat-section"><div class="section-title"><h2>Device</h2><span>Sessions</span></div><div class="device-layout"><div class="device-donut" id="device-donut"><span id="device-total">0</span></div><div class="insight-list" id="device-list"></div></div></section>
+              </div>
             </div>
-            <section class="section-grid" id="section-grid" aria-label="Visitors by site section"></section>
-          </article>
-          <article class="insight-panel recent-panel" id="recent-sessions"><div class="panel-heading"><div><p class="eyebrow">Journey stream</p><h2>Recent visitors</h2></div><span>Live activity</span></div><div class="session-list" id="session-list"></div></article>
+            <aside class="activity-rail">
+              <section class="today-block"><h2>Today's activity</h2><div><span>Page views<strong id="today-views">—</strong></span><span>Online<strong id="online-summary">—</strong></span><span>Clicks<strong id="total-clicks">—</strong></span></div></section>
+              <section id="recent-sessions"><div class="section-title"><h2>Recent visitors</h2><span>Live activity</span></div><div class="session-list" id="session-list"></div></section>
+            </aside>
+          </div>
         </section>
 
-        <section class="analytics-grid" id="traffic-overview">
-          <article class="insight-panel trend-panel"><div class="panel-heading"><div><p class="eyebrow">Last 14 days</p><h2>Traffic over time</h2></div><strong id="trend-total">0 views</strong></div><div class="trend-chart" id="trend-chart"></div></article>
-          <article class="insight-panel"><div class="panel-heading"><div><p class="eyebrow">Acquisition</p><h2>Traffic sources</h2></div></div><div class="insight-list" id="source-list"></div></article>
-          <article class="insight-panel"><div class="panel-heading"><div><p class="eyebrow">Audience</p><h2>Devices</h2></div></div><div class="device-layout"><div class="device-donut" id="device-donut"><span id="device-total">0</span></div><div class="insight-list" id="device-list"></div></div></article>
+        <section class="behavior-overview" id="behavior">
+          <div class="behavior-heading"><div><p class="eyebrow">Last 14 days</p><h2>Behavior overview</h2></div><span>Compared to all tracked activity</span></div>
+          <div class="summary-strip">
+            <div><span>Total sessions</span><strong id="total-sessions">—</strong></div>
+            <div><span>Unique visitors</span><strong id="unique-visitors">—</strong></div>
+            <div><span>Page views</span><strong id="total-views">—</strong></div>
+            <div><span>Pages / session</span><strong id="pages-per-session">—</strong></div>
+            <div><span>Top destination</span><strong class="summary-text" id="top-destination">—</strong><small id="top-destination-views">Waiting for traffic</small></div>
+          </div>
+          <section class="trend-section" id="traffic-overview"><div class="section-title"><h2>Sessions over time</h2><strong id="trend-total">0 views</strong></div><div class="trend-chart" id="trend-chart"></div></section>
         </section>
 
-        <section class="behavior-grid" id="behavior">
-          <article class="insight-panel"><div class="panel-heading"><div><p class="eyebrow">Conversion signals</p><h2>Top buttons & links</h2></div><span>Tracked clicks</span></div><div class="click-list" id="click-list"></div></article>
-          <article class="ranking-panel" aria-labelledby="ranking-title"><div class="panel-heading"><div><p class="eyebrow">Audience interest</p><h2 id="ranking-title">Most visited pages</h2></div><span>All-time views</span></div><div class="page-ranking" id="page-ranking"><p class="empty-state">Waiting for the first page view…</p></div></article>
+        <section class="detail-grid">
+          <article class="flat-panel" aria-labelledby="ranking-title"><div class="section-title"><h2 id="ranking-title">Top pages by views</h2><span>All time</span></div><div class="page-ranking" id="page-ranking"><p class="empty-state">Waiting for the first page view…</p></div></article>
+          <article class="flat-panel"><div class="section-title"><h2>Top buttons & links</h2><span>Tracked clicks</span></div><div class="click-list" id="click-list"></div></article>
         </section>
 
         <footer class="system-footer">

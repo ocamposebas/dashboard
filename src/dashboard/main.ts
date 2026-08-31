@@ -55,6 +55,9 @@ const clickListElement = requiredElement<HTMLElement>("#click-list");
 const sessionListElement = requiredElement<HTMLElement>("#session-list");
 const trendChartElement = requiredElement<HTMLElement>("#trend-chart");
 const trendTotalElement = requiredElement<HTMLElement>("#trend-total");
+const visitors30Element = requiredElement<HTMLElement>("#visitors-30");
+const todayViewsElement = requiredElement<HTMLElement>("#today-views");
+const pagesPerSessionElement = requiredElement<HTMLElement>("#pages-per-session");
 
 for (const section of PRESENCE_SECTIONS) {
   const article = document.createElement("article");
@@ -220,6 +223,13 @@ function renderAnalytics(snapshot: PresenceSnapshot): void {
   onlineSummaryElement.textContent = formatNumber(snapshot.total);
   totalSessionsElement.textContent = formatNumber(analytics.totalSessions);
   totalClicksElement.textContent = formatNumber(analytics.totalClicks);
+  visitors30Element.textContent = formatNumber(analytics.visitorsLast30Minutes);
+  const today = new Date().toISOString().slice(0, 10);
+  const todayViews = analytics.dailyViews.find((item) => item.date === today)?.views || 0;
+  todayViewsElement.textContent = formatNumber(todayViews);
+  pagesPerSessionElement.textContent = analytics.totalSessions
+    ? (analytics.totalViews / analytics.totalSessions).toFixed(1)
+    : "0.0";
   const leader = analytics.topPages[0];
   topDestinationElement.textContent = leader ? pageLabel(leader.path) : "—";
   topDestinationViewsElement.textContent = leader ? `${formatNumber(leader.views)} views` : "Waiting for traffic";
@@ -310,6 +320,7 @@ function isSnapshot(value: unknown): value is PresenceSnapshot {
     Array.isArray(data.analytics?.topPages) &&
     typeof data.analytics?.totalSessions === "number" &&
     typeof data.analytics?.totalClicks === "number" &&
+    typeof data.analytics?.visitorsLast30Minutes === "number" &&
     Array.isArray(data.analytics?.topSources) &&
     Array.isArray(data.analytics?.topDevices) &&
     Array.isArray(data.analytics?.topClicks) &&
