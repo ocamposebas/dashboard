@@ -45,6 +45,16 @@ const onlineSummaryElement = requiredElement<HTMLElement>("#online-summary");
 const topDestinationElement = requiredElement<HTMLElement>("#top-destination");
 const topDestinationViewsElement = requiredElement<HTMLElement>("#top-destination-views");
 const pageRankingElement = requiredElement<HTMLElement>("#page-ranking");
+const totalSessionsElement = requiredElement<HTMLElement>("#total-sessions");
+const totalClicksElement = requiredElement<HTMLElement>("#total-clicks");
+const sourceListElement = requiredElement<HTMLElement>("#source-list");
+const deviceListElement = requiredElement<HTMLElement>("#device-list");
+const deviceDonutElement = requiredElement<HTMLElement>("#device-donut");
+const deviceTotalElement = requiredElement<HTMLElement>("#device-total");
+const clickListElement = requiredElement<HTMLElement>("#click-list");
+const sessionListElement = requiredElement<HTMLElement>("#session-list");
+const trendChartElement = requiredElement<HTMLElement>("#trend-chart");
+const trendTotalElement = requiredElement<HTMLElement>("#trend-total");
 
 for (const section of PRESENCE_SECTIONS) {
   const article = document.createElement("article");
@@ -208,6 +218,8 @@ function renderAnalytics(snapshot: PresenceSnapshot): void {
   totalViewsElement.textContent = formatNumber(analytics.totalViews);
   uniqueVisitorsElement.textContent = formatNumber(analytics.uniqueVisitors);
   onlineSummaryElement.textContent = formatNumber(snapshot.total);
+  totalSessionsElement.textContent = formatNumber(analytics.totalSessions);
+  totalClicksElement.textContent = formatNumber(analytics.totalClicks);
   const leader = analytics.topPages[0];
   topDestinationElement.textContent = leader ? pageLabel(leader.path) : "—";
   topDestinationViewsElement.textContent = leader ? `${formatNumber(leader.views)} views` : "Waiting for traffic";
@@ -220,6 +232,56 @@ function renderAnalytics(snapshot: PresenceSnapshot): void {
     const width = Math.max(4, Math.round((page.views / leader.views) * 100));
     return `<div class="rank-row"><span class="rank-index">${String(index + 1).padStart(2, "0")}</span><div class="rank-data"><div><strong>${escapeHtml(pageLabel(page.path))}</strong><code>${escapeHtml(page.path)}</code><b>${formatNumber(page.views)}</b></div><span class="rank-track"><i style="width:${width}%"></i></span></div></div>`;
   }).join("");
+
+  renderRankList(sourceListElement, analytics.topSources);
+  renderRankList(deviceListElement, analytics.topDevices);
+  const deviceTotal = analytics.topDevices.reduce((sum, item) => sum + item.count, 0);
+  deviceTotalElement.textContent = formatNumber(deviceTotal);
+  const mobile = analytics.topDevices.find((item) => item.label === "Mobile")?.count || 0;
+  const tablet = analytics.topDevices.find((item) => item.label === "Tablet")?.count || 0;
+  const mobileEnd = deviceTotal ? Math.round((mobile / deviceTotal) * 100) : 0;
+  const tabletEnd = deviceTotal ? mobileEnd + Math.round((tablet / deviceTotal) * 100) : 0;
+  deviceDonutElement.style.background = `conic-gradient(#1688ff 0 ${mobileEnd}%, #66bcff ${mobileEnd}% ${tabletEnd}%, #204c95 ${tabletEnd}% 100%)`;
+
+  clickListElement.innerHTML = analytics.topClicks.length
+    ? analytics.topClicks.map((item, index) => `<div class="click-row"><span>${String(index + 1).padStart(2, "0")}</span><div><strong>${escapeHtml(item.label)}</strong><code>${escapeHtml(item.path)}</code></div><b>${formatNumber(item.count)}</b></div>`).join("")
+    : '<p class="empty-state">Button and link clicks will appear here.</p>';
+
+  sessionListElement.innerHTML = analytics.recentSessions.length
+    ? analytics.recentSessions.map((session) => `<div class="session-row"><span class="session-dot"></span><div><strong>${escapeHtml(pageLabel(session.path))}</strong><small>${escapeHtml(session.source)} · ${escapeHtml(session.device)}</small></div><div><b>${session.pageViews} pages</b><small>${session.clicks} clicks · ${relativeDate(session.lastSeenAt)}</small></div></div>`).join("")
+    : '<p class="empty-state">New visitor sessions will appear here.</p>';
+  renderTrend(analytics.dailyViews);
+}
+
+function renderRankList(element: HTMLElement, items: Array<{ label: string; count: number }>): void {
+  const maximum = items[0]?.count || 1;
+  element.innerHTML = items.length
+    ? items.map((item) => `<div class="insight-row"><div><strong>${escapeHtml(item.label)}</strong><b>${formatNumber(item.count)}</b></div><span><i style="width:${Math.max(4, Math.round((item.count / maximum) * 100))}%"></i></span></div>`).join("")
+    : '<p class="empty-state">Waiting for visitor data.</p>';
+}
+
+function relativeDate(value: string): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 60_000));
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)}h ago`;
+  return `${Math.floor(minutes / 1440)}d ago`;
+}
+
+function renderTrend(items: Array<{ date: string; views: number }>): void {
+  const total = items.reduce((sum, item) => sum + item.views, 0);
+  trendTotalElement.textContent = `${formatNumber(total)} views`;
+  if (!items.length) {
+    trendChartElement.innerHTML = '<p class="empty-state">The trend begins with the next page view.</p>';
+    return;
+  }
+  const max = Math.max(...items.map((item) => item.views), 1);
+  const points = items.map((item, index) => {
+    const x = items.length === 1 ? 50 : (index / (items.length - 1)) * 100;
+    const y = 86 - (item.views / max) * 68;
+    return `${x},${y}`;
+  }).join(" ");
+  trendChartElement.innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Daily page views"><defs><linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1688ff" stop-opacity=".35"/><stop offset="1" stop-color="#1688ff" stop-opacity="0"/></linearGradient></defs><polygon points="0,100 ${points} 100,100" fill="url(#trend-fill)"/><polyline points="${points}" fill="none" stroke="#42a4ff" stroke-width="2" vector-effect="non-scaling-stroke"/></svg><div class="trend-labels">${items.map((item) => `<span>${item.date.slice(5)}</span>`).join("")}</div>`;
 }
 
 function updateRelativeTime(): void {
@@ -246,6 +308,13 @@ function isSnapshot(value: unknown): value is PresenceSnapshot {
     typeof data.analytics?.totalViews === "number" &&
     typeof data.analytics?.uniqueVisitors === "number" &&
     Array.isArray(data.analytics?.topPages) &&
+    typeof data.analytics?.totalSessions === "number" &&
+    typeof data.analytics?.totalClicks === "number" &&
+    Array.isArray(data.analytics?.topSources) &&
+    Array.isArray(data.analytics?.topDevices) &&
+    Array.isArray(data.analytics?.topClicks) &&
+    Array.isArray(data.analytics?.dailyViews) &&
+    Array.isArray(data.analytics?.recentSessions) &&
     Boolean(data.counts) &&
     PRESENCE_SECTIONS.every(
       (section) => typeof data.counts?.[section] === "number",

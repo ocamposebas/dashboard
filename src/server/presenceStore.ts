@@ -11,6 +11,17 @@ interface PresenceRecord {
   connectionId: string;
 }
 
+interface AnalyticsSession {
+  id: string;
+  source: string;
+  device: string;
+  path: string;
+  startedAt: string;
+  lastSeenAt: string;
+  pageViews: number;
+  clicks: number;
+}
+
 const TOUCH_SCRIPT = `
 local current = redis.call('HGET', KEYS[1], ARGV[1])
 local changed = 0
@@ -57,6 +68,14 @@ export class PresenceStore {
   private readonly totalViewsKey: string;
   private readonly uniqueVisitorsKey: string;
   private readonly pageViewsKey: string;
+  private readonly totalSessionsKey: string;
+  private readonly totalClicksKey: string;
+  private readonly sourcesKey: string;
+  private readonly devicesKey: string;
+  private readonly clicksKey: string;
+  private readonly dailyViewsKey: string;
+  private readonly recentSessionsKey: string;
+  private readonly sessionKeyPrefix: string;
   private cleanupTimer: NodeJS.Timeout | undefined;
 
   constructor(
@@ -72,6 +91,14 @@ export class PresenceStore {
     this.totalViewsKey = `${keyPrefix}:analytics:views`;
     this.uniqueVisitorsKey = `${keyPrefix}:analytics:visitors`;
     this.pageViewsKey = `${keyPrefix}:analytics:pages`;
+    this.totalSessionsKey = `${keyPrefix}:analytics:sessions`;
+    this.totalClicksKey = `${keyPrefix}:analytics:clicks:total`;
+    this.sourcesKey = `${keyPrefix}:analytics:sources`;
+    this.devicesKey = `${keyPrefix}:analytics:devices`;
+    this.clicksKey = `${keyPrefix}:analytics:clicks`;
+    this.dailyViewsKey = `${keyPrefix}:analytics:daily`;
+    this.recentSessionsKey = `${keyPrefix}:analytics:recent`;
+    this.sessionKeyPrefix = `${keyPrefix}:analytics:session:`;
 
     this.client.on("error", (error) => console.error("Redis error", error));
     this.subscriber.on("error", (error) =>
@@ -116,23 +143,99 @@ export class PresenceStore {
     });
   }
 
-  async recordPageView(visitorId: string, path: string): Promise<void> {
+  async startSession(input: {
+    sessionId: string;
+    source: string;
+    device: string;
+    path: string;
+  }): Promise<void> {
+    const now = new Date();
+    const session: AnalyticsSession = {
+      id: input.sessionId,
+      source: input.source,
+      device: input.device,
+      path: input.path,
+      startedAt: now.toISOString(),
+      lastSeenAt: now.toISOString(),
+      pageViews: 0,
+      clicks: 0,
+    };
+    const key = `${this.sessionKeyPrefix}${input.sessionId}`;
+    const created = await this.client.set(key, JSON.stringify(session), {
+      EX: 30 * 24 * 60 * 60,
+      NX: true,
+    });
+    const transaction = this.client.multi();
+    if (created) {
+      transaction.incr(this.totalSessionsKey);
+      transaction.hIncrBy(this.sourcesKey, input.source, 1);
+      transaction.hIncrBy(this.devicesKey, input.device, 1);
+    }
+    transaction.zAdd(this.recentSessionsKey, { score: now.getTime(), value: input.sessionId });
+    transaction.zRemRangeByRank(this.recentSessionsKey, 0, -101);
+    await transaction.exec();
+    if (!created) {
+      await this.updateSession(input.sessionId, (existing) => ({
+        ...existing,
+        path: input.path,
+        lastSeenAt: now.toISOString(),
+      }));
+    }
+  }
+
+  async recordPageView(visitorId: string, connectionId: string, path: string): Promise<void> {
+    const date = new Date().toISOString().slice(0, 10);
     const transaction = this.client.multi();
     transaction.incr(this.totalViewsKey);
     transaction.pfAdd(this.uniqueVisitorsKey, visitorId);
     transaction.hIncrBy(this.pageViewsKey, path, 1);
+    transaction.hIncrBy(this.dailyViewsKey, date, 1);
     transaction.publish(this.channelKey, "changed");
     await transaction.exec();
+    await this.updateSession(connectionId, (session) => ({
+      ...session,
+      path,
+      lastSeenAt: new Date().toISOString(),
+      pageViews: session.pageViews + 1,
+    }));
+  }
+
+  async recordClick(connectionId: string, path: string, label: string): Promise<void> {
+    const transaction = this.client.multi();
+    transaction.incr(this.totalClicksKey);
+    transaction.hIncrBy(this.clicksKey, `${path}\u001f${label}`, 1);
+    transaction.publish(this.channelKey, "changed");
+    await transaction.exec();
+    await this.updateSession(connectionId, (session) => ({
+      ...session,
+      path,
+      lastSeenAt: new Date().toISOString(),
+      clicks: session.clicks + 1,
+    }));
   }
 
   async snapshot(): Promise<PresenceSnapshot> {
     await this.cleanupExpired();
-    const [values, totalViewsRaw, uniqueVisitors, pageViews] = await Promise.all([
+    const [values, totalViewsRaw, uniqueVisitors, pageViews, totalSessionsRaw, totalClicksRaw, sources, devices, clicks, dailyViews, recentIds] = await Promise.all([
       this.client.hVals(this.recordsKey),
       this.client.get(this.totalViewsKey),
       this.client.pfCount(this.uniqueVisitorsKey),
       this.client.hGetAll(this.pageViewsKey),
+      this.client.get(this.totalSessionsKey),
+      this.client.get(this.totalClicksKey),
+      this.client.hGetAll(this.sourcesKey),
+      this.client.hGetAll(this.devicesKey),
+      this.client.hGetAll(this.clicksKey),
+      this.client.hGetAll(this.dailyViewsKey),
+      this.client.zRange(this.recentSessionsKey, 0, 9, { REV: true }),
     ]);
+    const recentRaw = recentIds.length
+      ? await this.client.mGet(recentIds.map((id) => `${this.sessionKeyPrefix}${id}`))
+      : [];
+    const recentSessions = recentRaw.flatMap((value) => {
+      if (!value) return [];
+      try { return [JSON.parse(value) as AnalyticsSession]; } catch { return []; }
+    });
     const counts = emptyPresenceCounts();
 
     for (const value of values) {
@@ -152,10 +255,26 @@ export class PresenceStore {
       analytics: {
         totalViews: Number(totalViewsRaw || 0),
         uniqueVisitors,
+        totalSessions: Number(totalSessionsRaw || 0),
+        totalClicks: Number(totalClicksRaw || 0),
         topPages: Object.entries(pageViews)
           .map(([path, views]) => ({ path, views: Number(views) }))
           .sort((a, b) => b.views - a.views)
           .slice(0, 8),
+        topSources: this.rankHash(sources),
+        topDevices: this.rankHash(devices),
+        topClicks: Object.entries(clicks)
+          .map(([key, count]) => {
+            const [path, label] = key.split("\u001f");
+            return { path: path || "/", label: label || "Interaction", count: Number(count) };
+          })
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 8),
+        dailyViews: Object.entries(dailyViews)
+          .map(([date, views]) => ({ date, views: Number(views) }))
+          .sort((a, b) => a.date.localeCompare(b.date))
+          .slice(-14),
+        recentSessions,
       },
     };
   }
@@ -169,5 +288,30 @@ export class PresenceStore {
       keys: [this.recordsKey, this.expiriesKey, this.channelKey],
       arguments: [String(Date.now())],
     });
+  }
+
+  private rankHash(values: Record<string, string>): Array<{ label: string; count: number }> {
+    return Object.entries(values)
+      .map(([label, count]) => ({ label, count: Number(count) }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+  }
+
+  private async updateSession(
+    connectionId: string,
+    update: (session: AnalyticsSession) => AnalyticsSession,
+  ): Promise<void> {
+    const key = `${this.sessionKeyPrefix}${connectionId}`;
+    const raw = await this.client.get(key);
+    if (!raw) return;
+    try {
+      const session = update(JSON.parse(raw) as AnalyticsSession);
+      const transaction = this.client.multi();
+      transaction.set(key, JSON.stringify(session), { EX: 30 * 24 * 60 * 60 });
+      transaction.zAdd(this.recentSessionsKey, { score: Date.now(), value: connectionId });
+      await transaction.exec();
+    } catch {
+      // Invalid analytics sessions expire automatically.
+    }
   }
 }

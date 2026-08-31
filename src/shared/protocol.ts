@@ -19,7 +19,23 @@ export interface PresenceSnapshot {
   analytics: {
     totalViews: number;
     uniqueVisitors: number;
+    totalSessions: number;
+    totalClicks: number;
     topPages: Array<{ path: string; views: number }>;
+    topSources: Array<{ label: string; count: number }>;
+    topDevices: Array<{ label: string; count: number }>;
+    topClicks: Array<{ label: string; path: string; count: number }>;
+    dailyViews: Array<{ date: string; views: number }>;
+    recentSessions: Array<{
+      id: string;
+      source: string;
+      device: string;
+      path: string;
+      startedAt: string;
+      lastSeenAt: string;
+      pageViews: number;
+      clicks: number;
+    }>;
   };
 }
 

@@ -14,10 +14,20 @@ interface TrackerState {
   connectionId: string;
   section: PresenceSection;
   path: string;
+  source: string;
+  device: "Mobile" | "Tablet" | "Desktop";
 }
 
 function validPagePath(value: unknown): value is string {
   return typeof value === "string" && value.startsWith("/") && value.length <= 240 && !value.includes("?");
+}
+
+function validLabel(value: unknown, max = 80): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= max;
+}
+
+function validDevice(value: unknown): value is "Mobile" | "Tablet" | "Desktop" {
+  return value === "Mobile" || value === "Tablet" || value === "Desktop";
 }
 
 interface RateEntry {
@@ -219,7 +229,9 @@ export class SocketHub {
             !VISITOR_ID_PATTERN.test(payload.visitorId) ||
             !CONNECTION_ID_PATTERN.test(payload.connectionId) ||
             !isPresenceSection(payload.section) ||
-            !validPagePath(payload.path)
+            !validPagePath(payload.path) ||
+            !validLabel(payload.source) ||
+            !validDevice(payload.device)
           ) {
             socket.close(4400, "Invalid presence identity");
             return;
@@ -229,6 +241,8 @@ export class SocketHub {
             connectionId: payload.connectionId,
             section: payload.section,
             path: payload.path,
+            source: payload.source.trim(),
+            device: payload.device,
           };
           clearTimeout(helloTimeout);
           await this.store.touch(
@@ -236,7 +250,17 @@ export class SocketHub {
             state.connectionId,
             state.section,
           );
-          await this.store.recordPageView(state.visitorId, state.path);
+          await this.store.startSession({
+            sessionId: state.visitorId,
+            source: state.source,
+            device: state.device,
+            path: state.path,
+          });
+          await this.store.recordPageView(
+            state.visitorId,
+            state.visitorId,
+            state.path,
+          );
           return;
         }
 
@@ -250,7 +274,11 @@ export class SocketHub {
           state.section = payload.section;
           if (validPagePath(payload.path) && payload.path !== state.path) {
             state.path = payload.path;
-            await this.store.recordPageView(state.visitorId, state.path);
+            await this.store.recordPageView(
+              state.visitorId,
+              state.visitorId,
+              state.path,
+            );
           }
           await this.store.touch(
             state.visitorId,
@@ -264,6 +292,19 @@ export class SocketHub {
           await this.store.remove(state.visitorId, state.connectionId);
           state = undefined;
           socket.close(1000, "Inactive");
+          return;
+        }
+
+        if (
+          payload.type === "analytics:click" &&
+          validPagePath(payload.path) &&
+          validLabel(payload.label)
+        ) {
+          await this.store.recordClick(
+            state.visitorId,
+            payload.path,
+            payload.label.trim(),
+          );
         }
       })().catch((error: unknown) => {
         console.error("Presence message failed", error);
