@@ -199,6 +199,8 @@ export class PresenceStore {
     if (!created) {
       await this.updateSession(input.sessionId, (existing) => ({
         ...existing,
+        source: input.source,
+        device: input.device,
         path: input.path,
         lastSeenAt: now.toISOString(),
       }));
