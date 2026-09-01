@@ -7,84 +7,488 @@
     <meta name="theme-color" content="#03112d" />
     <title>Phase One — Live Monitor</title>
   </head>
+
   <body>
     <div class="shell">
+
       <header class="masthead">
         <div class="identity">
-          <div class="wordmark" aria-label="Phase One">PHASE ONE</div>
-          <div class="product-name">Live Monitor</div>
+          <div class="wordmark" aria-label="Phase One">
+            PHASE ONE
+          </div>
+
+          <div class="product-name">
+            Live Monitor
+          </div>
         </div>
 
         <div class="masthead-actions">
-          <div class="connection" id="connection" data-state="connecting" role="status" aria-live="polite">
+          <div
+            class="connection"
+            id="connection"
+            data-state="connecting"
+            role="status"
+            aria-live="polite"
+          >
             <span class="connection-dot" aria-hidden="true"></span>
             <span id="connection-label">Connecting</span>
           </div>
+
           <form method="post" action="/logout">
-            <button class="sign-out" type="submit">Sign out</button>
+            <button class="sign-out" type="submit">
+              Sign out
+            </button>
           </form>
         </div>
       </header>
 
       <main>
+
+        <!-- HERO -->
         <section class="hero-copy">
-          <div><p class="eyebrow">Phase One intelligence</p><h1>Real-time analytics</h1></div>
-          <div class="range-control"><span id="active-range-label">Last 30 days</span><div class="range-filter" aria-label="Analytics date range">
-            <button type="button" data-range="today">Today</button><button type="button" data-range="7">7D</button><button type="button" data-range="30" class="is-active">30D</button><button type="button" data-range="all">All time</button>
-          </div></div>
+          <div class="hero-title">
+            <p class="eyebrow">
+              Phase One intelligence
+            </p>
+
+            <h1>
+              Real-time analytics
+            </h1>
+          </div>
+
+          <div class="range-control">
+            <span id="active-range-label">
+              Last 30 days
+            </span>
+
+            <div
+              class="range-filter"
+              aria-label="Analytics date range"
+            >
+              <button type="button" data-range="today">
+                Today
+              </button>
+
+              <button type="button" data-range="7">
+                7D
+              </button>
+
+              <button
+                type="button"
+                data-range="30"
+                class="is-active"
+              >
+                30D
+              </button>
+
+              <button type="button" data-range="all">
+                All time
+              </button>
+            </div>
           </div>
         </section>
 
-        <section class="live-console" id="live-presence">
+
+        <!-- LIVE ANALYTICS -->
+        <section
+          class="live-console"
+          id="live-presence"
+        >
           <header class="live-head">
-            <div class="headline-stat"><span>Visitors in the last 30 minutes</span><strong id="visitors-30">—</strong></div>
-            <div class="headline-stat"><span>Live visitors</span><strong><i></i><b id="total">—</b></strong><small id="updated">Awaiting live state</small></div>
+
+            <div class="headline-stat">
+              <span>
+                Visitors in the last 30 minutes
+              </span>
+
+              <strong id="visitors-30">
+                —
+              </strong>
+            </div>
+
+            <div class="headline-stat">
+              <span>
+                Live visitors
+              </span>
+
+              <strong>
+                <i></i>
+                <b id="total">—</b>
+              </strong>
+
+              <small id="updated">
+                Awaiting live state
+              </small>
+            </div>
+
           </header>
+
+
           <div class="live-body">
+
             <div class="live-charts">
-              <section class="flat-section"><div class="section-title"><h2>Page views</h2><span>Current visitors</span></div><div class="section-grid" id="section-grid" aria-label="Visitors by site section"></div></section>
+
+              <section class="flat-section">
+                <div class="section-title">
+                  <h2>Page views</h2>
+                  <span>Current visitors</span>
+                </div>
+
+                <div
+                  class="section-grid"
+                  id="section-grid"
+                  aria-label="Visitors by site section"
+                ></div>
+              </section>
+
+
               <div class="live-split">
-                <section class="flat-section"><div class="section-title"><h2>Traffic source</h2><span>Sessions</span></div><div class="insight-list" id="source-list"></div></section>
-                <section class="flat-section"><div class="section-title"><h2>Device</h2><span>Sessions</span></div><div class="device-layout"><div class="device-donut" id="device-donut"><span id="device-total">0</span></div><div class="insight-list" id="device-list"></div></div></section>
+
+                <section class="flat-section">
+                  <div class="section-title">
+                    <h2>Traffic source</h2>
+                    <span>Sessions</span>
+                  </div>
+
+                  <div
+                    class="insight-list"
+                    id="source-list"
+                  ></div>
+                </section>
+
+
+                <section class="flat-section">
+                  <div class="section-title">
+                    <h2>Device</h2>
+                    <span>Sessions</span>
+                  </div>
+
+                  <div class="device-layout">
+
+                    <div
+                      class="device-donut"
+                      id="device-donut"
+                    >
+                      <span id="device-total">
+                        0
+                      </span>
+                    </div>
+
+                    <div
+                      class="insight-list"
+                      id="device-list"
+                    ></div>
+
+                  </div>
+                </section>
+
               </div>
             </div>
+
+
             <aside class="activity-rail">
-              <section class="today-block"><h2>Today's activity</h2><div><span>Page views<strong id="today-views">—</strong></span><span>Online<strong id="online-summary">—</strong></span><span>Clicks<strong id="total-clicks">—</strong></span></div></section>
-              <section id="recent-sessions"><div class="section-title"><h2>Recent sessions</h2><span>Newest first</span></div><div class="session-list" id="session-list"></div><div class="session-pagination" id="session-pagination" hidden><button type="button" id="sessions-previous" aria-label="Previous sessions">←</button><span id="sessions-page">Page 1 of 1</span><button type="button" id="sessions-next" aria-label="Next sessions">→</button></div></section>
+
+              <section class="today-block">
+                <h2>
+                  Today's activity
+                </h2>
+
+                <div>
+                  <span>
+                    Page views
+                    <strong id="today-views">
+                      —
+                    </strong>
+                  </span>
+
+                  <span>
+                    Online
+                    <strong id="online-summary">
+                      —
+                    </strong>
+                  </span>
+
+                  <span>
+                    Clicks
+                    <strong id="total-clicks">
+                      —
+                    </strong>
+                  </span>
+                </div>
+              </section>
+
+
+              <section id="recent-sessions">
+
+                <div class="section-title">
+                  <h2>
+                    Recent sessions
+                  </h2>
+
+                  <span>
+                    Newest first
+                  </span>
+                </div>
+
+                <div
+                  class="session-list"
+                  id="session-list"
+                ></div>
+
+                <div
+                  class="session-pagination"
+                  id="session-pagination"
+                  hidden
+                >
+                  <button
+                    type="button"
+                    id="sessions-previous"
+                    aria-label="Previous sessions"
+                  >
+                    ←
+                  </button>
+
+                  <span id="sessions-page">
+                    Page 1 of 1
+                  </span>
+
+                  <button
+                    type="button"
+                    id="sessions-next"
+                    aria-label="Next sessions"
+                  >
+                    →
+                  </button>
+                </div>
+
+              </section>
+
             </aside>
           </div>
         </section>
 
-        <section class="behavior-overview" id="behavior">
-          <div class="behavior-heading"><div><p class="eyebrow">Last 14 days</p><h2>Behavior overview</h2></div><span>Compared to all tracked activity</span></div>
-          <div class="summary-strip">
-            <div><span>Total sessions</span><strong id="total-sessions">—</strong></div>
-            <div><span>Unique visitors</span><strong id="unique-visitors">—</strong></div>
-            <div><span>Page views</span><strong id="total-views">—</strong></div>
-            <div><span>Pages / session</span><strong id="pages-per-session">—</strong></div>
-            <div><span>Top destination</span><strong class="summary-text" id="top-destination">—</strong><small id="top-destination-views">Waiting for traffic</small></div>
+
+        <!-- BEHAVIOR -->
+        <section
+          class="behavior-overview"
+          id="behavior"
+        >
+
+          <div class="behavior-heading">
+            <div>
+              <p class="eyebrow">
+                Last 14 days
+              </p>
+
+              <h2>
+                Behavior overview
+              </h2>
+            </div>
+
+            <span>
+              Compared to all tracked activity
+            </span>
           </div>
-          <section class="trend-section" id="traffic-overview"><div class="section-title"><h2>Sessions over time</h2><strong id="trend-total">0 views</strong></div><div class="trend-chart" id="trend-chart"></div></section>
+
+
+          <div class="summary-strip">
+
+            <div>
+              <span>
+                Total sessions
+              </span>
+
+              <strong id="total-sessions">
+                —
+              </strong>
+            </div>
+
+
+            <div>
+              <span>
+                Unique visitors
+              </span>
+
+              <strong id="unique-visitors">
+                —
+              </strong>
+            </div>
+
+
+            <div>
+              <span>
+                Page views
+              </span>
+
+              <strong id="total-views">
+                —
+              </strong>
+            </div>
+
+
+            <div>
+              <span>
+                Pages / session
+              </span>
+
+              <strong id="pages-per-session">
+                —
+              </strong>
+            </div>
+
+
+            <div>
+              <span>
+                Top destination
+              </span>
+
+              <strong
+                class="summary-text"
+                id="top-destination"
+              >
+                —
+              </strong>
+
+              <small id="top-destination-views">
+                Waiting for traffic
+              </small>
+            </div>
+
+          </div>
+
+
+          <section
+            class="trend-section"
+            id="traffic-overview"
+          >
+            <div class="section-title">
+              <h2>
+                Sessions over time
+              </h2>
+
+              <strong id="trend-total">
+                0 views
+              </strong>
+            </div>
+
+            <div
+              class="trend-chart"
+              id="trend-chart"
+            ></div>
+          </section>
+
         </section>
 
+
+        <!-- TOP PAGES -->
         <section class="detail-grid detail-grid--single">
-          <article class="flat-panel" aria-labelledby="ranking-title"><div class="section-title"><h2 id="ranking-title">Top pages by views</h2><span>All time</span></div><div class="page-ranking" id="page-ranking"><p class="empty-state">Waiting for the first page view…</p></div></article>
+
+          <article
+            class="flat-panel"
+            aria-labelledby="ranking-title"
+          >
+            <div class="section-title">
+              <h2 id="ranking-title">
+                Top pages by views
+              </h2>
+
+              <span>
+                All time
+              </span>
+            </div>
+
+            <div
+              class="page-ranking"
+              id="page-ranking"
+            >
+              <p class="empty-state">
+                Waiting for the first page view…
+              </p>
+            </div>
+
+          </article>
+
         </section>
 
-        <aside class="session-detail" id="session-detail" aria-labelledby="session-detail-title" hidden>
-          <div class="session-detail-head"><div><p class="eyebrow">Visitor journey</p><h2 id="session-detail-title">Session details</h2></div><button type="button" id="close-session-detail" aria-label="Close session details">×</button></div>
+
+        <!-- SESSION DETAIL DRAWER -->
+        <aside
+          class="session-detail"
+          id="session-detail"
+          aria-labelledby="session-detail-title"
+          hidden
+        >
+          <div class="session-detail-head">
+            <div>
+              <p class="eyebrow">
+                Visitor journey
+              </p>
+
+              <h2 id="session-detail-title">
+                Session details
+              </h2>
+            </div>
+
+            <button
+              type="button"
+              id="close-session-detail"
+              aria-label="Close session details"
+            >
+              ×
+            </button>
+          </div>
+
           <div id="session-detail-content"></div>
         </aside>
-        <button class="session-backdrop" id="session-backdrop" type="button" aria-label="Close session details" hidden></button>
 
+
+        <button
+          class="session-backdrop"
+          id="session-backdrop"
+          type="button"
+          aria-label="Close session details"
+          hidden
+        ></button>
+
+
+        <!-- FOOTER -->
         <footer class="system-footer">
-          <div><span>Connection</span><strong id="footer-connection">Connecting</strong></div>
-          <div><span>Updated</span><strong id="footer-updated">Waiting</strong></div>
+
+          <div>
+            <span>
+              Connection
+            </span>
+
+            <strong id="footer-connection">
+              Connecting
+            </strong>
+          </div>
+
+          <div>
+            <span>
+              Updated
+            </span>
+
+            <strong id="footer-updated">
+              Waiting
+            </strong>
+          </div>
+
         </footer>
+
       </main>
     </div>
 
-    <div class="sr-only" id="announcement" aria-live="polite"></div>
-    <script type="module" src="/main.ts"></script>
+
+    <div
+      class="sr-only"
+      id="announcement"
+      aria-live="polite"
+    ></div>
+
+    <script
+      type="module"
+      src="/main.ts"
+    ></script>
   </body>
 </html>

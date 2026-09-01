@@ -102,11 +102,25 @@ button, input { font: inherit; }
 }
 .sign-out:hover, .sign-out:focus-visible { color: #d7dad6; }
 
-main { padding-top: 45px; }
+main {
+  padding-top: 22px;
+}
 
-.hero-copy { display: flex; align-items: end; justify-content: space-between; gap: 40px; padding: 28px 2px 30px; }
+.hero-copy {
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 40px;
+  min-height: 0;
+  height: auto;
+  margin: 0;
+  padding: 18px 2px 28px;
+}
+
+.hero-title { min-width: 0; }
 .hero-copy h1 { margin: 0; color: #f5f9ff; font-size: clamp(32px, 4vw, 50px); line-height: .98; letter-spacing: -.045em; }
-.hero-copy > p { width: min(390px, 42%); margin: 0; color: #7894c5; font-size: 13px; line-height: 1.7; }
+.hero-copy .eyebrow { margin: 0 0 13px; }
 .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: rgba(5,16,39,.9); }
 .metric-card { min-height: 154px; display: flex; flex-direction: column; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); border-radius: 0; padding: 22px 24px; background: transparent; box-shadow: none; }
 .metric-card:nth-child(3n) { border-right: 0; }
@@ -383,7 +397,7 @@ main { padding-top: 45px; }
   .shell { padding-inline: 16px; }
   .masthead { min-height: 78px; }
   .product-name, .sign-out { display: none; }
-  main { padding-top: 32px; }
+  main { padding-top: 18px; }
   .overview { min-height: 180px; padding-bottom: 26px; }
   .total { font-size: 88px; }
   .overview-meta { padding-bottom: 0; }
@@ -422,6 +436,8 @@ main { padding-top: 45px; }
   border-radius: 10px;
   background: rgba(5, 16, 39, .92);
 }
+
+.live-console { margin-top: 0; }
 
 .range-control { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .range-control > span { color: #7e98c1; font: 600 9px/1 monospace; letter-spacing: .06em; text-transform: uppercase; }
@@ -565,4 +581,10 @@ body.detail-open { overflow: hidden; }
   .range-control { width: 100%; align-items: flex-start; }
   .range-filter button { flex: 1; padding-inline: 8px; }
   .session-detail { padding: 24px 20px; }
+}
+
+
+/* Phase One hero spacing guard */
+main > .hero-copy + .live-console {
+  margin-top: 0;
 }
