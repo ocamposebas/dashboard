@@ -505,6 +505,9 @@ main {
 .session-pagination button { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid rgba(89,139,220,.24); border-radius: 7px; background: rgba(12,40,87,.45); color: #8fc7ff; cursor: pointer; }
 .session-pagination button:hover:not(:disabled) { border-color: rgba(83,166,255,.55); background: rgba(17,80,157,.32); color: #fff; }
 .session-pagination button:disabled { opacity: .28; cursor: default; }
+.journey-panel { overflow: hidden; margin-top: 24px; border: 1px solid rgba(88,139,224,.22); border-radius: 12px; background: rgba(3,15,38,.42); }
+.journey-panel .journey-heading { margin: 0; border-bottom: 1px solid var(--line); padding: 18px 20px; }
+.journey-panel .journey-timeline { padding: 4px 20px 20px; }
 
 .behavior-overview { margin-top: 14px; }
 .behavior-heading { display: flex; justify-content: space-between; align-items: end; gap: 24px; padding: 27px 28px 22px; }

@@ -230,6 +230,36 @@ function escapeHtml(value: string): string {
   })[character] || character);
 }
 
+function rankLabels(values: string[]): Array<{ label: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const value of values) counts.set(value, (counts.get(value) || 0) + 1);
+  return [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label))
+    .slice(0, 8);
+}
+
+function pagesForSessions(
+  sessions: PresenceSnapshot["analytics"]["recentSessions"],
+  cutoff: string | null,
+): Array<{ path: string; views: number }> {
+  const counts = new Map<string, number>();
+  for (const session of sessions) {
+    const pageEvents = (session.events || []).filter((event) =>
+      event.type === "pageview" && (!cutoff || event.at.slice(0, 10) >= cutoff),
+    );
+    if (pageEvents.length) {
+      for (const event of pageEvents) counts.set(event.path, (counts.get(event.path) || 0) + 1);
+    } else if (session.pageViews > 0) {
+      counts.set(session.path, (counts.get(session.path) || 0) + session.pageViews);
+    }
+  }
+  return [...counts.entries()]
+    .map(([path, views]) => ({ path, views }))
+    .sort((left, right) => right.views - left.views || left.path.localeCompare(right.path))
+    .slice(0, 8);
+}
+
 function renderAnalytics(snapshot: PresenceSnapshot): void {
   const { analytics } = snapshot;
   const cutoffDays = selectedRange === "today" ? 0 : selectedRange === "all" ? null : Number(selectedRange) - 1;
@@ -256,7 +286,9 @@ function renderAnalytics(snapshot: PresenceSnapshot): void {
     filteredClicks = sessionsInRange.reduce((sum, session) => sum + session.clicks, 0);
   }
   totalViewsElement.textContent = formatNumber(filteredViews);
-  uniqueVisitorsElement.textContent = formatNumber(analytics.uniqueVisitors);
+  uniqueVisitorsElement.textContent = formatNumber(
+    selectedRange === "all" ? analytics.uniqueVisitors : sessionsInRange.length,
+  );
   onlineSummaryElement.textContent = formatNumber(snapshot.total);
   totalSessionsElement.textContent = formatNumber(filteredSessions);
   totalClicksElement.textContent = formatNumber(filteredClicks);
@@ -267,25 +299,34 @@ function renderAnalytics(snapshot: PresenceSnapshot): void {
   pagesPerSessionElement.textContent = filteredSessions
     ? (filteredViews / filteredSessions).toFixed(1)
     : "0.0";
-  const leader = analytics.topPages[0];
+  const filteredPages = selectedRange === "all"
+    ? analytics.topPages
+    : pagesForSessions(sessionsInRange, cutoff);
+  const filteredSources = selectedRange === "all"
+    ? analytics.topSources
+    : rankLabels(sessionsInRange.map((session) => session.source));
+  const filteredDevices = selectedRange === "all"
+    ? analytics.topDevices
+    : rankLabels(sessionsInRange.map((session) => session.device));
+  const leader = filteredPages[0];
   topDestinationElement.textContent = leader ? pageLabel(leader.path) : "—";
   topDestinationViewsElement.textContent = leader ? `${formatNumber(leader.views)} views` : "Waiting for traffic";
 
   if (!leader) {
     pageRankingElement.innerHTML = '<p class="empty-state">Waiting for the first page view…</p>';
   } else {
-    pageRankingElement.innerHTML = analytics.topPages.map((page, index) => {
+    pageRankingElement.innerHTML = filteredPages.map((page, index) => {
       const width = Math.max(4, Math.round((page.views / leader.views) * 100));
       return `<div class="rank-row"><span class="rank-index">${String(index + 1).padStart(2, "0")}</span><div class="rank-data"><div><strong>${escapeHtml(pageLabel(page.path))}</strong><code>${escapeHtml(page.path)}</code><b>${formatNumber(page.views)}</b></div><span class="rank-track"><i style="width:${width}%"></i></span></div></div>`;
     }).join("");
   }
 
-  renderRankList(sourceListElement, analytics.topSources);
-  renderRankList(deviceListElement, analytics.topDevices);
-  const deviceTotal = analytics.topDevices.reduce((sum, item) => sum + item.count, 0);
+  renderRankList(sourceListElement, filteredSources);
+  renderRankList(deviceListElement, filteredDevices);
+  const deviceTotal = filteredDevices.reduce((sum, item) => sum + item.count, 0);
   deviceTotalElement.textContent = formatNumber(deviceTotal);
-  const mobile = analytics.topDevices.find((item) => item.label === "Mobile")?.count || 0;
-  const tablet = analytics.topDevices.find((item) => item.label === "Tablet")?.count || 0;
+  const mobile = filteredDevices.find((item) => item.label === "Mobile")?.count || 0;
+  const tablet = filteredDevices.find((item) => item.label === "Tablet")?.count || 0;
   const mobileEnd = deviceTotal ? Math.round((mobile / deviceTotal) * 100) : 0;
   const tabletEnd = deviceTotal ? mobileEnd + Math.round((tablet / deviceTotal) * 100) : 0;
   deviceDonutElement.style.background = `conic-gradient(#1688ff 0 ${mobileEnd}%, #66bcff ${mobileEnd}% ${tabletEnd}%, #204c95 ${tabletEnd}% 100%)`;
@@ -314,11 +355,14 @@ function renderAnalytics(snapshot: PresenceSnapshot): void {
 function openSessionDetail(sessionId: string): void {
   const session = latestSnapshot?.analytics.recentSessions.find((item) => item.id === sessionId);
   if (!session) return;
-  const events = session.events || [];
-  sessionDetailTitle.textContent = session.number ? `Session #${session.number}` : "Previous session";
+  const events = [...(session.events || [])].sort((left, right) => Date.parse(left.at) - Date.parse(right.at));
+  sessionDetailTitle.textContent = session.number ? `Session #${session.number}` : "Session";
   const durationMs = Math.max(0, Date.parse(session.lastSeenAt) - Date.parse(session.startedAt));
   const durationLabel = durationMs < 60_000 ? `${Math.floor(durationMs / 1_000)}s` : `${Math.floor(durationMs / 60_000)}m ${Math.floor((durationMs % 60_000) / 1_000)}s`;
-  sessionDetailContent.innerHTML = `<div class="session-status"><i></i><span>${relativeDate(session.lastSeenAt)} · ${new Date(session.startedAt).toLocaleString()}</span></div><div class="session-facts"><div><span>Source</span><strong>${escapeHtml(session.source)}</strong></div><div><span>Device</span><strong>${escapeHtml(session.device)}</strong></div><div><span>Duration</span><strong>${durationLabel}</strong></div><div><span>Activity</span><strong>${session.pageViews} pages · ${session.clicks} clicks</strong></div></div><div class="journey-heading"><span>Complete journey</span><b>${events.length} events</b></div><div class="journey-timeline">${events.length ? events.map((event, index) => `<div class="journey-event journey-event--${event.type}"><i>${index + 1}</i><div><span>${event.type === "click" ? "Clicked" : "Visited"} · ${new Date(event.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span><strong>${escapeHtml(event.type === "click" ? event.label || "Interaction" : pageLabel(event.path))}</strong><code>${escapeHtml(event.path)}</code></div></div>`).join("") : '<div class="legacy-session"><strong>No detailed events</strong><p>This session occurred before journey tracking was enabled. New sessions will include every visited page and selected button.</p></div>'}</div>`;
+  const journey = events.length
+    ? events.map((event, index) => `<div class="journey-event journey-event--${event.type}"><i>${index + 1}</i><div><span>${event.type === "click" ? "Clicked" : "Visited"} · ${new Date(event.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span><strong>${escapeHtml(event.type === "click" ? event.label || "Interaction" : pageLabel(event.path))}</strong><code>${escapeHtml(event.path)}</code></div></div>`).join("")
+    : `<div class="journey-event journey-event--pageview"><i>1</i><div><span>Recorded visit · ${new Date(session.lastSeenAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span><strong>${escapeHtml(pageLabel(session.path))}</strong><code>${escapeHtml(session.path)} · ${session.pageViews} pages · ${session.clicks} clicks</code></div></div>`;
+  sessionDetailContent.innerHTML = `<div class="session-status"><i></i><span>Last interaction ${relativeDate(session.lastSeenAt)} · started ${new Date(session.startedAt).toLocaleString()}</span></div><div class="session-facts"><div><span>Source</span><strong>${escapeHtml(session.source)}</strong></div><div><span>Device</span><strong>${escapeHtml(session.device)}</strong></div><div><span>Duration</span><strong>${durationLabel}</strong></div><div><span>Activity</span><strong>${session.pageViews} pages · ${session.clicks} clicks</strong></div></div><section class="journey-panel"><div class="journey-heading"><span>Complete journey</span><b>${Math.max(events.length, 1)} recorded</b></div><div class="journey-timeline">${journey}</div></section>`;
   sessionDetailElement.hidden = false;
   sessionBackdrop.hidden = false;
   document.body.classList.add("detail-open");

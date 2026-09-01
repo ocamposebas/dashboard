@@ -255,7 +255,7 @@ export class PresenceStore {
       this.client.hGetAll(this.dailyViewsKey),
       this.client.hGetAll(this.dailySessionsKey),
       this.client.hGetAll(this.dailyClicksKey),
-      this.client.zRange(this.recentSessionsKey, 0, 49, { REV: true }),
+      this.client.zRange(this.recentSessionsKey, 0, 99, { REV: true }),
       this.client.zCount(this.recentSessionsKey, Date.now() - 30 * 60_000, "+inf"),
     ]);
     const recentRaw = recentIds.length
