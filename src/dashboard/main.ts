@@ -356,13 +356,27 @@ function openSessionDetail(sessionId: string): void {
   const session = latestSnapshot?.analytics.recentSessions.find((item) => item.id === sessionId);
   if (!session) return;
   const events = [...(session.events || [])].sort((left, right) => Date.parse(left.at) - Date.parse(right.at));
+  const detailedPageViews = events.filter((event) => event.type === "pageview").length;
+  const detailedClicks = events.filter((event) => event.type === "click").length;
+  const earlierPageViews = Math.max(0, session.pageViews - detailedPageViews);
+  const earlierClicks = Math.max(0, session.clicks - detailedClicks);
   sessionDetailTitle.textContent = session.number ? `Session #${session.number}` : "Session";
   const durationMs = Math.max(0, Date.parse(session.lastSeenAt) - Date.parse(session.startedAt));
   const durationLabel = durationMs < 60_000 ? `${Math.floor(durationMs / 1_000)}s` : `${Math.floor(durationMs / 60_000)}m ${Math.floor((durationMs % 60_000) / 1_000)}s`;
-  const journey = events.length
-    ? events.map((event, index) => `<div class="journey-event journey-event--${event.type}"><i>${index + 1}</i><div><span>${event.type === "click" ? "Clicked" : "Visited"} · ${new Date(event.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span><strong>${escapeHtml(event.type === "click" ? event.label || "Interaction" : pageLabel(event.path))}</strong><code>${escapeHtml(event.path)}</code></div></div>`).join("")
-    : `<div class="journey-event journey-event--pageview"><i>1</i><div><span>Recorded visit · ${new Date(session.lastSeenAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span><strong>${escapeHtml(pageLabel(session.path))}</strong><code>${escapeHtml(session.path)} · ${session.pageViews} pages · ${session.clicks} clicks</code></div></div>`;
-  sessionDetailContent.innerHTML = `<div class="session-status"><i></i><span>Last interaction ${relativeDate(session.lastSeenAt)} · started ${new Date(session.startedAt).toLocaleString()}</span></div><div class="session-facts"><div><span>Source</span><strong>${escapeHtml(session.source)}</strong></div><div><span>Device</span><strong>${escapeHtml(session.device)}</strong></div><div><span>Duration</span><strong>${durationLabel}</strong></div><div><span>Activity</span><strong>${session.pageViews} pages · ${session.clicks} clicks</strong></div></div><section class="journey-panel"><div class="journey-heading"><span>Complete journey</span><b>${Math.max(events.length, 1)} recorded</b></div><div class="journey-timeline">${journey}</div></section>`;
+  const summaryEvents = [
+    earlierPageViews
+      ? `<div class="journey-event journey-event--summary"><i>↗</i><div><span>Earlier page activity</span><strong>${earlierPageViews} page view${earlierPageViews === 1 ? "" : "s"}</strong><code>Last known page: ${escapeHtml(session.path)}</code></div></div>`
+      : "",
+    earlierClicks
+      ? `<div class="journey-event journey-event--summary"><i>+</i><div><span>Earlier interaction activity</span><strong>${earlierClicks} click${earlierClicks === 1 ? "" : "s"}</strong><code>Count preserved for this session</code></div></div>`
+      : "",
+  ].join("");
+  const detailedEvents = events.map((event, index) => `<div class="journey-event journey-event--${event.type}"><i>${index + 1}</i><div><span>${event.type === "click" ? "Clicked" : "Visited"} · ${new Date(event.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span><strong>${escapeHtml(event.type === "click" ? event.label || "Interaction" : pageLabel(event.path))}</strong><code>${escapeHtml(event.path)}</code></div></div>`).join("");
+  const journey = summaryEvents || detailedEvents
+    ? `${summaryEvents}${detailedEvents}`
+    : `<div class="journey-event journey-event--summary"><i>•</i><div><span>Session activity</span><strong>${escapeHtml(pageLabel(session.path))}</strong><code>${escapeHtml(session.path)}</code></div></div>`;
+  const totalActions = session.pageViews + session.clicks;
+  sessionDetailContent.innerHTML = `<div class="session-status"><i></i><span>Last interaction ${relativeDate(session.lastSeenAt)} · started ${new Date(session.startedAt).toLocaleString()}</span></div><div class="session-facts"><div><span>Source</span><strong>${escapeHtml(session.source)}</strong></div><div><span>Device</span><strong>${escapeHtml(session.device)}</strong></div><div><span>Duration</span><strong>${durationLabel}</strong></div><div><span>Activity</span><strong>${session.pageViews} page views · ${session.clicks} clicks</strong></div></div><section class="journey-panel"><div class="journey-heading"><span>Complete journey</span><b>${totalActions} actions</b></div><div class="journey-timeline">${journey}</div></section>`;
   sessionDetailElement.hidden = false;
   sessionBackdrop.hidden = false;
   document.body.classList.add("detail-open");
