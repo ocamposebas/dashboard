@@ -265,6 +265,20 @@ export class PresenceStore {
       if (!value) return [];
       try { return [JSON.parse(value) as AnalyticsSession]; } catch { return []; }
     });
+    const legacySessions = recentSessions
+      .filter((session) => !Number.isSafeInteger(session.number) || session.number <= 0)
+      .sort((left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt));
+    for (const session of legacySessions) {
+      session.number = await this.client.incr(this.sessionSequenceKey);
+      await this.client.set(
+        `${this.sessionKeyPrefix}${session.id}`,
+        JSON.stringify(session),
+        { EX: 30 * 24 * 60 * 60 },
+      );
+    }
+    recentSessions.sort((left, right) =>
+      Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt) || right.number - left.number,
+    );
     const counts = emptyPresenceCounts();
 
     for (const value of values) {

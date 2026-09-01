@@ -52,6 +52,10 @@ const deviceListElement = requiredElement<HTMLElement>("#device-list");
 const deviceDonutElement = requiredElement<HTMLElement>("#device-donut");
 const deviceTotalElement = requiredElement<HTMLElement>("#device-total");
 const sessionListElement = requiredElement<HTMLElement>("#session-list");
+const sessionPagination = requiredElement<HTMLElement>("#session-pagination");
+const sessionsPrevious = requiredElement<HTMLButtonElement>("#sessions-previous");
+const sessionsNext = requiredElement<HTMLButtonElement>("#sessions-next");
+const sessionsPage = requiredElement<HTMLElement>("#sessions-page");
 const trendChartElement = requiredElement<HTMLElement>("#trend-chart");
 const trendTotalElement = requiredElement<HTMLElement>("#trend-total");
 const visitors30Element = requiredElement<HTMLElement>("#visitors-30");
@@ -93,6 +97,8 @@ let hasSnapshot = false;
 let lastUpdatedAt: number | undefined;
 let latestSnapshot: PresenceSnapshot | undefined;
 let selectedRange: "today" | "7" | "30" | "all" = "30";
+let sessionPage = 1;
+const SESSION_PAGE_SIZE = 5;
 const displayedCounts = emptyPresenceCounts();
 const cardTimers = new Map<PresenceSection, number>();
 
@@ -284,10 +290,23 @@ function renderAnalytics(snapshot: PresenceSnapshot): void {
   const tabletEnd = deviceTotal ? mobileEnd + Math.round((tablet / deviceTotal) * 100) : 0;
   deviceDonutElement.style.background = `conic-gradient(#1688ff 0 ${mobileEnd}%, #66bcff ${mobileEnd}% ${tabletEnd}%, #204c95 ${tabletEnd}% 100%)`;
 
-  const visibleSessions = sessionsInRange;
-  sessionListElement.innerHTML = visibleSessions.length
-    ? visibleSessions.map((session) => `<button type="button" class="session-row" data-session-id="${session.id}"><span class="session-dot"></span><div><strong>${session.number ? `Session #${session.number}` : "Previous session"}</strong><small>${escapeHtml(session.source)} · ${escapeHtml(session.device)} · ${escapeHtml(pageLabel(session.path))}</small></div><div><b>${session.pageViews} pages</b><small>${session.clicks} clicks · ${relativeDate(session.lastSeenAt)}</small></div></button>`).join("")
+  const visibleSessions = [...sessionsInRange].sort((left, right) =>
+    Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt) ||
+    (right.number || 0) - (left.number || 0),
+  );
+  const sessionPageCount = Math.max(1, Math.ceil(visibleSessions.length / SESSION_PAGE_SIZE));
+  sessionPage = Math.min(sessionPage, sessionPageCount);
+  const pageSessions = visibleSessions.slice(
+    (sessionPage - 1) * SESSION_PAGE_SIZE,
+    sessionPage * SESSION_PAGE_SIZE,
+  );
+  sessionListElement.innerHTML = pageSessions.length
+    ? pageSessions.map((session) => `<button type="button" class="session-row" data-session-id="${session.id}"><span class="session-dot"></span><div><strong>${session.number ? `Session #${session.number}` : "Session"}</strong><small>${escapeHtml(session.source)} · ${escapeHtml(session.device)} · ${escapeHtml(pageLabel(session.path))}</small></div><div><b>${session.pageViews} pages</b><small>${session.clicks} clicks · ${relativeDate(session.lastSeenAt)}</small></div></button>`).join("")
     : '<p class="empty-state">New visitor sessions will appear here.</p>';
+  sessionPagination.hidden = visibleSessions.length <= SESSION_PAGE_SIZE;
+  sessionsPage.textContent = `Page ${sessionPage} of ${sessionPageCount}`;
+  sessionsPrevious.disabled = sessionPage <= 1;
+  sessionsNext.disabled = sessionPage >= sessionPageCount;
   const trendItems = analytics.dailyViews.filter((item) => !cutoff || item.date >= cutoff);
   renderTrend(trendItems);
 }
@@ -457,6 +476,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-range]"
     const range = button.dataset.range;
     if (range !== "today" && range !== "7" && range !== "30" && range !== "all") return;
     selectedRange = range;
+    sessionPage = 1;
     activeRangeLabel.textContent = {
       today: "Today",
       "7": "Last 7 days",
@@ -473,6 +493,15 @@ sessionListElement.addEventListener("click", (event) => {
     ? event.target.closest<HTMLButtonElement>("[data-session-id]")
     : null;
   if (target?.dataset.sessionId) openSessionDetail(target.dataset.sessionId);
+});
+sessionsPrevious.addEventListener("click", () => {
+  if (sessionPage <= 1) return;
+  sessionPage -= 1;
+  if (latestSnapshot) renderAnalytics(latestSnapshot);
+});
+sessionsNext.addEventListener("click", () => {
+  sessionPage += 1;
+  if (latestSnapshot) renderAnalytics(latestSnapshot);
 });
 closeSessionDetailButton.addEventListener("click", closeSessionDetail);
 sessionBackdrop.addEventListener("click", closeSessionDetail);
