@@ -29,8 +29,9 @@
       <main>
         <section class="hero-copy">
           <div><p class="eyebrow">Phase One intelligence</p><h1>Real-time analytics</h1></div>
-          <div class="range-filter" aria-label="Analytics date range">
-            <button type="button" data-range="today">Today</button><button type="button" data-range="7">7 days</button><button type="button" data-range="30" class="is-active">30 days</button><button type="button" data-range="all">All</button>
+          <div class="range-control"><span id="active-range-label">Last 30 days</span><div class="range-filter" aria-label="Analytics date range">
+            <button type="button" data-range="today">Today</button><button type="button" data-range="7">7D</button><button type="button" data-range="30" class="is-active">30D</button><button type="button" data-range="all">All time</button>
+          </div></div>
           </div>
         </section>
 
@@ -66,9 +67,8 @@
           <section class="trend-section" id="traffic-overview"><div class="section-title"><h2>Sessions over time</h2><strong id="trend-total">0 views</strong></div><div class="trend-chart" id="trend-chart"></div></section>
         </section>
 
-        <section class="detail-grid">
+        <section class="detail-grid detail-grid--single">
           <article class="flat-panel" aria-labelledby="ranking-title"><div class="section-title"><h2 id="ranking-title">Top pages by views</h2><span>All time</span></div><div class="page-ranking" id="page-ranking"><p class="empty-state">Waiting for the first page view…</p></div></article>
-          <article class="flat-panel"><div class="section-title"><h2>Top buttons & links</h2><span>Tracked clicks</span></div><div class="click-list" id="click-list"></div></article>
         </section>
 
         <aside class="session-detail" id="session-detail" aria-labelledby="session-detail-title" hidden>

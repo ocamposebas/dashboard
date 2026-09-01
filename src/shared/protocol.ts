@@ -30,6 +30,7 @@ export interface PresenceSnapshot {
     dailyActivity: Array<{ date: string; views: number; sessions: number; clicks: number }>;
     recentSessions: Array<{
       id: string;
+      number: number;
       source: string;
       device: string;
       path: string;

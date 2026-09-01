@@ -51,14 +51,15 @@ const sourceListElement = requiredElement<HTMLElement>("#source-list");
 const deviceListElement = requiredElement<HTMLElement>("#device-list");
 const deviceDonutElement = requiredElement<HTMLElement>("#device-donut");
 const deviceTotalElement = requiredElement<HTMLElement>("#device-total");
-const clickListElement = requiredElement<HTMLElement>("#click-list");
 const sessionListElement = requiredElement<HTMLElement>("#session-list");
 const trendChartElement = requiredElement<HTMLElement>("#trend-chart");
 const trendTotalElement = requiredElement<HTMLElement>("#trend-total");
 const visitors30Element = requiredElement<HTMLElement>("#visitors-30");
 const todayViewsElement = requiredElement<HTMLElement>("#today-views");
 const pagesPerSessionElement = requiredElement<HTMLElement>("#pages-per-session");
+const activeRangeLabel = requiredElement<HTMLElement>("#active-range-label");
 const sessionDetailElement = requiredElement<HTMLElement>("#session-detail");
+const sessionDetailTitle = requiredElement<HTMLElement>("#session-detail-title");
 const sessionDetailContent = requiredElement<HTMLElement>("#session-detail-content");
 const closeSessionDetailButton = requiredElement<HTMLButtonElement>("#close-session-detail");
 const sessionBackdrop = requiredElement<HTMLButtonElement>("#session-backdrop");
@@ -232,15 +233,22 @@ function renderAnalytics(snapshot: PresenceSnapshot): void {
   const activity = cutoff
     ? analytics.dailyActivity.filter((item) => item.date >= cutoff)
     : analytics.dailyActivity;
+  const sessionsInRange = cutoff
+    ? analytics.recentSessions.filter((session) => session.lastSeenAt.slice(0, 10) >= cutoff)
+    : analytics.recentSessions;
   const filteredViews = selectedRange === "all"
     ? analytics.totalViews
     : activity.reduce((sum, item) => sum + item.views, 0);
-  const filteredSessions = selectedRange === "all"
+  let filteredSessions = selectedRange === "all"
     ? analytics.totalSessions
     : activity.reduce((sum, item) => sum + item.sessions, 0);
-  const filteredClicks = selectedRange === "all"
+  let filteredClicks = selectedRange === "all"
     ? analytics.totalClicks
     : activity.reduce((sum, item) => sum + item.clicks, 0);
+  if (selectedRange !== "all" && filteredSessions === 0) filteredSessions = sessionsInRange.length;
+  if (selectedRange !== "all" && filteredClicks === 0) {
+    filteredClicks = sessionsInRange.reduce((sum, session) => sum + session.clicks, 0);
+  }
   totalViewsElement.textContent = formatNumber(filteredViews);
   uniqueVisitorsElement.textContent = formatNumber(analytics.uniqueVisitors);
   onlineSummaryElement.textContent = formatNumber(snapshot.total);
@@ -276,15 +284,9 @@ function renderAnalytics(snapshot: PresenceSnapshot): void {
   const tabletEnd = deviceTotal ? mobileEnd + Math.round((tablet / deviceTotal) * 100) : 0;
   deviceDonutElement.style.background = `conic-gradient(#1688ff 0 ${mobileEnd}%, #66bcff ${mobileEnd}% ${tabletEnd}%, #204c95 ${tabletEnd}% 100%)`;
 
-  clickListElement.innerHTML = analytics.topClicks.length
-    ? analytics.topClicks.map((item, index) => `<div class="click-row"><span>${String(index + 1).padStart(2, "0")}</span><div><strong>${escapeHtml(item.label)}</strong><code>${escapeHtml(item.path)}</code></div><b>${formatNumber(item.count)}</b></div>`).join("")
-    : '<p class="empty-state">Button and link clicks will appear here.</p>';
-
-  const visibleSessions = cutoff
-    ? analytics.recentSessions.filter((session) => session.lastSeenAt.slice(0, 10) >= cutoff)
-    : analytics.recentSessions;
+  const visibleSessions = sessionsInRange;
   sessionListElement.innerHTML = visibleSessions.length
-    ? visibleSessions.map((session) => `<button type="button" class="session-row" data-session-id="${session.id}"><span class="session-dot"></span><div><strong>${escapeHtml(pageLabel(session.path))}</strong><small>${escapeHtml(session.source)} · ${escapeHtml(session.device)}</small></div><div><b>${session.pageViews} pages</b><small>${session.clicks} clicks · ${relativeDate(session.lastSeenAt)}</small></div></button>`).join("")
+    ? visibleSessions.map((session) => `<button type="button" class="session-row" data-session-id="${session.id}"><span class="session-dot"></span><div><strong>${session.number ? `Session #${session.number}` : "Previous session"}</strong><small>${escapeHtml(session.source)} · ${escapeHtml(session.device)} · ${escapeHtml(pageLabel(session.path))}</small></div><div><b>${session.pageViews} pages</b><small>${session.clicks} clicks · ${relativeDate(session.lastSeenAt)}</small></div></button>`).join("")
     : '<p class="empty-state">New visitor sessions will appear here.</p>';
   const trendItems = analytics.dailyViews.filter((item) => !cutoff || item.date >= cutoff);
   renderTrend(trendItems);
@@ -294,7 +296,10 @@ function openSessionDetail(sessionId: string): void {
   const session = latestSnapshot?.analytics.recentSessions.find((item) => item.id === sessionId);
   if (!session) return;
   const events = session.events || [];
-  sessionDetailContent.innerHTML = `<div class="session-facts"><div><span>Source</span><strong>${escapeHtml(session.source)}</strong></div><div><span>Device</span><strong>${escapeHtml(session.device)}</strong></div><div><span>Pages</span><strong>${session.pageViews}</strong></div><div><span>Clicks</span><strong>${session.clicks}</strong></div></div><div class="journey-timeline">${events.length ? events.map((event) => `<div class="journey-event journey-event--${event.type}"><i></i><div><span>${event.type === "click" ? "Click" : "Page view"} · ${new Date(event.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span><strong>${escapeHtml(event.type === "click" ? event.label || "Interaction" : pageLabel(event.path))}</strong><code>${escapeHtml(event.path)}</code></div></div>`).join("") : '<p class="empty-state">The detailed journey begins with the visitor’s next action.</p>'}</div>`;
+  sessionDetailTitle.textContent = session.number ? `Session #${session.number}` : "Previous session";
+  const durationMs = Math.max(0, Date.parse(session.lastSeenAt) - Date.parse(session.startedAt));
+  const durationLabel = durationMs < 60_000 ? `${Math.floor(durationMs / 1_000)}s` : `${Math.floor(durationMs / 60_000)}m ${Math.floor((durationMs % 60_000) / 1_000)}s`;
+  sessionDetailContent.innerHTML = `<div class="session-status"><i></i><span>${relativeDate(session.lastSeenAt)} · ${new Date(session.startedAt).toLocaleString()}</span></div><div class="session-facts"><div><span>Source</span><strong>${escapeHtml(session.source)}</strong></div><div><span>Device</span><strong>${escapeHtml(session.device)}</strong></div><div><span>Duration</span><strong>${durationLabel}</strong></div><div><span>Activity</span><strong>${session.pageViews} pages · ${session.clicks} clicks</strong></div></div><div class="journey-heading"><span>Complete journey</span><b>${events.length} events</b></div><div class="journey-timeline">${events.length ? events.map((event, index) => `<div class="journey-event journey-event--${event.type}"><i>${index + 1}</i><div><span>${event.type === "click" ? "Clicked" : "Visited"} · ${new Date(event.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span><strong>${escapeHtml(event.type === "click" ? event.label || "Interaction" : pageLabel(event.path))}</strong><code>${escapeHtml(event.path)}</code></div></div>`).join("") : '<div class="legacy-session"><strong>No detailed events</strong><p>This session occurred before journey tracking was enabled. New sessions will include every visited page and selected button.</p></div>'}</div>`;
   sessionDetailElement.hidden = false;
   sessionBackdrop.hidden = false;
   document.body.classList.add("detail-open");
@@ -452,6 +457,12 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-range]"
     const range = button.dataset.range;
     if (range !== "today" && range !== "7" && range !== "30" && range !== "all") return;
     selectedRange = range;
+    activeRangeLabel.textContent = {
+      today: "Today",
+      "7": "Last 7 days",
+      "30": "Last 30 days",
+      all: "All tracked time",
+    }[range];
     for (const item of document.querySelectorAll("[data-range]")) item.classList.toggle("is-active", item === button);
     if (latestSnapshot) renderAnalytics(latestSnapshot);
   });

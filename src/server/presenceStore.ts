@@ -13,6 +13,7 @@ interface PresenceRecord {
 
 interface AnalyticsSession {
   id: string;
+  number: number;
   source: string;
   device: string;
   path: string;
@@ -84,6 +85,7 @@ export class PresenceStore {
   private readonly dailyClicksKey: string;
   private readonly recentSessionsKey: string;
   private readonly sessionKeyPrefix: string;
+  private readonly sessionSequenceKey: string;
   private cleanupTimer: NodeJS.Timeout | undefined;
 
   constructor(
@@ -109,6 +111,7 @@ export class PresenceStore {
     this.dailyClicksKey = `${keyPrefix}:analytics:daily:clicks`;
     this.recentSessionsKey = `${keyPrefix}:analytics:recent`;
     this.sessionKeyPrefix = `${keyPrefix}:analytics:session:`;
+    this.sessionSequenceKey = `${keyPrefix}:analytics:session-sequence`;
 
     this.client.on("error", (error) => console.error("Redis error", error));
     this.subscriber.on("error", (error) =>
@@ -160,8 +163,14 @@ export class PresenceStore {
     path: string;
   }): Promise<void> {
     const now = new Date();
+    const key = `${this.sessionKeyPrefix}${input.sessionId}`;
+    const existingSession = await this.client.get(key);
+    const sessionNumber = existingSession
+      ? 0
+      : await this.client.incr(this.sessionSequenceKey);
     const session: AnalyticsSession = {
       id: input.sessionId,
+      number: sessionNumber,
       source: input.source,
       device: input.device,
       path: input.path,
@@ -171,11 +180,12 @@ export class PresenceStore {
       clicks: 0,
       events: [],
     };
-    const key = `${this.sessionKeyPrefix}${input.sessionId}`;
-    const created = await this.client.set(key, JSON.stringify(session), {
-      EX: 30 * 24 * 60 * 60,
-      NX: true,
-    });
+    const created = existingSession
+      ? null
+      : await this.client.set(key, JSON.stringify(session), {
+          EX: 30 * 24 * 60 * 60,
+          NX: true,
+        });
     const transaction = this.client.multi();
     if (created) {
       transaction.incr(this.totalSessionsKey);
@@ -245,7 +255,7 @@ export class PresenceStore {
       this.client.hGetAll(this.dailyViewsKey),
       this.client.hGetAll(this.dailySessionsKey),
       this.client.hGetAll(this.dailyClicksKey),
-      this.client.zRange(this.recentSessionsKey, 0, 9, { REV: true }),
+      this.client.zRange(this.recentSessionsKey, 0, 49, { REV: true }),
       this.client.zCount(this.recentSessionsKey, Date.now() - 30 * 60_000, "+inf"),
     ]);
     const recentRaw = recentIds.length
