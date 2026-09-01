@@ -27,6 +27,7 @@ export interface PresenceSnapshot {
     topDevices: Array<{ label: string; count: number }>;
     topClicks: Array<{ label: string; path: string; count: number }>;
     dailyViews: Array<{ date: string; views: number }>;
+    dailyActivity: Array<{ date: string; views: number; sessions: number; clicks: number }>;
     recentSessions: Array<{
       id: string;
       source: string;
@@ -36,6 +37,12 @@ export interface PresenceSnapshot {
       lastSeenAt: string;
       pageViews: number;
       clicks: number;
+      events: Array<{
+        type: "pageview" | "click";
+        at: string;
+        path: string;
+        label?: string;
+      }>;
     }>;
   };
 }

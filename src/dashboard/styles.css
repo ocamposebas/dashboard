@@ -423,6 +423,12 @@ main { padding-top: 45px; }
   background: rgba(5, 16, 39, .92);
 }
 
+.range-filter { display: flex; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: rgba(5,16,39,.72); }
+.range-filter button { border: 0; border-right: 1px solid var(--line); background: transparent; padding: 10px 13px; color: #607ba9; font: 650 9px/1 monospace; cursor: pointer; }
+.range-filter button:last-child { border-right: 0; }
+.range-filter button:hover { color: #dbeaff; }
+.range-filter button.is-active { background: #0c5fc2; color: #fff; }
+
 .live-head {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -471,6 +477,8 @@ main { padding-top: 45px; }
 .today-block strong { display: block; margin-top: 9px; color: #e8f1ff; font-size: 22px; font-weight: 570; letter-spacing: -.04em; }
 .activity-rail #recent-sessions { padding-top: 27px; }
 .activity-rail .session-row { grid-template-columns: 7px minmax(90px, 1fr); }
+.session-row { width: 100%; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.session-row:hover { background: rgba(18,91,184,.09); }
 .activity-rail .session-row > div:last-child { grid-column: 2; margin-top: -7px; text-align: left; }
 
 .behavior-overview { margin-top: 14px; }
@@ -488,6 +496,27 @@ main { padding-top: 45px; }
 
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
 .flat-panel { padding: 27px 28px; }
+
+.session-backdrop { position: fixed; z-index: 49; inset: 0; border: 0; background: rgba(0,5,16,.62); backdrop-filter: blur(3px); cursor: default; }
+.session-detail { position: fixed; z-index: 50; inset: 0 0 0 auto; width: min(460px, 100%); overflow-y: auto; border-left: 1px solid rgba(89,145,238,.3); background: #06142f; padding: 30px; box-shadow: -35px 0 90px rgba(0,0,0,.4); }
+.session-detail[hidden], .session-backdrop[hidden] { display: none; }
+body.detail-open { overflow: hidden; }
+.session-detail-head { display: flex; align-items: start; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--line); padding-bottom: 24px; }
+.session-detail-head h2 { margin: 0; color: #f0f6ff; font-size: 22px; letter-spacing: -.03em; }
+.session-detail-head button { width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 8px; background: #0a1d40; color: #8aa5d0; font-size: 23px; cursor: pointer; }
+.session-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: 24px 0 30px; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--line); }
+.session-facts > div { background: #081a39; padding: 16px; }
+.session-facts span { display: block; color: #5776a5; font: 600 8px/1 monospace; text-transform: uppercase; }
+.session-facts strong { display: block; overflow: hidden; margin-top: 9px; color: #dceaff; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.journey-timeline { position: relative; display: grid; gap: 0; }
+.journey-event { position: relative; display: grid; grid-template-columns: 18px 1fr; gap: 12px; min-height: 82px; }
+.journey-event::before { content: ""; position: absolute; left: 4px; top: 15px; bottom: -4px; width: 1px; background: #1b3f70; }
+.journey-event:last-child::before { display: none; }
+.journey-event > i { position: relative; z-index: 1; width: 9px; height: 9px; margin-top: 4px; border: 2px solid #64b1ff; border-radius: 50%; background: #06142f; }
+.journey-event--click > i { border-color: #fff; background: #1e7de1; }
+.journey-event span { display: block; color: #52719f; font: 600 8px/1 monospace; text-transform: uppercase; }
+.journey-event strong { display: block; margin-top: 8px; color: #dce9fb; font-size: 12px; }
+.journey-event code { display: block; overflow: hidden; margin-top: 6px; color: #6a86b0; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 920px) {
   .live-body { grid-template-columns: 1fr; }
@@ -512,4 +541,8 @@ main { padding-top: 45px; }
   .summary-strip > div:last-child { grid-column: 1 / -1; border-right: 0; border-bottom: 0; }
   .behavior-heading { align-items: start; padding: 22px 20px 18px; }
   .behavior-heading > span { display: none; }
+  .hero-copy { gap: 20px; }
+  .range-filter { width: 100%; margin-top: 20px; }
+  .range-filter button { flex: 1; padding-inline: 8px; }
+  .session-detail { padding: 24px 20px; }
 }

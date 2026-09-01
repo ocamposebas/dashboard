@@ -28,7 +28,10 @@
 
       <main>
         <section class="hero-copy">
-          <div><p class="eyebrow">Phase One intelligence</p><h1>Real-time analytics</h1></div><p>Live storefront activity</p>
+          <div><p class="eyebrow">Phase One intelligence</p><h1>Real-time analytics</h1></div>
+          <div class="range-filter" aria-label="Analytics date range">
+            <button type="button" data-range="today">Today</button><button type="button" data-range="7">7 days</button><button type="button" data-range="30" class="is-active">30 days</button><button type="button" data-range="all">All</button>
+          </div>
         </section>
 
         <section class="live-console" id="live-presence">
@@ -67,6 +70,12 @@
           <article class="flat-panel" aria-labelledby="ranking-title"><div class="section-title"><h2 id="ranking-title">Top pages by views</h2><span>All time</span></div><div class="page-ranking" id="page-ranking"><p class="empty-state">Waiting for the first page view…</p></div></article>
           <article class="flat-panel"><div class="section-title"><h2>Top buttons & links</h2><span>Tracked clicks</span></div><div class="click-list" id="click-list"></div></article>
         </section>
+
+        <aside class="session-detail" id="session-detail" aria-labelledby="session-detail-title" hidden>
+          <div class="session-detail-head"><div><p class="eyebrow">Visitor journey</p><h2 id="session-detail-title">Session details</h2></div><button type="button" id="close-session-detail" aria-label="Close session details">×</button></div>
+          <div id="session-detail-content"></div>
+        </aside>
+        <button class="session-backdrop" id="session-backdrop" type="button" aria-label="Close session details" hidden></button>
 
         <footer class="system-footer">
           <div><span>Connection</span><strong id="footer-connection">Connecting</strong></div>

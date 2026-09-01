@@ -58,6 +58,10 @@ const trendTotalElement = requiredElement<HTMLElement>("#trend-total");
 const visitors30Element = requiredElement<HTMLElement>("#visitors-30");
 const todayViewsElement = requiredElement<HTMLElement>("#today-views");
 const pagesPerSessionElement = requiredElement<HTMLElement>("#pages-per-session");
+const sessionDetailElement = requiredElement<HTMLElement>("#session-detail");
+const sessionDetailContent = requiredElement<HTMLElement>("#session-detail-content");
+const closeSessionDetailButton = requiredElement<HTMLButtonElement>("#close-session-detail");
+const sessionBackdrop = requiredElement<HTMLButtonElement>("#session-backdrop");
 
 for (const section of PRESENCE_SECTIONS) {
   const article = document.createElement("article");
@@ -86,6 +90,8 @@ let previousCounts: PresenceCounts | undefined;
 let displayedTotal = 0;
 let hasSnapshot = false;
 let lastUpdatedAt: number | undefined;
+let latestSnapshot: PresenceSnapshot | undefined;
+let selectedRange: "today" | "7" | "30" | "all" = "30";
 const displayedCounts = emptyPresenceCounts();
 const cardTimers = new Map<PresenceSection, number>();
 
@@ -167,6 +173,7 @@ function applySnapshot(snapshot: PresenceSnapshot): void {
   setConnectionState("live", "Live");
   reconnectAttempt = 0;
   lastUpdatedAt = Date.parse(snapshot.serverTime) || Date.now();
+  latestSnapshot = snapshot;
 
   for (const section of PRESENCE_SECTIONS) {
     const target = snapshot.counts[section];
@@ -218,17 +225,33 @@ function escapeHtml(value: string): string {
 
 function renderAnalytics(snapshot: PresenceSnapshot): void {
   const { analytics } = snapshot;
-  totalViewsElement.textContent = formatNumber(analytics.totalViews);
+  const cutoffDays = selectedRange === "today" ? 0 : selectedRange === "all" ? null : Number(selectedRange) - 1;
+  const cutoff = cutoffDays === null
+    ? null
+    : new Date(Date.now() - cutoffDays * 24 * 60 * 60_000).toISOString().slice(0, 10);
+  const activity = cutoff
+    ? analytics.dailyActivity.filter((item) => item.date >= cutoff)
+    : analytics.dailyActivity;
+  const filteredViews = selectedRange === "all"
+    ? analytics.totalViews
+    : activity.reduce((sum, item) => sum + item.views, 0);
+  const filteredSessions = selectedRange === "all"
+    ? analytics.totalSessions
+    : activity.reduce((sum, item) => sum + item.sessions, 0);
+  const filteredClicks = selectedRange === "all"
+    ? analytics.totalClicks
+    : activity.reduce((sum, item) => sum + item.clicks, 0);
+  totalViewsElement.textContent = formatNumber(filteredViews);
   uniqueVisitorsElement.textContent = formatNumber(analytics.uniqueVisitors);
   onlineSummaryElement.textContent = formatNumber(snapshot.total);
-  totalSessionsElement.textContent = formatNumber(analytics.totalSessions);
-  totalClicksElement.textContent = formatNumber(analytics.totalClicks);
+  totalSessionsElement.textContent = formatNumber(filteredSessions);
+  totalClicksElement.textContent = formatNumber(filteredClicks);
   visitors30Element.textContent = formatNumber(analytics.visitorsLast30Minutes);
   const today = new Date().toISOString().slice(0, 10);
   const todayViews = analytics.dailyViews.find((item) => item.date === today)?.views || 0;
   todayViewsElement.textContent = formatNumber(todayViews);
-  pagesPerSessionElement.textContent = analytics.totalSessions
-    ? (analytics.totalViews / analytics.totalSessions).toFixed(1)
+  pagesPerSessionElement.textContent = filteredSessions
+    ? (filteredViews / filteredSessions).toFixed(1)
     : "0.0";
   const leader = analytics.topPages[0];
   topDestinationElement.textContent = leader ? pageLabel(leader.path) : "—";
@@ -236,12 +259,12 @@ function renderAnalytics(snapshot: PresenceSnapshot): void {
 
   if (!leader) {
     pageRankingElement.innerHTML = '<p class="empty-state">Waiting for the first page view…</p>';
-    return;
+  } else {
+    pageRankingElement.innerHTML = analytics.topPages.map((page, index) => {
+      const width = Math.max(4, Math.round((page.views / leader.views) * 100));
+      return `<div class="rank-row"><span class="rank-index">${String(index + 1).padStart(2, "0")}</span><div class="rank-data"><div><strong>${escapeHtml(pageLabel(page.path))}</strong><code>${escapeHtml(page.path)}</code><b>${formatNumber(page.views)}</b></div><span class="rank-track"><i style="width:${width}%"></i></span></div></div>`;
+    }).join("");
   }
-  pageRankingElement.innerHTML = analytics.topPages.map((page, index) => {
-    const width = Math.max(4, Math.round((page.views / leader.views) * 100));
-    return `<div class="rank-row"><span class="rank-index">${String(index + 1).padStart(2, "0")}</span><div class="rank-data"><div><strong>${escapeHtml(pageLabel(page.path))}</strong><code>${escapeHtml(page.path)}</code><b>${formatNumber(page.views)}</b></div><span class="rank-track"><i style="width:${width}%"></i></span></div></div>`;
-  }).join("");
 
   renderRankList(sourceListElement, analytics.topSources);
   renderRankList(deviceListElement, analytics.topDevices);
@@ -257,10 +280,30 @@ function renderAnalytics(snapshot: PresenceSnapshot): void {
     ? analytics.topClicks.map((item, index) => `<div class="click-row"><span>${String(index + 1).padStart(2, "0")}</span><div><strong>${escapeHtml(item.label)}</strong><code>${escapeHtml(item.path)}</code></div><b>${formatNumber(item.count)}</b></div>`).join("")
     : '<p class="empty-state">Button and link clicks will appear here.</p>';
 
-  sessionListElement.innerHTML = analytics.recentSessions.length
-    ? analytics.recentSessions.map((session) => `<div class="session-row"><span class="session-dot"></span><div><strong>${escapeHtml(pageLabel(session.path))}</strong><small>${escapeHtml(session.source)} · ${escapeHtml(session.device)}</small></div><div><b>${session.pageViews} pages</b><small>${session.clicks} clicks · ${relativeDate(session.lastSeenAt)}</small></div></div>`).join("")
+  const visibleSessions = cutoff
+    ? analytics.recentSessions.filter((session) => session.lastSeenAt.slice(0, 10) >= cutoff)
+    : analytics.recentSessions;
+  sessionListElement.innerHTML = visibleSessions.length
+    ? visibleSessions.map((session) => `<button type="button" class="session-row" data-session-id="${session.id}"><span class="session-dot"></span><div><strong>${escapeHtml(pageLabel(session.path))}</strong><small>${escapeHtml(session.source)} · ${escapeHtml(session.device)}</small></div><div><b>${session.pageViews} pages</b><small>${session.clicks} clicks · ${relativeDate(session.lastSeenAt)}</small></div></button>`).join("")
     : '<p class="empty-state">New visitor sessions will appear here.</p>';
-  renderTrend(analytics.dailyViews);
+  const trendItems = analytics.dailyViews.filter((item) => !cutoff || item.date >= cutoff);
+  renderTrend(trendItems);
+}
+
+function openSessionDetail(sessionId: string): void {
+  const session = latestSnapshot?.analytics.recentSessions.find((item) => item.id === sessionId);
+  if (!session) return;
+  const events = session.events || [];
+  sessionDetailContent.innerHTML = `<div class="session-facts"><div><span>Source</span><strong>${escapeHtml(session.source)}</strong></div><div><span>Device</span><strong>${escapeHtml(session.device)}</strong></div><div><span>Pages</span><strong>${session.pageViews}</strong></div><div><span>Clicks</span><strong>${session.clicks}</strong></div></div><div class="journey-timeline">${events.length ? events.map((event) => `<div class="journey-event journey-event--${event.type}"><i></i><div><span>${event.type === "click" ? "Click" : "Page view"} · ${new Date(event.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span><strong>${escapeHtml(event.type === "click" ? event.label || "Interaction" : pageLabel(event.path))}</strong><code>${escapeHtml(event.path)}</code></div></div>`).join("") : '<p class="empty-state">The detailed journey begins with the visitor’s next action.</p>'}</div>`;
+  sessionDetailElement.hidden = false;
+  sessionBackdrop.hidden = false;
+  document.body.classList.add("detail-open");
+}
+
+function closeSessionDetail(): void {
+  sessionDetailElement.hidden = true;
+  sessionBackdrop.hidden = true;
+  document.body.classList.remove("detail-open");
 }
 
 function renderRankList(element: HTMLElement, items: Array<{ label: string; count: number }>): void {
@@ -325,6 +368,7 @@ function isSnapshot(value: unknown): value is PresenceSnapshot {
     Array.isArray(data.analytics?.topDevices) &&
     Array.isArray(data.analytics?.topClicks) &&
     Array.isArray(data.analytics?.dailyViews) &&
+    Array.isArray(data.analytics?.dailyActivity) &&
     Array.isArray(data.analytics?.recentSessions) &&
     Boolean(data.counts) &&
     PRESENCE_SECTIONS.every(
@@ -401,6 +445,28 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && socket?.readyState !== WebSocket.OPEN) {
     connect();
   }
+});
+
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-range]")) {
+  button.addEventListener("click", () => {
+    const range = button.dataset.range;
+    if (range !== "today" && range !== "7" && range !== "30" && range !== "all") return;
+    selectedRange = range;
+    for (const item of document.querySelectorAll("[data-range]")) item.classList.toggle("is-active", item === button);
+    if (latestSnapshot) renderAnalytics(latestSnapshot);
+  });
+}
+
+sessionListElement.addEventListener("click", (event) => {
+  const target = event.target instanceof Element
+    ? event.target.closest<HTMLButtonElement>("[data-session-id]")
+    : null;
+  if (target?.dataset.sessionId) openSessionDetail(target.dataset.sessionId);
+});
+closeSessionDetailButton.addEventListener("click", closeSessionDetail);
+sessionBackdrop.addEventListener("click", closeSessionDetail);
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !sessionDetailElement.hidden) closeSessionDetail();
 });
 
 connect();

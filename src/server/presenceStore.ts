@@ -20,6 +20,12 @@ interface AnalyticsSession {
   lastSeenAt: string;
   pageViews: number;
   clicks: number;
+  events: Array<{
+    type: "pageview" | "click";
+    at: string;
+    path: string;
+    label?: string;
+  }>;
 }
 
 const TOUCH_SCRIPT = `
@@ -74,6 +80,8 @@ export class PresenceStore {
   private readonly devicesKey: string;
   private readonly clicksKey: string;
   private readonly dailyViewsKey: string;
+  private readonly dailySessionsKey: string;
+  private readonly dailyClicksKey: string;
   private readonly recentSessionsKey: string;
   private readonly sessionKeyPrefix: string;
   private cleanupTimer: NodeJS.Timeout | undefined;
@@ -97,6 +105,8 @@ export class PresenceStore {
     this.devicesKey = `${keyPrefix}:analytics:devices`;
     this.clicksKey = `${keyPrefix}:analytics:clicks`;
     this.dailyViewsKey = `${keyPrefix}:analytics:daily`;
+    this.dailySessionsKey = `${keyPrefix}:analytics:daily:sessions`;
+    this.dailyClicksKey = `${keyPrefix}:analytics:daily:clicks`;
     this.recentSessionsKey = `${keyPrefix}:analytics:recent`;
     this.sessionKeyPrefix = `${keyPrefix}:analytics:session:`;
 
@@ -159,6 +169,7 @@ export class PresenceStore {
       lastSeenAt: now.toISOString(),
       pageViews: 0,
       clicks: 0,
+      events: [],
     };
     const key = `${this.sessionKeyPrefix}${input.sessionId}`;
     const created = await this.client.set(key, JSON.stringify(session), {
@@ -170,6 +181,7 @@ export class PresenceStore {
       transaction.incr(this.totalSessionsKey);
       transaction.hIncrBy(this.sourcesKey, input.source, 1);
       transaction.hIncrBy(this.devicesKey, input.device, 1);
+      transaction.hIncrBy(this.dailySessionsKey, now.toISOString().slice(0, 10), 1);
     }
     transaction.zAdd(this.recentSessionsKey, { score: now.getTime(), value: input.sessionId });
     transaction.zRemRangeByRank(this.recentSessionsKey, 0, -101);
@@ -197,26 +209,30 @@ export class PresenceStore {
       path,
       lastSeenAt: new Date().toISOString(),
       pageViews: session.pageViews + 1,
+      events: [...(session.events || []), { type: "pageview" as const, at: new Date().toISOString(), path }].slice(-100),
     }));
   }
 
   async recordClick(connectionId: string, path: string, label: string): Promise<void> {
+    const now = new Date();
     const transaction = this.client.multi();
     transaction.incr(this.totalClicksKey);
     transaction.hIncrBy(this.clicksKey, `${path}\u001f${label}`, 1);
+    transaction.hIncrBy(this.dailyClicksKey, now.toISOString().slice(0, 10), 1);
     transaction.publish(this.channelKey, "changed");
     await transaction.exec();
     await this.updateSession(connectionId, (session) => ({
       ...session,
       path,
-      lastSeenAt: new Date().toISOString(),
+      lastSeenAt: now.toISOString(),
       clicks: session.clicks + 1,
+      events: [...(session.events || []), { type: "click" as const, at: now.toISOString(), path, label }].slice(-100),
     }));
   }
 
   async snapshot(): Promise<PresenceSnapshot> {
     await this.cleanupExpired();
-    const [values, totalViewsRaw, uniqueVisitors, pageViews, totalSessionsRaw, totalClicksRaw, sources, devices, clicks, dailyViews, recentIds, visitorsLast30Minutes] = await Promise.all([
+    const [values, totalViewsRaw, uniqueVisitors, pageViews, totalSessionsRaw, totalClicksRaw, sources, devices, clicks, dailyViews, dailySessions, dailyClicks, recentIds, visitorsLast30Minutes] = await Promise.all([
       this.client.hVals(this.recordsKey),
       this.client.get(this.totalViewsKey),
       this.client.pfCount(this.uniqueVisitorsKey),
@@ -227,6 +243,8 @@ export class PresenceStore {
       this.client.hGetAll(this.devicesKey),
       this.client.hGetAll(this.clicksKey),
       this.client.hGetAll(this.dailyViewsKey),
+      this.client.hGetAll(this.dailySessionsKey),
+      this.client.hGetAll(this.dailyClicksKey),
       this.client.zRange(this.recentSessionsKey, 0, 9, { REV: true }),
       this.client.zCount(this.recentSessionsKey, Date.now() - 30 * 60_000, "+inf"),
     ]);
@@ -276,6 +294,19 @@ export class PresenceStore {
           .map(([date, views]) => ({ date, views: Number(views) }))
           .sort((a, b) => a.date.localeCompare(b.date))
           .slice(-14),
+        dailyActivity: Array.from(new Set([
+          ...Object.keys(dailyViews),
+          ...Object.keys(dailySessions),
+          ...Object.keys(dailyClicks),
+        ]))
+          .sort((a, b) => a.localeCompare(b))
+          .slice(-30)
+          .map((date) => ({
+            date,
+            views: Number(dailyViews[date] || 0),
+            sessions: Number(dailySessions[date] || 0),
+            clicks: Number(dailyClicks[date] || 0),
+          })),
         recentSessions,
       },
     };
