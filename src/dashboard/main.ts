@@ -52,21 +52,21 @@ type DashboardSnapshot = Omit<PresenceSnapshot, "analytics"> & {
 };
 
 const sectionLabels: Record<PresenceSection, string> = {
-  HOME: "Home",
-  SHOP: "Shop",
-  PRODUCT: "Product",
-  CART: "Cart",
-  CHECKOUT: "Checkout",
-  OTHER: "Other",
+  HOME: "Inicio",
+  SHOP: "Tienda",
+  PRODUCT: "Producto",
+  CART: "Carrito",
+  CHECKOUT: "Pago",
+  OTHER: "Otras",
 };
 
 const sectionDescriptions: Record<PresenceSection, string> = {
-  HOME: "Landing experience",
-  SHOP: "Catalog browsing",
-  PRODUCT: "Product detail",
-  CART: "Cart drawer open",
-  CHECKOUT: "Order flow",
-  OTHER: "Supporting pages",
+  HOME: "Página principal",
+  SHOP: "Viendo el catálogo",
+  PRODUCT: "Detalle de producto",
+  CART: "Carrito abierto",
+  CHECKOUT: "Proceso de compra",
+  OTHER: "Otras páginas",
 };
 
 function requiredElement<T extends HTMLElement>(selector: string): T {
@@ -204,7 +204,7 @@ function pulseCard(
     card.classList.add(
       section === "CHECKOUT" ? "is-entering-checkout" : "is-entering",
     );
-    announcement.textContent = `${sectionLabels[section]} increased from ${previous} to ${current}`;
+    announcement.textContent = `${sectionLabels[section]} aumentó de ${previous} a ${current}`;
   } else {
     card.classList.add("is-leaving");
   }
@@ -222,7 +222,7 @@ function pulseCard(
 function applySnapshot(snapshot: DashboardSnapshot): void {
   const firstSnapshot = !hasSnapshot;
   hasSnapshot = true;
-  setConnectionState("live", "Live");
+  setConnectionState("live", "En vivo");
   reconnectAttempt = 0;
   lastUpdatedAt = Date.parse(snapshot.serverTime) || Date.now();
   latestSnapshot = snapshot;
@@ -251,7 +251,15 @@ function applySnapshot(snapshot: DashboardSnapshot): void {
 }
 
 function pageLabel(path: string): string {
-  if (path === "/") return "Home";
+  if (path === "/") return "Inicio";
+  const translations: Record<string, string> = {
+    shop: "Tienda",
+    product: "Producto",
+    checkout: "Pago",
+    cart: "Carrito",
+    account: "Cuenta",
+    "thank you": "Confirmación",
+  };
   return path
     .replace(/^\//, "")
     .replace(/\/$/, "")
@@ -263,12 +271,21 @@ function pageLabel(path: string): string {
         return part.replace(/[-_]+/g, " ");
       }
     })
-    .map((part) => part.replace(/\b\w/g, (letter) => letter.toUpperCase()))
+    .map((part) => translations[part.toLowerCase()] || part.replace(/\b\w/g, (letter) => letter.toUpperCase()))
     .join(" / ");
 }
 
 function formatNumber(value: number): string {
-  return new Intl.NumberFormat("en-US").format(value);
+  return new Intl.NumberFormat("es-CO").format(value);
+}
+
+function displayLabel(value: string): string {
+  return ({
+    Direct: "Directo",
+    Mobile: "Móvil",
+    Tablet: "Tableta",
+    Desktop: "Computador",
+  } as Record<string, string>)[value] || value;
 }
 
 function dateKey(
@@ -392,26 +409,26 @@ function renderSessionRow(session: DashboardSession): string {
   const visitorNumber = session.visitorNumber;
   const visitNumber = session.visitNumber ?? 1;
   const identity = visitorNumber
-    ? `Visitor #${visitorNumber} · Visit ${visitNumber}`
+    ? `Persona #${visitorNumber} · Visita ${visitNumber}`
     : session.number
-      ? `Session #${session.number} · Visit ${visitNumber}`
-      : `Anonymous visitor · Visit ${visitNumber}`;
+      ? `Sesión #${session.number} · Visita ${visitNumber}`
+      : `Persona anónima · Visita ${visitNumber}`;
   const returning = isReturningSession(session);
   const completedOrder = sessionHasCompletedOrder(session);
   const badges = [
     returning
-      ? '<span class="session-badge session-badge--returning">Returning</span>'
+      ? '<span class="session-badge session-badge--returning">Regresó</span>'
       : "",
     completedOrder
-      ? '<span class="session-badge session-badge--order">Order completed</span>'
+      ? '<span class="session-badge session-badge--order">Compró</span>'
       : "",
   ].join("");
   const accessibilityStatus = [
-    returning ? "returning visitor" : "new visitor",
-    completedOrder ? "order completed" : "no completed order",
+    returning ? "persona que regresó" : "persona nueva",
+    completedOrder ? "orden completada" : "sin orden completada",
   ].join(", ");
 
-  return `<button type="button" class="session-row${completedOrder ? " has-order" : ""}" data-session-id="${escapeHtml(session.id)}" aria-haspopup="dialog" aria-controls="session-detail" aria-label="Open ${escapeHtml(identity)}, ${accessibilityStatus}"><span class="session-dot" aria-hidden="true"></span><div class="session-row-main"><div class="session-row-heading"><strong>${escapeHtml(identity)}</strong><span class="session-badges">${badges}</span></div><small>${escapeHtml(session.source)} · ${escapeHtml(session.device)} · ${escapeHtml(pageLabel(session.path))}</small><div class="session-row-meta"><b>${formatNumber(session.pageViews)} page${session.pageViews === 1 ? "" : "s"}</b><small>${formatNumber(session.clicks)} click${session.clicks === 1 ? "" : "s"} · ${relativeDate(session.lastSeenAt)}</small></div></div></button>`;
+  return `<button type="button" class="session-row${completedOrder ? " has-order" : ""}" data-session-id="${escapeHtml(session.id)}" aria-haspopup="dialog" aria-controls="session-detail" aria-label="Abrir ${escapeHtml(identity)}, ${accessibilityStatus}"><span class="session-dot" aria-hidden="true"></span><div class="session-row-main"><div class="session-row-heading"><strong>${escapeHtml(identity)}</strong><span class="session-badges">${badges}</span></div><small>${escapeHtml(displayLabel(session.source))} · ${escapeHtml(displayLabel(session.device))} · ${escapeHtml(pageLabel(session.path))}</small><div class="session-row-meta"><b>${formatNumber(session.pageViews)} página${session.pageViews === 1 ? "" : "s"}</b><small>${formatNumber(session.clicks)} clic${session.clicks === 1 ? "" : "s"} · ${relativeDate(session.lastSeenAt)}</small></div></div></button>`;
 }
 
 function renderAnalytics(snapshot: DashboardSnapshot): void {
@@ -487,7 +504,7 @@ function renderAnalytics(snapshot: DashboardSnapshot): void {
   const leader = filteredPages[0];
 
   if (!leader) {
-    pageRankingElement.innerHTML = '<p class="empty-state">Waiting for the first page view…</p>';
+    pageRankingElement.innerHTML = '<p class="empty-state">Aún no hay páginas vistas en este periodo.</p>';
   } else {
     pageRankingElement.innerHTML = filteredPages.map((page, index) => {
       const width = Math.max(4, Math.round((page.views / leader.views) * 100));
@@ -519,9 +536,9 @@ function renderAnalytics(snapshot: DashboardSnapshot): void {
   );
   sessionListElement.innerHTML = pageSessions.length
     ? pageSessions.map(renderSessionRow).join("")
-    : '<p class="empty-state">New visitor visits will appear here.</p>';
+    : '<p class="empty-state">Las visitas nuevas aparecerán aquí.</p>';
   sessionPagination.hidden = visibleSessions.length <= SESSION_PAGE_SIZE;
-  sessionsPage.textContent = `Page ${sessionPage} of ${sessionPageCount}`;
+  sessionsPage.textContent = `Página ${sessionPage} de ${sessionPageCount}`;
   sessionsPrevious.disabled = sessionPage <= 1;
   sessionsNext.disabled = sessionPage >= sessionPageCount;
   const trendItems = dailyVisitorSeries(analytics).filter(
@@ -531,21 +548,21 @@ function renderAnalytics(snapshot: DashboardSnapshot): void {
 }
 
 function renderJourneyEvent(event: DashboardEvent, index: number): string {
-  const time = new Date(event.at).toLocaleTimeString([], {
+  const time = new Date(event.at).toLocaleTimeString("es-CO", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
   });
   const paidOrder = event.type === "order" && event.status === "paid";
   const action = event.type === "order"
-    ? paidOrder ? "Order completed" : "Order event"
+    ? paidOrder ? "Orden completada" : "Evento de orden"
     : event.type === "click"
-      ? "Clicked"
-      : "Visited";
+      ? "Hizo clic"
+      : "Visitó";
   const detail = event.type === "order"
-    ? paidOrder ? "Paid order" : "Order status unavailable"
+    ? paidOrder ? "Pago confirmado" : "Estado de orden no disponible"
     : event.type === "click"
-      ? event.label || "Interaction"
+      ? event.label || "Interacción"
       : pageLabel(event.path);
   const icon = paidOrder ? "✓" : event.type === "order" ? "•" : String(index + 1);
   const eventClass = paidOrder
@@ -574,32 +591,32 @@ function openSessionDetail(sessionId: string): void {
   const earlierPageViews = Math.max(0, session.pageViews - detailedPageViews);
   const earlierClicks = Math.max(0, session.clicks - detailedClicks);
   sessionDetailTitle.textContent = visitorNumber
-    ? `Visitor #${visitorNumber} · Visit ${visitNumber}`
+    ? `Persona #${visitorNumber} · Visita ${visitNumber}`
     : session.number
-      ? `Session #${session.number} · Visit ${visitNumber}`
-      : `Anonymous visitor · Visit ${visitNumber}`;
+      ? `Sesión #${session.number} · Visita ${visitNumber}`
+      : `Persona anónima · Visita ${visitNumber}`;
   const durationMs = Math.max(0, Date.parse(session.lastSeenAt) - Date.parse(session.startedAt));
   const durationLabel = durationMs < 60_000 ? `${Math.floor(durationMs / 1_000)}s` : `${Math.floor(durationMs / 60_000)}m ${Math.floor((durationMs % 60_000) / 1_000)}s`;
   const summaryEvents = [
     earlierPageViews
-      ? `<div class="journey-event journey-event--summary"><i>↗</i><div><span>Earlier page activity</span><strong>${earlierPageViews} page view${earlierPageViews === 1 ? "" : "s"}</strong><code>Last known page: ${escapeHtml(session.path)}</code></div></div>`
+      ? `<div class="journey-event journey-event--summary"><i>↗</i><div><span>Actividad anterior</span><strong>${earlierPageViews} página${earlierPageViews === 1 ? "" : "s"} vista${earlierPageViews === 1 ? "" : "s"}</strong><code>Última página: ${escapeHtml(session.path)}</code></div></div>`
       : "",
     earlierClicks
-      ? `<div class="journey-event journey-event--summary"><i>+</i><div><span>Earlier interaction activity</span><strong>${earlierClicks} click${earlierClicks === 1 ? "" : "s"}</strong><code>Count preserved for this visit</code></div></div>`
+      ? `<div class="journey-event journey-event--summary"><i>+</i><div><span>Interacciones anteriores</span><strong>${earlierClicks} clic${earlierClicks === 1 ? "" : "s"}</strong><code>Conteo conservado para esta visita</code></div></div>`
       : "",
   ].join("");
   const detailedEvents = events.map(renderJourneyEvent).join("");
   const inferredOrderEvent = completedOrder && !detailedOrder
-    ? `<div class="journey-event journey-event--order"><i>✓</i><div><span>Order completed${orderCompletedAt ? ` · ${new Date(orderCompletedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}</span><strong>Paid order</strong><code>Checkout confirmation</code></div></div>`
+    ? `<div class="journey-event journey-event--order"><i>✓</i><div><span>Orden completada${orderCompletedAt ? ` · ${new Date(orderCompletedAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}</span><strong>Pago confirmado</strong><code>Confirmación de compra</code></div></div>`
     : "";
   const journey = summaryEvents || detailedEvents || inferredOrderEvent
     ? `${summaryEvents}${detailedEvents}${inferredOrderEvent}`
-    : `<div class="journey-event journey-event--summary"><i>•</i><div><span>Visit activity</span><strong>${escapeHtml(pageLabel(session.path))}</strong><code>${escapeHtml(session.path)}</code></div></div>`;
+    : `<div class="journey-event journey-event--summary"><i>•</i><div><span>Actividad de la visita</span><strong>${escapeHtml(pageLabel(session.path))}</strong><code>${escapeHtml(session.path)}</code></div></div>`;
   const totalActions = session.pageViews + session.clicks + (completedOrder ? 1 : 0);
   const conversionBanner = completedOrder
-    ? `<section class="conversion-banner" aria-label="Order conversion"><span aria-hidden="true">✓</span><div><strong>Order completed</strong><small>${orderCompletedAt ? `Confirmed ${new Date(orderCompletedAt).toLocaleString()}` : "Confirmed during this visit"}</small></div></section>`
+    ? `<section class="conversion-banner" aria-label="Conversión de orden"><span aria-hidden="true">✓</span><div><strong>Orden completada</strong><small>${orderCompletedAt ? `Confirmada ${new Date(orderCompletedAt).toLocaleString("es-CO")}` : "Confirmada durante esta visita"}</small></div></section>`
     : "";
-  sessionDetailContent.innerHTML = `<div class="session-status"><i></i><span>Last interaction ${relativeDate(session.lastSeenAt)} · visit started ${new Date(session.startedAt).toLocaleString()}</span></div>${conversionBanner}<div class="session-facts"><div><span>Visitor</span><strong>${visitorNumber ? `#${visitorNumber}` : "Anonymous"}</strong></div><div><span>Visit</span><strong>#${visitNumber}</strong></div><div><span>Visitor type</span><strong>${returning ? "Returning" : "New"}</strong></div><div><span>Order</span><strong>${completedOrder ? "Completed" : "Not completed"}</strong></div><div><span>Source</span><strong>${escapeHtml(session.source)}</strong></div><div><span>Device</span><strong>${escapeHtml(session.device)}</strong></div><div><span>Duration</span><strong>${durationLabel}</strong></div><div><span>Activity</span><strong>${formatNumber(session.pageViews)} page views · ${formatNumber(session.clicks)} clicks</strong></div></div><section class="journey-panel"><div class="journey-heading"><span>Complete visit journey</span><b>${formatNumber(totalActions)} action${totalActions === 1 ? "" : "s"}</b></div><div class="journey-timeline">${journey}</div></section>`;
+  sessionDetailContent.innerHTML = `<div class="session-status"><i></i><span>Última interacción ${relativeDate(session.lastSeenAt)} · inició ${new Date(session.startedAt).toLocaleString("es-CO")}</span></div>${conversionBanner}<div class="session-facts"><div><span>Persona</span><strong>${visitorNumber ? `#${visitorNumber}` : "Anónima"}</strong></div><div><span>Visita</span><strong>#${visitNumber}</strong></div><div><span>Tipo</span><strong>${returning ? "Regresó" : "Nueva"}</strong></div><div><span>Orden</span><strong>${completedOrder ? "Completada" : "Sin completar"}</strong></div><div><span>Origen</span><strong>${escapeHtml(displayLabel(session.source))}</strong></div><div><span>Dispositivo</span><strong>${escapeHtml(displayLabel(session.device))}</strong></div><div><span>Duración</span><strong>${durationLabel}</strong></div><div><span>Actividad</span><strong>${formatNumber(session.pageViews)} páginas · ${formatNumber(session.clicks)} clics</strong></div></div><section class="journey-panel"><div class="journey-heading"><span>Recorrido completo</span><b>${formatNumber(totalActions)} acción${totalActions === 1 ? "" : "es"}</b></div><div class="journey-timeline">${journey}</div></section>`;
   sessionDetailElement.hidden = false;
   sessionBackdrop.hidden = false;
   setBackgroundInert(true);
@@ -636,25 +653,25 @@ function setBackgroundInert(inert: boolean): void {
 function renderRankList(element: HTMLElement, items: Array<{ label: string; count: number }>): void {
   const maximum = items[0]?.count || 1;
   element.innerHTML = items.length
-    ? items.map((item) => `<div class="insight-row"><div><strong>${escapeHtml(item.label)}</strong><b>${formatNumber(item.count)}</b></div><span><i style="width:${Math.max(4, Math.round((item.count / maximum) * 100))}%"></i></span></div>`).join("")
-    : '<p class="empty-state">Waiting for visitor data.</p>';
+    ? items.map((item) => `<div class="insight-row"><div><strong>${escapeHtml(displayLabel(item.label))}</strong><b>${formatNumber(item.count)}</b></div><span><i style="width:${Math.max(4, Math.round((item.count / maximum) * 100))}%"></i></span></div>`).join("")
+    : '<p class="empty-state">Aún no hay datos para mostrar.</p>';
 }
 
 function relativeDate(value: string): string {
   const minutes = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 60_000));
-  if (minutes < 1) return "now";
-  if (minutes < 60) return `${minutes}m ago`;
-  if (minutes < 1440) return `${Math.floor(minutes / 60)}h ago`;
-  return `${Math.floor(minutes / 1440)}d ago`;
+  if (minutes < 1) return "ahora";
+  if (minutes < 60) return `hace ${minutes} min`;
+  if (minutes < 1440) return `hace ${Math.floor(minutes / 60)} h`;
+  return `hace ${Math.floor(minutes / 1440)} d`;
 }
 
 function renderTrend(items: Array<{ date: string; visitors: number }>): void {
   const peak = Math.max(...items.map((item) => item.visitors), 0);
   trendTotalElement.textContent = selectedRange === "all"
-    ? `Last 30 days · Peak ${formatNumber(peak)} / day`
-    : `Peak ${formatNumber(peak)} / day`;
+    ? `Últimos 30 días · Máximo ${formatNumber(peak)}`
+    : `Máximo ${formatNumber(peak)} por día`;
   if (!items.length || peak === 0) {
-    trendChartElement.innerHTML = '<p class="empty-state">The trend begins with the next unique visitor.</p>';
+    trendChartElement.innerHTML = '<p class="empty-state">La gráfica comenzará con la próxima persona que visite la tienda.</p>';
     return;
   }
   const max = Math.max(...items.map((item) => item.visitors), 1);
@@ -670,7 +687,7 @@ function renderTrend(items: Array<{ date: string; visitors: number }>): void {
   const labels = items.filter(
     (_item, index) => index === 0 || index === items.length - 1 || index % labelStep === 0,
   );
-  trendChartElement.innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Daily unique visitors. ${accessibleSummary}"><defs><linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1688ff" stop-opacity=".35"/><stop offset="1" stop-color="#1688ff" stop-opacity="0"/></linearGradient></defs><polygon points="0,100 ${points} 100,100" fill="url(#trend-fill)"/><polyline points="${points}" fill="none" stroke="#42a4ff" stroke-width="2" vector-effect="non-scaling-stroke"/></svg><div class="trend-labels">${labels.map((item) => `<span title="${item.date}: ${formatNumber(item.visitors)} unique visitors">${item.date.slice(5)}</span>`).join("")}</div>`;
+  trendChartElement.innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Personas diferentes por día. ${accessibleSummary}"><defs><linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4d9cff" stop-opacity=".3"/><stop offset="1" stop-color="#4d9cff" stop-opacity="0"/></linearGradient></defs><polygon points="0,100 ${points} 100,100" fill="url(#trend-fill)"/><polyline points="${points}" fill="none" stroke="#64adff" stroke-width="2" vector-effect="non-scaling-stroke"/></svg><div class="trend-labels">${labels.map((item) => `<span title="${item.date}: ${formatNumber(item.visitors)} personas diferentes">${item.date.slice(5)}</span>`).join("")}</div>`;
 }
 
 function updateRelativeTime(): void {
@@ -678,10 +695,10 @@ function updateRelativeTime(): void {
   const seconds = Math.max(0, Math.floor((Date.now() - lastUpdatedAt) / 1_000));
   const label =
     seconds < 5
-      ? "Just now"
+      ? "Ahora"
       : seconds < 60
-        ? `${seconds}s ago`
-        : `${Math.floor(seconds / 60)}m ago`;
+        ? `Hace ${seconds} s`
+        : `Hace ${Math.floor(seconds / 60)} min`;
   updatedElement.textContent = label;
   footerUpdated.textContent = label;
 }
@@ -837,7 +854,7 @@ async function sessionStillValid(): Promise<boolean> {
 
 function scheduleReconnect(): void {
   if (reconnectTimer) return;
-  setConnectionState("reconnecting", "Reconnecting");
+  setConnectionState("reconnecting", "Reconectando");
   const baseDelay = Math.min(15_000, 750 * 2 ** reconnectAttempt);
   const jitter = Math.floor(Math.random() * 350);
   reconnectAttempt += 1;
@@ -851,12 +868,12 @@ function connect(): void {
   if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) {
     return;
   }
-  setConnectionState(hasSnapshot ? "reconnecting" : "connecting", hasSnapshot ? "Reconnecting" : "Connecting");
+  setConnectionState(hasSnapshot ? "reconnecting" : "connecting", hasSnapshot ? "Reconectando" : "Conectando");
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   socket = new WebSocket(`${protocol}//${location.host}/ws/dashboard`);
 
   socket.addEventListener("open", () => {
-    setConnectionState("connecting", "Syncing");
+    setConnectionState("connecting", "Sincronizando");
   });
 
   socket.addEventListener("message", (event) => {
@@ -880,13 +897,13 @@ function connect(): void {
   });
 
   socket.addEventListener("error", () => {
-    setConnectionState("offline", "Interrupted");
+    setConnectionState("offline", "Interrumpido");
   });
 }
 
 window.setInterval(updateRelativeTime, 1_000);
 window.addEventListener("online", connect);
-window.addEventListener("offline", () => setConnectionState("offline", "Offline"));
+window.addEventListener("offline", () => setConnectionState("offline", "Sin conexión"));
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && socket?.readyState !== WebSocket.OPEN) {
     connect();
@@ -900,10 +917,10 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-range]"
     selectedRange = range;
     sessionPage = 1;
     activeRangeLabel.textContent = {
-      today: "Today",
-      "7": "Last 7 days",
-      "30": "Last 30 days",
-      all: "All tracked time",
+      today: "Hoy",
+      "7": "Últimos 7 días",
+      "30": "Últimos 30 días",
+      all: "Todo el historial",
     }[range];
     for (const item of document.querySelectorAll<HTMLButtonElement>("[data-range]")) {
       const selected = item === button;
