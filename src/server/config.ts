@@ -1,3 +1,8 @@
+import {
+  DEFAULT_ANALYTICS_TIME_ZONE,
+  validateTimeZone,
+} from "./analyticsDate.js";
+
 const DEFAULT_TRACKER_ORIGINS = [
   "https://phaseonelabz.com",
   "https://www.phaseonelabz.com",
@@ -14,9 +19,11 @@ export interface AppConfig {
   monitorUsername: string;
   monitorPasswordHash: string;
   sessionSecret: string;
+  analyticsHmacSecret: string;
   sessionTtlMs: number;
   cookieSecure: boolean;
   trustProxy: boolean;
+  analyticsTimeZone: string;
 }
 
 function requireValue(name: string): string {
@@ -57,9 +64,13 @@ export function loadConfig(): AppConfig {
     .filter(Boolean)
     .map(normalizeOrigin);
   const sessionSecret = requireValue("SESSION_SECRET");
+  const analyticsHmacSecret = requireValue("ANALYTICS_HMAC_SECRET");
 
   if (sessionSecret.length < 32) {
     throw new Error("SESSION_SECRET must contain at least 32 characters");
+  }
+  if (analyticsHmacSecret.length < 32) {
+    throw new Error("ANALYTICS_HMAC_SECRET must contain at least 32 characters");
   }
 
   return {
@@ -74,10 +85,14 @@ export function loadConfig(): AppConfig {
     monitorUsername: requireValue("MONITOR_USERNAME"),
     monitorPasswordHash: requireValue("MONITOR_PASSWORD_HASH"),
     sessionSecret,
+    analyticsHmacSecret,
     sessionTtlMs: parsePositiveInt("SESSION_TTL_HOURS", 12) * 60 * 60 * 1_000,
     cookieSecure:
       process.env.COOKIE_SECURE?.trim().toLowerCase() !== "false" &&
       nodeEnv === "production",
     trustProxy: process.env.TRUST_PROXY?.trim().toLowerCase() === "true",
+    analyticsTimeZone: validateTimeZone(
+      process.env.ANALYTICS_TIME_ZONE?.trim() || DEFAULT_ANALYTICS_TIME_ZONE,
+    ),
   };
 }

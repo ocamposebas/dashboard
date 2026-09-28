@@ -17,20 +17,42 @@ export interface PresenceSnapshot {
   total: number;
   serverTime: string;
   analytics: {
+    timeZone: string;
     totalViews: number;
     uniqueVisitors: number;
+    returningVisitors: number;
     totalSessions: number;
+    returningSessions: number;
     totalClicks: number;
+    totalOrders: number;
     visitorsLast30Minutes: number;
+    visitorRanges: {
+      today: number;
+      last7Days: number;
+      last30Days: number;
+      all: number;
+    };
     topPages: Array<{ path: string; views: number }>;
     topSources: Array<{ label: string; count: number }>;
     topDevices: Array<{ label: string; count: number }>;
     topClicks: Array<{ label: string; path: string; count: number }>;
     dailyViews: Array<{ date: string; views: number }>;
-    dailyActivity: Array<{ date: string; views: number; sessions: number; clicks: number }>;
+    dailyVisitors: Array<{ date: string; visitors: number }>;
+    dailyActivity: Array<{
+      date: string;
+      views: number;
+      visitors: number;
+      sessions: number;
+      returningSessions: number;
+      clicks: number;
+      orders: number;
+    }>;
     recentSessions: Array<{
       id: string;
       number: number;
+      visitorNumber: number;
+      visitNumber: number;
+      returningVisitor: boolean;
       source: string;
       device: string;
       path: string;
@@ -38,11 +60,14 @@ export interface PresenceSnapshot {
       lastSeenAt: string;
       pageViews: number;
       clicks: number;
+      orderCompleted: boolean;
+      orderCompletedAt?: string;
       events: Array<{
-        type: "pageview" | "click";
+        type: "pageview" | "click" | "order";
         at: string;
         path: string;
         label?: string;
+        status?: "paid";
       }>;
     }>;
   };

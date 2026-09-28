@@ -13,7 +13,9 @@ services:
       MONITOR_USERNAME: ${MONITOR_USERNAME:?Set the private monitor username}
       MONITOR_PASSWORD_HASH: ${MONITOR_PASSWORD_HASH:?Set a scrypt password hash}
       SESSION_SECRET: ${SESSION_SECRET:?Set a random secret with at least 32 characters}
+      ANALYTICS_HMAC_SECRET: ${ANALYTICS_HMAC_SECRET:?Set a stable random analytics secret with at least 32 characters}
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-12}
+      ANALYTICS_TIME_ZONE: ${ANALYTICS_TIME_ZONE:-America/Bogota}
       COOKIE_SECURE: "true"
       TRUST_PROXY: "true"
     depends_on:

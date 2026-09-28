@@ -65,11 +65,11 @@
               class="range-filter"
               aria-label="Analytics date range"
             >
-              <button type="button" data-range="today">
+              <button type="button" data-range="today" aria-pressed="false">
                 Today
               </button>
 
-              <button type="button" data-range="7">
+              <button type="button" data-range="7" aria-pressed="false">
                 7D
               </button>
 
@@ -77,11 +77,12 @@
                 type="button"
                 data-range="30"
                 class="is-active"
+                aria-pressed="true"
               >
                 30D
               </button>
 
-              <button type="button" data-range="all">
+              <button type="button" data-range="all" aria-pressed="false">
                 All time
               </button>
             </div>
@@ -147,7 +148,7 @@
                 <section class="flat-section">
                   <div class="section-title">
                     <h2>Traffic source</h2>
-                    <span>Sessions</span>
+                  <span>Visits</span>
                   </div>
 
                   <div
@@ -160,7 +161,7 @@
                 <section class="flat-section">
                   <div class="section-title">
                     <h2>Device</h2>
-                    <span>Sessions</span>
+                  <span>Visits</span>
                   </div>
 
                   <div class="device-layout">
@@ -195,22 +196,22 @@
 
                 <div>
                   <span>
-                    Page views
-                    <strong id="today-views">
+                    Unique visitors
+                    <strong id="today-visitors">
                       —
                     </strong>
                   </span>
 
                   <span>
-                    Online
-                    <strong id="online-summary">
+                    Visits
+                    <strong id="today-visits">
                       —
                     </strong>
                   </span>
 
                   <span>
-                    Clicks
-                    <strong id="total-clicks">
+                    Orders
+                    <strong id="today-orders">
                       —
                     </strong>
                   </span>
@@ -222,7 +223,7 @@
 
                 <div class="section-title">
                   <h2>
-                    Recent sessions
+                    Recent visits
                   </h2>
 
                   <span>
@@ -243,7 +244,7 @@
                   <button
                     type="button"
                     id="sessions-previous"
-                    aria-label="Previous sessions"
+                    aria-label="Previous visits"
                   >
                     ←
                   </button>
@@ -255,7 +256,7 @@
                   <button
                     type="button"
                     id="sessions-next"
-                    aria-label="Next sessions"
+                    aria-label="Next visits"
                   >
                     →
                   </button>
@@ -277,16 +278,16 @@
           <div class="behavior-heading">
             <div>
               <p class="eyebrow">
-                Last 14 days
+                Selected date range
               </p>
 
               <h2>
-                Behavior overview
+                Audience overview
               </h2>
             </div>
 
             <span>
-              Compared to all tracked activity
+              Unique and returning activity
             </span>
           </div>
 
@@ -295,10 +296,10 @@
 
             <div>
               <span>
-                Total sessions
+                Unique visitors
               </span>
 
-              <strong id="total-sessions">
+              <strong id="unique-visitors">
                 —
               </strong>
             </div>
@@ -306,10 +307,21 @@
 
             <div>
               <span>
-                Unique visitors
+                Returning visits
               </span>
 
-              <strong id="unique-visitors">
+              <strong id="returning-visits">
+                —
+              </strong>
+            </div>
+
+
+            <div>
+              <span>
+                Total visits
+              </span>
+
+              <strong id="total-visits">
                 —
               </strong>
             </div>
@@ -328,30 +340,12 @@
 
             <div>
               <span>
-                Pages / session
+                Orders
               </span>
 
-              <strong id="pages-per-session">
+              <strong id="total-orders">
                 —
               </strong>
-            </div>
-
-
-            <div>
-              <span>
-                Top destination
-              </span>
-
-              <strong
-                class="summary-text"
-                id="top-destination"
-              >
-                —
-              </strong>
-
-              <small id="top-destination-views">
-                Waiting for traffic
-              </small>
             </div>
 
           </div>
@@ -363,11 +357,11 @@
           >
             <div class="section-title">
               <h2>
-                Sessions over time
+                Daily unique visitors
               </h2>
 
               <strong id="trend-total">
-                0 views
+                Peak 0 / day
               </strong>
             </div>
 
@@ -393,7 +387,7 @@
               </h2>
 
               <span>
-                All time
+                Selected range
               </span>
             </div>
 
@@ -415,6 +409,8 @@
         <aside
           class="session-detail"
           id="session-detail"
+          role="dialog"
+          aria-modal="true"
           aria-labelledby="session-detail-title"
           hidden
         >
@@ -425,7 +421,7 @@
               </p>
 
               <h2 id="session-detail-title">
-                Session details
+                Visit details
               </h2>
             </div>
 
@@ -447,6 +443,8 @@
           id="session-backdrop"
           type="button"
           aria-label="Close session details"
+          aria-hidden="true"
+          tabindex="-1"
           hidden
         ></button>
 

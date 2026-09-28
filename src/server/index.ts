@@ -8,6 +8,7 @@ const store = new PresenceStore(
   config.redisUrl,
   config.redisKeyPrefix,
   config.presenceTtlMs,
+  config.analyticsTimeZone,
 );
 const server = createMonitorServer(config, store);
 const hub = new SocketHub(config, store);

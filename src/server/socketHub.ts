@@ -1,4 +1,5 @@
 import type { IncomingMessage, Server as HttpServer } from "node:http";
+import { createHmac } from "node:crypto";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { isPresenceSection, type PresenceSection } from "../shared/protocol.js";
 import type { AppConfig } from "./config.js";
@@ -11,6 +12,8 @@ const MAX_CONNECTIONS_PER_MINUTE = 120;
 
 interface TrackerState {
   visitorId: string;
+  analyticsVisitorId: string;
+  sessionId: string;
   connectionId: string;
   section: PresenceSection;
   path: string;
@@ -19,11 +22,33 @@ interface TrackerState {
 }
 
 function validPagePath(value: unknown): value is string {
-  return typeof value === "string" && value.startsWith("/") && value.length <= 240 && !value.includes("?");
+  if (
+    typeof value !== "string" ||
+    !value.startsWith("/") ||
+    value.length > 240 ||
+    value.includes("?")
+  ) {
+    return false;
+  }
+  try {
+    decodeURI(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function validLabel(value: unknown, max = 80): value is string {
   return typeof value === "string" && value.trim().length > 0 && value.length <= max;
+}
+
+function validOrderReference(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 1 &&
+    value.length <= 128 &&
+    /^[a-z0-9._:-]+$/i.test(value)
+  );
 }
 
 function validDevice(value: unknown): value is "Mobile" | "Tablet" | "Desktop" {
@@ -103,8 +128,11 @@ export class SocketHub {
   private readonly dashboardSockets = new Set<LiveSocket>();
   private readonly rateEntries = new Map<string, RateEntry>();
   private heartbeatTimer: NodeJS.Timeout | undefined;
+  private periodicSnapshotTimer: NodeJS.Timeout | undefined;
   private snapshotTimer: NodeJS.Timeout | undefined;
+  private snapshotOperation: Promise<void> = Promise.resolve();
   private lastSnapshotSignature = "";
+  private closing = false;
 
   constructor(
     private readonly config: AppConfig,
@@ -164,19 +192,26 @@ export class SocketHub {
 
     this.heartbeatTimer = setInterval(() => this.heartbeatSockets(), 25_000);
     this.heartbeatTimer.unref();
+    this.periodicSnapshotTimer = setInterval(() => {
+      void this.broadcastSnapshot(false);
+    }, 60_000);
+    this.periodicSnapshotTimer.unref();
   }
 
   async close(): Promise<void> {
+    this.closing = true;
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    if (this.periodicSnapshotTimer) clearInterval(this.periodicSnapshotTimer);
     if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
     for (const socket of this.dashboardSockets) socket.close(1001, "Shutdown");
     for (const socket of this.trackerServer.clients) socket.close(1001, "Shutdown");
     this.trackerServer.close();
     this.dashboardServer.close();
+    await this.snapshotOperation.catch(() => undefined);
   }
 
   scheduleSnapshot(): void {
-    if (this.snapshotTimer) return;
+    if (this.closing || this.snapshotTimer) return;
     this.snapshotTimer = setTimeout(() => {
       this.snapshotTimer = undefined;
       void this.broadcastSnapshot(false);
@@ -188,6 +223,7 @@ export class SocketHub {
     let state: TrackerState | undefined;
     let messageWindowStartedAt = Date.now();
     let messageCount = 0;
+    let messageQueue = Promise.resolve();
     const helloTimeout = setTimeout(() => socket.close(4400, "Hello required"), 5_000);
 
     socket.on("pong", () => {
@@ -206,7 +242,7 @@ export class SocketHub {
         return;
       }
 
-      void (async () => {
+      messageQueue = messageQueue.then(async () => {
         let message: unknown;
         try {
           message = parseMessage(data);
@@ -228,6 +264,9 @@ export class SocketHub {
             typeof payload.connectionId !== "string" ||
             !VISITOR_ID_PATTERN.test(payload.visitorId) ||
             !CONNECTION_ID_PATTERN.test(payload.connectionId) ||
+            (payload.sessionId !== undefined &&
+              (typeof payload.sessionId !== "string" ||
+                !CONNECTION_ID_PATTERN.test(payload.sessionId))) ||
             !isPresenceSection(payload.section) ||
             !validPagePath(payload.path) ||
             !validLabel(payload.source) ||
@@ -238,6 +277,11 @@ export class SocketHub {
           }
           state = {
             visitorId: payload.visitorId,
+            analyticsVisitorId: this.anonymize("visitor", payload.visitorId),
+            sessionId:
+              typeof payload.sessionId === "string"
+                ? payload.sessionId
+                : payload.visitorId,
             connectionId: payload.connectionId,
             section: payload.section,
             path: payload.path,
@@ -247,20 +291,25 @@ export class SocketHub {
           clearTimeout(helloTimeout);
           await this.store.touch(
             state.visitorId,
+            state.analyticsVisitorId,
             state.connectionId,
             state.section,
           );
-          await this.store.startSession({
-            sessionId: state.visitorId,
+          const session = await this.store.startSession({
+            sessionId: state.sessionId,
+            visitorId: state.analyticsVisitorId,
+            uniqueVisitorId: state.visitorId,
             source: state.source,
             device: state.device,
             path: state.path,
           });
-          await this.store.recordPageView(
-            state.visitorId,
-            state.visitorId,
-            state.path,
-          );
+          if (session.created || session.previousPath !== state.path) {
+            await this.store.recordPageView(
+              state.visitorId,
+              state.sessionId,
+              state.path,
+            );
+          }
           return;
         }
 
@@ -276,12 +325,13 @@ export class SocketHub {
             state.path = payload.path;
             await this.store.recordPageView(
               state.visitorId,
-              state.visitorId,
+              state.sessionId,
               state.path,
             );
           }
           await this.store.touch(
             state.visitorId,
+            state.analyticsVisitorId,
             state.connectionId,
             state.section,
           );
@@ -289,7 +339,7 @@ export class SocketHub {
         }
 
         if (payload.type === "presence:inactive") {
-          await this.store.remove(state.visitorId, state.connectionId);
+          await this.store.remove(state.connectionId);
           state = undefined;
           socket.close(1000, "Inactive");
           return;
@@ -301,12 +351,30 @@ export class SocketHub {
           validLabel(payload.label)
         ) {
           await this.store.recordClick(
-            state.visitorId,
+            state.sessionId,
             payload.path,
             payload.label.trim(),
           );
+          return;
         }
-      })().catch((error: unknown) => {
+
+        if (
+          payload.type === "analytics:order-completed" &&
+          validOrderReference(payload.orderReference)
+        ) {
+          await this.store.recordOrder(
+            state.sessionId,
+            this.anonymize("order", payload.orderReference),
+            state.path,
+          );
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({
+              type: "analytics:order-recorded",
+              orderReference: payload.orderReference,
+            }));
+          }
+        }
+      }).catch((error: unknown) => {
         console.error("Presence message failed", error);
         socket.close(1011, "Presence unavailable");
       });
@@ -327,30 +395,40 @@ export class SocketHub {
     void this.sendSnapshot(socket);
   }
 
-  private async sendSnapshot(socket: WebSocket): Promise<void> {
-    try {
-      const snapshot = await this.store.snapshot();
-      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(snapshot));
-    } catch (error) {
-      console.error("Could not send presence snapshot", error);
-      socket.close(1011, "Presence unavailable");
-    }
+  private sendSnapshot(socket: WebSocket): Promise<void> {
+    return this.queueSnapshotOperation(async () => {
+      try {
+        const snapshot = await this.store.snapshot();
+        if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(snapshot));
+      } catch (error) {
+        console.error("Could not send presence snapshot", error);
+        socket.close(1011, "Presence unavailable");
+      }
+    });
   }
 
-  private async broadcastSnapshot(force: boolean): Promise<void> {
-    if (this.dashboardSockets.size === 0) return;
-    try {
-      const snapshot = await this.store.snapshot();
-      const signature = JSON.stringify([snapshot.counts, snapshot.analytics]);
-      if (!force && signature === this.lastSnapshotSignature) return;
-      this.lastSnapshotSignature = signature;
-      const serialized = JSON.stringify(snapshot);
-      for (const socket of this.dashboardSockets) {
-        if (socket.readyState === WebSocket.OPEN) socket.send(serialized);
+  private broadcastSnapshot(force: boolean): Promise<void> {
+    return this.queueSnapshotOperation(async () => {
+      if (this.dashboardSockets.size === 0) return;
+      try {
+        const snapshot = await this.store.snapshot();
+        const signature = JSON.stringify([snapshot.counts, snapshot.analytics]);
+        if (!force && signature === this.lastSnapshotSignature) return;
+        this.lastSnapshotSignature = signature;
+        const serialized = JSON.stringify(snapshot);
+        for (const socket of this.dashboardSockets) {
+          if (socket.readyState === WebSocket.OPEN) socket.send(serialized);
+        }
+      } catch (error) {
+        console.error("Could not broadcast presence snapshot", error);
       }
-    } catch (error) {
-      console.error("Could not broadcast presence snapshot", error);
-    }
+    });
+  }
+
+  private queueSnapshotOperation(operation: () => Promise<void>): Promise<void> {
+    const queued = this.snapshotOperation.then(operation, operation);
+    this.snapshotOperation = queued.catch(() => undefined);
+    return queued;
   }
 
   private heartbeatSockets(): void {
@@ -382,5 +460,11 @@ export class SocketHub {
     }
     current.count += 1;
     return current.count <= MAX_CONNECTIONS_PER_MINUTE;
+  }
+
+  private anonymize(purpose: "visitor" | "order", value: string): string {
+    return createHmac("sha256", this.config.analyticsHmacSecret)
+      .update(`${purpose}:${value}`)
+      .digest("hex");
   }
 }
