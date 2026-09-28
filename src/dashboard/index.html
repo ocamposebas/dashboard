@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex,nofollow" />
     <meta name="theme-color" content="#07111f" />
-    <title>Phase One — Monitor de visitas</title>
+    <title>Phase One — Visitor Monitor</title>
   </head>
 
   <body>
@@ -13,16 +13,16 @@
       <header class="masthead">
         <div class="identity">
           <div class="wordmark" aria-label="Phase One">PHASE ONE</div>
-          <div class="product-name">Monitor de visitas</div>
+          <div class="product-name">Visitor Monitor</div>
         </div>
 
         <div class="masthead-actions">
           <div class="connection" id="connection" data-state="connecting" role="status" aria-live="polite">
             <span class="connection-dot" aria-hidden="true"></span>
-            <span id="connection-label">Conectando</span>
+            <span id="connection-label">Connecting</span>
           </div>
           <form method="post" action="/logout">
-            <button class="sign-out" type="submit">Salir</button>
+            <button class="sign-out" type="submit">Sign out</button>
           </form>
         </div>
       </header>
@@ -30,45 +30,52 @@
       <main>
         <section class="hero-copy" aria-labelledby="page-title">
           <div class="hero-title">
-            <p class="eyebrow">Resumen fácil de entender</p>
-            <h1 id="page-title">Visitantes y ventas</h1>
-            <p class="hero-description">Personas diferentes, visitas repetidas y órdenes completadas.</p>
+            <p class="eyebrow">At-a-glance overview</p>
+            <h1 id="page-title">Visitors and sales</h1>
+            <p class="hero-description">Unique visitors, repeat visits, and completed orders.</p>
           </div>
 
           <div class="range-control">
-            <span id="active-range-label">Últimos 30 días</span>
-            <div class="range-filter" aria-label="Rango de fechas">
-              <button type="button" data-range="today" aria-pressed="false">Hoy</button>
-              <button type="button" data-range="7" aria-pressed="false">7 días</button>
-              <button type="button" data-range="30" class="is-active" aria-pressed="true">30 días</button>
-              <button type="button" data-range="all" aria-pressed="false">Todo</button>
+            <span id="active-range-label">Last 30 days</span>
+            <div class="range-actions">
+              <div class="range-filter" aria-label="Date range">
+                <button type="button" data-range="today" aria-pressed="false">Today</button>
+                <button type="button" data-range="7" aria-pressed="false">7 days</button>
+                <button type="button" data-range="30" class="is-active" aria-pressed="true">30 days</button>
+                <button type="button" data-range="all" aria-pressed="false">All time</button>
+              </div>
+              <label class="date-picker" id="date-picker-control" for="specific-date">
+                <span><i aria-hidden="true">▦</i> Specific day</span>
+                <span class="date-picker-value" id="specific-date-label">Choose date</span>
+                <input id="specific-date" type="date" lang="en-US" aria-label="Choose a specific day" />
+              </label>
             </div>
           </div>
         </section>
 
-        <section class="metric-grid" aria-label="Indicadores principales">
+        <section class="metric-grid" aria-label="Key metrics">
           <article class="metric-card metric-card--primary">
-            <div class="metric-heading"><span>Personas diferentes</span><i aria-hidden="true">01</i></div>
+            <div class="metric-heading"><span>Unique visitors</span><i aria-hidden="true">01</i></div>
             <strong id="unique-visitors">—</strong>
-            <small>Navegadores únicos en el periodo</small>
+            <small>Unique browsers during this period</small>
           </article>
 
           <article class="metric-card metric-card--returning">
-            <div class="metric-heading"><span>Visitas repetidas</span><i aria-hidden="true">02</i></div>
+            <div class="metric-heading"><span>Repeat visits</span><i aria-hidden="true">02</i></div>
             <strong id="returning-visits">—</strong>
-            <small>Regresos de personas conocidas</small>
+            <small>Visits from returning people</small>
           </article>
 
           <article class="metric-card metric-card--orders">
-            <div class="metric-heading"><span>Órdenes completadas</span><i aria-hidden="true">03</i></div>
+            <div class="metric-heading"><span>Completed orders</span><i aria-hidden="true">03</i></div>
             <strong id="total-orders">—</strong>
-            <small>Pagos confirmados en el periodo</small>
+            <small>Confirmed payments during this period</small>
           </article>
 
           <article class="metric-card">
-            <div class="metric-heading"><span>Visitas totales</span><i aria-hidden="true">04</i></div>
+            <div class="metric-heading"><span>Total visits</span><i aria-hidden="true">04</i></div>
             <strong id="total-visits">—</strong>
-            <small>Todas las visitas registradas</small>
+            <small>All visits recorded</small>
           </article>
         </section>
 
@@ -76,80 +83,80 @@
           <div class="today-heading">
             <span class="today-pulse" aria-hidden="true"></span>
             <div>
-              <h2 id="today-title">Hoy</h2>
-              <small>Actividad desde las 12:00 a. m. de Bogotá</small>
+              <h2 id="today-title">Today</h2>
+              <small>Activity since 12:00 a.m. in Bogotá</small>
             </div>
           </div>
-          <div class="today-stat"><span>Personas</span><strong id="today-visitors">—</strong></div>
-          <div class="today-stat"><span>Visitas</span><strong id="today-visits">—</strong></div>
-          <div class="today-stat today-stat--order"><span>Órdenes</span><strong id="today-orders">—</strong></div>
+          <div class="today-stat"><span>People</span><strong id="today-visitors">—</strong></div>
+          <div class="today-stat"><span>Visits</span><strong id="today-visits">—</strong></div>
+          <div class="today-stat today-stat--order"><span>Orders</span><strong id="today-orders">—</strong></div>
         </section>
 
         <section class="main-grid">
           <article class="panel chart-panel" id="traffic-overview">
             <div class="panel-heading">
-              <div><p class="eyebrow">Conteo diario</p><h2>Personas por día</h2></div>
-              <strong id="trend-total">Máximo 0 por día</strong>
+              <div><p class="eyebrow">Daily count</p><h2>Visitors by day</h2></div>
+              <strong id="trend-total">Peak 0 per day</strong>
             </div>
-            <p class="panel-description">Cada punto representa personas diferentes que entraron ese día.</p>
+            <p class="panel-description">Each point represents unique visitors who entered that day.</p>
             <div class="trend-chart" id="trend-chart"></div>
           </article>
 
           <aside class="panel recent-panel" id="recent-sessions">
             <div class="panel-heading">
-              <div><p class="eyebrow">Quién entró</p><h2>Visitas recientes</h2></div>
-              <span>Más nuevas primero</span>
+              <div><p class="eyebrow">Who visited</p><h2>Recent visits</h2></div>
+              <span>Newest first</span>
             </div>
-            <p class="panel-description">Aquí verás si regresó y si completó una orden.</p>
+            <p class="panel-description">See who returned and who completed an order.</p>
             <div class="session-list" id="session-list"></div>
             <div class="session-pagination" id="session-pagination" hidden>
-              <button type="button" id="sessions-previous" aria-label="Visitas anteriores">←</button>
-              <span id="sessions-page">Página 1 de 1</span>
-              <button type="button" id="sessions-next" aria-label="Visitas siguientes">→</button>
+              <button type="button" id="sessions-previous" aria-label="Previous visits">←</button>
+              <span id="sessions-page">Page 1 of 1</span>
+              <button type="button" id="sessions-next" aria-label="Next visits">→</button>
             </div>
           </aside>
         </section>
 
         <section class="panel live-panel" id="live-presence">
           <div class="panel-heading live-panel-heading">
-            <div><p class="eyebrow">En este momento</p><h2>Actividad en vivo</h2></div>
-            <small id="updated">Esperando datos</small>
+            <div><p class="eyebrow">Right now</p><h2>Live activity</h2></div>
+            <small id="updated">Waiting for data</small>
           </div>
 
           <div class="live-summary">
             <div class="live-summary-item live-summary-item--active">
-              <span><i aria-hidden="true"></i> En línea ahora</span><strong id="total">—</strong>
+              <span><i aria-hidden="true"></i> Online now</span><strong id="total">—</strong>
             </div>
-            <div class="live-summary-item"><span>Últimos 30 minutos</span><strong id="visitors-30">—</strong></div>
-            <div class="live-summary-item"><span>Páginas vistas</span><strong id="total-views">—</strong></div>
+            <div class="live-summary-item"><span>Last 30 minutes</span><strong id="visitors-30">—</strong></div>
+            <div class="live-summary-item"><span>Page views</span><strong id="total-views">—</strong></div>
           </div>
 
-          <div class="section-heading"><h3>Dónde están ahora</h3><span>Personas activas por sección</span></div>
-          <div class="section-grid" id="section-grid" aria-label="Personas activas por sección de la tienda"></div>
+          <div class="section-heading"><h3>Where they are now</h3><span>Active visitors by section</span></div>
+          <div class="section-grid" id="section-grid" aria-label="Active visitors by store section"></div>
         </section>
 
         <details class="more-details">
           <summary>
-            <span><strong>Más estadísticas</strong><small>Páginas, origen del tráfico y dispositivos</small></span>
+            <span><strong>More statistics</strong><small>Pages, traffic sources, and devices</small></span>
             <i aria-hidden="true">+</i>
           </summary>
 
           <div class="details-grid">
             <article class="panel pages-panel" aria-labelledby="ranking-title">
               <div class="panel-heading">
-                <div><p class="eyebrow">Contenido</p><h2 id="ranking-title">Páginas más vistas</h2></div>
-                <span>Periodo seleccionado</span>
+                <div><p class="eyebrow">Content</p><h2 id="ranking-title">Most viewed pages</h2></div>
+                <span>Selected period</span>
               </div>
-              <div class="page-ranking" id="page-ranking"><p class="empty-state">Esperando la primera visita.</p></div>
+              <div class="page-ranking" id="page-ranking"><p class="empty-state">Waiting for the first visit.</p></div>
             </article>
 
             <article class="panel compact-panel">
-              <div class="panel-heading"><div><p class="eyebrow">Adquisición</p><h2>Origen de las visitas</h2></div></div>
+              <div class="panel-heading"><div><p class="eyebrow">Acquisition</p><h2>Traffic sources</h2></div></div>
               <div class="insight-list" id="source-list"></div>
             </article>
 
             <article class="panel compact-panel">
-              <div class="panel-heading"><div><p class="eyebrow">Tecnología</p><h2>Dispositivos</h2></div></div>
+              <div class="panel-heading"><div><p class="eyebrow">Technology</p><h2>Devices</h2></div></div>
               <div class="device-layout">
                 <div class="device-donut" id="device-donut"><span id="device-total">0</span></div>
                 <div class="insight-list" id="device-list"></div>
@@ -160,17 +167,17 @@
 
         <aside class="session-detail" id="session-detail" role="dialog" aria-modal="true" aria-labelledby="session-detail-title" hidden>
           <div class="session-detail-head">
-            <div><p class="eyebrow">Recorrido de la persona</p><h2 id="session-detail-title">Detalle de la visita</h2></div>
-            <button type="button" id="close-session-detail" aria-label="Cerrar detalle de la visita">×</button>
+            <div><p class="eyebrow">Visitor journey</p><h2 id="session-detail-title">Visit details</h2></div>
+            <button type="button" id="close-session-detail" aria-label="Close visit details">×</button>
           </div>
           <div id="session-detail-content"></div>
         </aside>
 
-        <button class="session-backdrop" id="session-backdrop" type="button" aria-label="Cerrar detalle de la visita" aria-hidden="true" tabindex="-1" hidden></button>
+        <button class="session-backdrop" id="session-backdrop" type="button" aria-label="Close visit details" aria-hidden="true" tabindex="-1" hidden></button>
 
         <footer class="system-footer">
-          <div><span>Conexión</span><strong id="footer-connection">Conectando</strong></div>
-          <div><span>Actualizado</span><strong id="footer-updated">Esperando</strong></div>
+          <div><span>Connection</span><strong id="footer-connection">Connecting</strong></div>
+          <div><span>Updated</span><strong id="footer-updated">Waiting</strong></div>
         </footer>
       </main>
     </div>

@@ -52,21 +52,21 @@ type DashboardSnapshot = Omit<PresenceSnapshot, "analytics"> & {
 };
 
 const sectionLabels: Record<PresenceSection, string> = {
-  HOME: "Inicio",
-  SHOP: "Tienda",
-  PRODUCT: "Producto",
-  CART: "Carrito",
-  CHECKOUT: "Pago",
-  OTHER: "Otras",
+  HOME: "Home",
+  SHOP: "Shop",
+  PRODUCT: "Product",
+  CART: "Cart",
+  CHECKOUT: "Checkout",
+  OTHER: "Other",
 };
 
 const sectionDescriptions: Record<PresenceSection, string> = {
-  HOME: "Página principal",
-  SHOP: "Viendo el catálogo",
-  PRODUCT: "Detalle de producto",
-  CART: "Carrito abierto",
-  CHECKOUT: "Proceso de compra",
-  OTHER: "Otras páginas",
+  HOME: "Landing page",
+  SHOP: "Browsing the catalog",
+  PRODUCT: "Product details",
+  CART: "Cart open",
+  CHECKOUT: "Checkout flow",
+  OTHER: "Supporting pages",
 };
 
 function requiredElement<T extends HTMLElement>(selector: string): T {
@@ -105,6 +105,9 @@ const todayVisitorsElement = requiredElement<HTMLElement>("#today-visitors");
 const todayVisitsElement = requiredElement<HTMLElement>("#today-visits");
 const todayOrdersElement = requiredElement<HTMLElement>("#today-orders");
 const activeRangeLabel = requiredElement<HTMLElement>("#active-range-label");
+const specificDateInput = requiredElement<HTMLInputElement>("#specific-date");
+const specificDateLabel = requiredElement<HTMLElement>("#specific-date-label");
+const datePickerControl = requiredElement<HTMLElement>("#date-picker-control");
 const sessionDetailElement = requiredElement<HTMLElement>("#session-detail");
 const sessionDetailTitle = requiredElement<HTMLElement>("#session-detail-title");
 const sessionDetailContent = requiredElement<HTMLElement>("#session-detail-content");
@@ -139,7 +142,8 @@ let displayedTotal = 0;
 let hasSnapshot = false;
 let lastUpdatedAt: number | undefined;
 let latestSnapshot: DashboardSnapshot | undefined;
-let selectedRange: "today" | "7" | "30" | "all" = "30";
+let selectedRange: "today" | "7" | "30" | "all" | "date" = "30";
+let selectedDate: string | null = null;
 let sessionPage = 1;
 let sessionDetailTriggerId: string | undefined;
 const SESSION_PAGE_SIZE = 5;
@@ -204,7 +208,7 @@ function pulseCard(
     card.classList.add(
       section === "CHECKOUT" ? "is-entering-checkout" : "is-entering",
     );
-    announcement.textContent = `${sectionLabels[section]} aumentó de ${previous} a ${current}`;
+    announcement.textContent = `${sectionLabels[section]} increased from ${previous} to ${current}`;
   } else {
     card.classList.add("is-leaving");
   }
@@ -222,7 +226,7 @@ function pulseCard(
 function applySnapshot(snapshot: DashboardSnapshot): void {
   const firstSnapshot = !hasSnapshot;
   hasSnapshot = true;
-  setConnectionState("live", "En vivo");
+  setConnectionState("live", "Live");
   reconnectAttempt = 0;
   lastUpdatedAt = Date.parse(snapshot.serverTime) || Date.now();
   latestSnapshot = snapshot;
@@ -251,14 +255,14 @@ function applySnapshot(snapshot: DashboardSnapshot): void {
 }
 
 function pageLabel(path: string): string {
-  if (path === "/") return "Inicio";
+  if (path === "/") return "Home";
   const translations: Record<string, string> = {
-    shop: "Tienda",
-    product: "Producto",
-    checkout: "Pago",
-    cart: "Carrito",
-    account: "Cuenta",
-    "thank you": "Confirmación",
+    shop: "Shop",
+    product: "Product",
+    checkout: "Checkout",
+    cart: "Cart",
+    account: "Account",
+    "thank you": "Order confirmation",
   };
   return path
     .replace(/^\//, "")
@@ -276,16 +280,11 @@ function pageLabel(path: string): string {
 }
 
 function formatNumber(value: number): string {
-  return new Intl.NumberFormat("es-CO").format(value);
+  return new Intl.NumberFormat("en-US").format(value);
 }
 
 function displayLabel(value: string): string {
-  return ({
-    Direct: "Directo",
-    Mobile: "Móvil",
-    Tablet: "Tableta",
-    Desktop: "Computador",
-  } as Record<string, string>)[value] || value;
+  return value;
 }
 
 function dateKey(
@@ -313,6 +312,26 @@ function shiftDateKey(value: string, days: number): string {
     .slice(0, 10);
 }
 
+function formatDateLabel(value: string): string {
+  const formatted = new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date(`${value}T12:00:00.000Z`));
+  return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+}
+
+function formatShortDateLabel(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(`${value}T12:00:00.000Z`));
+}
+
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({
     "&": "&amp;",
@@ -336,20 +355,27 @@ function pagesForSessions(
   sessions: DashboardSession[],
   cutoff: string | null,
   timeZone: string,
+  exactDate: string | null = null,
 ): Array<{ path: string; views: number }> {
   const counts = new Map<string, number>();
   for (const session of sessions) {
     const allPageEvents = (session.events || []).filter(
       (event) => event.type === "pageview",
     );
-    const pageEvents = allPageEvents.filter(
-      (event) =>
-        !cutoff || dateKey(new Date(event.at), timeZone) >= cutoff,
-    );
+    const pageEvents = allPageEvents.filter((event) => {
+      const eventDate = dateKey(new Date(event.at), timeZone);
+      return exactDate ? eventDate === exactDate : !cutoff || eventDate >= cutoff;
+    });
     if (pageEvents.length) {
       for (const event of pageEvents) counts.set(event.path, (counts.get(event.path) || 0) + 1);
     } else if (allPageEvents.length === 0 && session.pageViews > 0) {
-      counts.set(session.path, (counts.get(session.path) || 0) + session.pageViews);
+      const sessionDate = dateKey(new Date(session.startedAt), timeZone);
+      const sessionMatches = exactDate
+        ? sessionDate === exactDate
+        : !cutoff || sessionDate >= cutoff;
+      if (sessionMatches) {
+        counts.set(session.path, (counts.get(session.path) || 0) + session.pageViews);
+      }
     }
   }
   return [...counts.entries()]
@@ -362,6 +388,12 @@ function visitorCountForRange(
   analytics: DashboardAnalytics,
   sessions: DashboardSession[],
 ): number {
+  if (selectedRange === "date") {
+    if (!selectedDate) return 0;
+    return dailyVisitorSeries(analytics).find(
+      (item) => item.date === selectedDate,
+    )?.visitors ?? 0;
+  }
   const ranges = analytics.visitorRanges;
   if (ranges) {
     return {
@@ -409,49 +441,57 @@ function renderSessionRow(session: DashboardSession): string {
   const visitorNumber = session.visitorNumber;
   const visitNumber = session.visitNumber ?? 1;
   const identity = visitorNumber
-    ? `Persona #${visitorNumber} · Visita ${visitNumber}`
+    ? `Visitor #${visitorNumber} · Visit ${visitNumber}`
     : session.number
-      ? `Sesión #${session.number} · Visita ${visitNumber}`
-      : `Persona anónima · Visita ${visitNumber}`;
+      ? `Session #${session.number} · Visit ${visitNumber}`
+      : `Anonymous visitor · Visit ${visitNumber}`;
   const returning = isReturningSession(session);
   const completedOrder = sessionHasCompletedOrder(session);
   const badges = [
     returning
-      ? '<span class="session-badge session-badge--returning">Regresó</span>'
+      ? '<span class="session-badge session-badge--returning">Returned</span>'
       : "",
     completedOrder
-      ? '<span class="session-badge session-badge--order">Compró</span>'
+      ? '<span class="session-badge session-badge--order">Purchased</span>'
       : "",
   ].join("");
   const accessibilityStatus = [
-    returning ? "persona que regresó" : "persona nueva",
-    completedOrder ? "orden completada" : "sin orden completada",
+    returning ? "returning visitor" : "new visitor",
+    completedOrder ? "completed order" : "no completed order",
   ].join(", ");
 
-  return `<button type="button" class="session-row${completedOrder ? " has-order" : ""}" data-session-id="${escapeHtml(session.id)}" aria-haspopup="dialog" aria-controls="session-detail" aria-label="Abrir ${escapeHtml(identity)}, ${accessibilityStatus}"><span class="session-dot" aria-hidden="true"></span><div class="session-row-main"><div class="session-row-heading"><strong>${escapeHtml(identity)}</strong><span class="session-badges">${badges}</span></div><small>${escapeHtml(displayLabel(session.source))} · ${escapeHtml(displayLabel(session.device))} · ${escapeHtml(pageLabel(session.path))}</small><div class="session-row-meta"><b>${formatNumber(session.pageViews)} página${session.pageViews === 1 ? "" : "s"}</b><small>${formatNumber(session.clicks)} clic${session.clicks === 1 ? "" : "s"} · ${relativeDate(session.lastSeenAt)}</small></div></div></button>`;
+  return `<button type="button" class="session-row${completedOrder ? " has-order" : ""}" data-session-id="${escapeHtml(session.id)}" aria-haspopup="dialog" aria-controls="session-detail" aria-label="Open ${escapeHtml(identity)}, ${accessibilityStatus}"><span class="session-dot" aria-hidden="true"></span><div class="session-row-main"><div class="session-row-heading"><strong>${escapeHtml(identity)}</strong><span class="session-badges">${badges}</span></div><small>${escapeHtml(displayLabel(session.source))} · ${escapeHtml(displayLabel(session.device))} · ${escapeHtml(pageLabel(session.path))}</small><div class="session-row-meta"><b>${formatNumber(session.pageViews)} page${session.pageViews === 1 ? "" : "s"}</b><small>${formatNumber(session.clicks)} click${session.clicks === 1 ? "" : "s"} · ${relativeDate(session.lastSeenAt)}</small></div></div></button>`;
 }
 
 function renderAnalytics(snapshot: DashboardSnapshot): void {
   const { analytics } = snapshot;
   const timeZone = analytics.timeZone || LEGACY_ANALYTICS_TIME_ZONE;
-  const cutoffDays = selectedRange === "today" ? 0 : selectedRange === "all" ? null : Number(selectedRange) - 1;
   const currentDate = dateKey(new Date(snapshot.serverTime), timeZone);
+  const visitorSeries = dailyVisitorSeries(analytics);
+  const earliestDate = visitorSeries[0]?.date ?? currentDate;
+  const latestDate = visitorSeries[visitorSeries.length - 1]?.date ?? currentDate;
+  specificDateInput.min = earliestDate;
+  specificDateInput.max = latestDate;
+  specificDateInput.title = `Available from ${formatDateLabel(earliestDate)} to ${formatDateLabel(latestDate)}`;
+  const exactDate = selectedRange === "date" ? selectedDate : null;
+  const cutoffDays = selectedRange === "today"
+    ? 0
+    : selectedRange === "7"
+      ? 6
+      : selectedRange === "30"
+        ? 29
+        : null;
   const cutoff = cutoffDays === null
     ? null
     : shiftDateKey(currentDate, -cutoffDays);
-  const activity = cutoff
-    ? analytics.dailyActivity.filter((item) => item.date >= cutoff)
-    : analytics.dailyActivity;
-  const sessionsInRange = cutoff
-    ? analytics.recentSessions.filter(
-        (session) => dateKey(new Date(session.lastSeenAt), timeZone) >= cutoff,
-      )
-    : analytics.recentSessions;
-  const sessionsStartedInRange = cutoff
-    ? analytics.recentSessions.filter(
-        (session) => dateKey(new Date(session.startedAt), timeZone) >= cutoff,
-      )
-    : analytics.recentSessions;
+  const activity = analytics.dailyActivity.filter((item) =>
+    exactDate ? item.date === exactDate : !cutoff || item.date >= cutoff,
+  );
+  const sessionsInRange = analytics.recentSessions.filter((session) => {
+    const sessionDate = dateKey(new Date(session.startedAt), timeZone);
+    return exactDate ? sessionDate === exactDate : !cutoff || sessionDate >= cutoff;
+  });
+  const sessionsStartedInRange = sessionsInRange;
   const filteredViews = selectedRange === "all"
     ? analytics.totalViews
     : activity.reduce((sum, item) => sum + item.views, 0);
@@ -486,7 +526,7 @@ function renderAnalytics(snapshot: DashboardSnapshot): void {
   visitors30Element.textContent = formatNumber(analytics.visitorsLast30Minutes);
   const today = currentDate;
   const todayActivity = analytics.dailyActivity.find((item) => item.date === today);
-  const todayVisitors = dailyVisitorSeries(analytics).find(
+  const todayVisitors = visitorSeries.find(
     (item) => item.date === today,
   )?.visitors ?? analytics.visitorRanges?.today ?? 0;
   todayVisitorsElement.textContent = formatNumber(todayVisitors);
@@ -494,7 +534,7 @@ function renderAnalytics(snapshot: DashboardSnapshot): void {
   todayOrdersElement.textContent = formatNumber(todayActivity?.orders ?? 0);
   const filteredPages = selectedRange === "all"
     ? analytics.topPages
-    : pagesForSessions(sessionsInRange, cutoff, timeZone);
+    : pagesForSessions(analytics.recentSessions, cutoff, timeZone, exactDate);
   const filteredSources = selectedRange === "all"
     ? analytics.topSources
     : rankLabels(sessionsStartedInRange.map((session) => session.source));
@@ -504,7 +544,7 @@ function renderAnalytics(snapshot: DashboardSnapshot): void {
   const leader = filteredPages[0];
 
   if (!leader) {
-    pageRankingElement.innerHTML = '<p class="empty-state">Aún no hay páginas vistas en este periodo.</p>';
+    pageRankingElement.innerHTML = '<p class="empty-state">No page views for this period yet.</p>';
   } else {
     pageRankingElement.innerHTML = filteredPages.map((page, index) => {
       const width = Math.max(4, Math.round((page.views / leader.views) * 100));
@@ -536,33 +576,33 @@ function renderAnalytics(snapshot: DashboardSnapshot): void {
   );
   sessionListElement.innerHTML = pageSessions.length
     ? pageSessions.map(renderSessionRow).join("")
-    : '<p class="empty-state">Las visitas nuevas aparecerán aquí.</p>';
+    : '<p class="empty-state">New visits will appear here.</p>';
   sessionPagination.hidden = visibleSessions.length <= SESSION_PAGE_SIZE;
-  sessionsPage.textContent = `Página ${sessionPage} de ${sessionPageCount}`;
+  sessionsPage.textContent = `Page ${sessionPage} of ${sessionPageCount}`;
   sessionsPrevious.disabled = sessionPage <= 1;
   sessionsNext.disabled = sessionPage >= sessionPageCount;
-  const trendItems = dailyVisitorSeries(analytics).filter(
-    (item) => !cutoff || item.date >= cutoff,
+  const trendItems = visitorSeries.filter(
+    (item) => exactDate ? item.date === exactDate : !cutoff || item.date >= cutoff,
   );
   renderTrend(trendItems);
 }
 
 function renderJourneyEvent(event: DashboardEvent, index: number): string {
-  const time = new Date(event.at).toLocaleTimeString("es-CO", {
+  const time = new Date(event.at).toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
   });
   const paidOrder = event.type === "order" && event.status === "paid";
   const action = event.type === "order"
-    ? paidOrder ? "Orden completada" : "Evento de orden"
+    ? paidOrder ? "Order completed" : "Order event"
     : event.type === "click"
-      ? "Hizo clic"
-      : "Visitó";
+      ? "Clicked"
+      : "Visited";
   const detail = event.type === "order"
-    ? paidOrder ? "Pago confirmado" : "Estado de orden no disponible"
+    ? paidOrder ? "Payment confirmed" : "Order status unavailable"
     : event.type === "click"
-      ? event.label || "Interacción"
+      ? event.label || "Interaction"
       : pageLabel(event.path);
   const icon = paidOrder ? "✓" : event.type === "order" ? "•" : String(index + 1);
   const eventClass = paidOrder
@@ -591,32 +631,32 @@ function openSessionDetail(sessionId: string): void {
   const earlierPageViews = Math.max(0, session.pageViews - detailedPageViews);
   const earlierClicks = Math.max(0, session.clicks - detailedClicks);
   sessionDetailTitle.textContent = visitorNumber
-    ? `Persona #${visitorNumber} · Visita ${visitNumber}`
+    ? `Visitor #${visitorNumber} · Visit ${visitNumber}`
     : session.number
-      ? `Sesión #${session.number} · Visita ${visitNumber}`
-      : `Persona anónima · Visita ${visitNumber}`;
+      ? `Session #${session.number} · Visit ${visitNumber}`
+      : `Anonymous visitor · Visit ${visitNumber}`;
   const durationMs = Math.max(0, Date.parse(session.lastSeenAt) - Date.parse(session.startedAt));
   const durationLabel = durationMs < 60_000 ? `${Math.floor(durationMs / 1_000)}s` : `${Math.floor(durationMs / 60_000)}m ${Math.floor((durationMs % 60_000) / 1_000)}s`;
   const summaryEvents = [
     earlierPageViews
-      ? `<div class="journey-event journey-event--summary"><i>↗</i><div><span>Actividad anterior</span><strong>${earlierPageViews} página${earlierPageViews === 1 ? "" : "s"} vista${earlierPageViews === 1 ? "" : "s"}</strong><code>Última página: ${escapeHtml(session.path)}</code></div></div>`
+      ? `<div class="journey-event journey-event--summary"><i>↗</i><div><span>Earlier activity</span><strong>${earlierPageViews} page view${earlierPageViews === 1 ? "" : "s"}</strong><code>Last page: ${escapeHtml(session.path)}</code></div></div>`
       : "",
     earlierClicks
-      ? `<div class="journey-event journey-event--summary"><i>+</i><div><span>Interacciones anteriores</span><strong>${earlierClicks} clic${earlierClicks === 1 ? "" : "s"}</strong><code>Conteo conservado para esta visita</code></div></div>`
+      ? `<div class="journey-event journey-event--summary"><i>+</i><div><span>Earlier interactions</span><strong>${earlierClicks} click${earlierClicks === 1 ? "" : "s"}</strong><code>Count retained for this visit</code></div></div>`
       : "",
   ].join("");
   const detailedEvents = events.map(renderJourneyEvent).join("");
   const inferredOrderEvent = completedOrder && !detailedOrder
-    ? `<div class="journey-event journey-event--order"><i>✓</i><div><span>Orden completada${orderCompletedAt ? ` · ${new Date(orderCompletedAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}</span><strong>Pago confirmado</strong><code>Confirmación de compra</code></div></div>`
+    ? `<div class="journey-event journey-event--order"><i>✓</i><div><span>Order completed${orderCompletedAt ? ` · ${new Date(orderCompletedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}</span><strong>Payment confirmed</strong><code>Purchase confirmation</code></div></div>`
     : "";
   const journey = summaryEvents || detailedEvents || inferredOrderEvent
     ? `${summaryEvents}${detailedEvents}${inferredOrderEvent}`
-    : `<div class="journey-event journey-event--summary"><i>•</i><div><span>Actividad de la visita</span><strong>${escapeHtml(pageLabel(session.path))}</strong><code>${escapeHtml(session.path)}</code></div></div>`;
+    : `<div class="journey-event journey-event--summary"><i>•</i><div><span>Visit activity</span><strong>${escapeHtml(pageLabel(session.path))}</strong><code>${escapeHtml(session.path)}</code></div></div>`;
   const totalActions = session.pageViews + session.clicks + (completedOrder ? 1 : 0);
   const conversionBanner = completedOrder
-    ? `<section class="conversion-banner" aria-label="Conversión de orden"><span aria-hidden="true">✓</span><div><strong>Orden completada</strong><small>${orderCompletedAt ? `Confirmada ${new Date(orderCompletedAt).toLocaleString("es-CO")}` : "Confirmada durante esta visita"}</small></div></section>`
+    ? `<section class="conversion-banner" aria-label="Order conversion"><span aria-hidden="true">✓</span><div><strong>Order completed</strong><small>${orderCompletedAt ? `Confirmed ${new Date(orderCompletedAt).toLocaleString("en-US")}` : "Confirmed during this visit"}</small></div></section>`
     : "";
-  sessionDetailContent.innerHTML = `<div class="session-status"><i></i><span>Última interacción ${relativeDate(session.lastSeenAt)} · inició ${new Date(session.startedAt).toLocaleString("es-CO")}</span></div>${conversionBanner}<div class="session-facts"><div><span>Persona</span><strong>${visitorNumber ? `#${visitorNumber}` : "Anónima"}</strong></div><div><span>Visita</span><strong>#${visitNumber}</strong></div><div><span>Tipo</span><strong>${returning ? "Regresó" : "Nueva"}</strong></div><div><span>Orden</span><strong>${completedOrder ? "Completada" : "Sin completar"}</strong></div><div><span>Origen</span><strong>${escapeHtml(displayLabel(session.source))}</strong></div><div><span>Dispositivo</span><strong>${escapeHtml(displayLabel(session.device))}</strong></div><div><span>Duración</span><strong>${durationLabel}</strong></div><div><span>Actividad</span><strong>${formatNumber(session.pageViews)} páginas · ${formatNumber(session.clicks)} clics</strong></div></div><section class="journey-panel"><div class="journey-heading"><span>Recorrido completo</span><b>${formatNumber(totalActions)} acción${totalActions === 1 ? "" : "es"}</b></div><div class="journey-timeline">${journey}</div></section>`;
+  sessionDetailContent.innerHTML = `<div class="session-status"><i></i><span>Last interaction ${relativeDate(session.lastSeenAt)} · started ${new Date(session.startedAt).toLocaleString("en-US")}</span></div>${conversionBanner}<div class="session-facts"><div><span>Visitor</span><strong>${visitorNumber ? `#${visitorNumber}` : "Anonymous"}</strong></div><div><span>Visit</span><strong>#${visitNumber}</strong></div><div><span>Type</span><strong>${returning ? "Returning" : "New"}</strong></div><div><span>Order</span><strong>${completedOrder ? "Completed" : "Not completed"}</strong></div><div><span>Source</span><strong>${escapeHtml(displayLabel(session.source))}</strong></div><div><span>Device</span><strong>${escapeHtml(displayLabel(session.device))}</strong></div><div><span>Duration</span><strong>${durationLabel}</strong></div><div><span>Activity</span><strong>${formatNumber(session.pageViews)} pages · ${formatNumber(session.clicks)} clicks</strong></div></div><section class="journey-panel"><div class="journey-heading"><span>Full journey</span><b>${formatNumber(totalActions)} action${totalActions === 1 ? "" : "s"}</b></div><div class="journey-timeline">${journey}</div></section>`;
   sessionDetailElement.hidden = false;
   sessionBackdrop.hidden = false;
   setBackgroundInert(true);
@@ -654,24 +694,30 @@ function renderRankList(element: HTMLElement, items: Array<{ label: string; coun
   const maximum = items[0]?.count || 1;
   element.innerHTML = items.length
     ? items.map((item) => `<div class="insight-row"><div><strong>${escapeHtml(displayLabel(item.label))}</strong><b>${formatNumber(item.count)}</b></div><span><i style="width:${Math.max(4, Math.round((item.count / maximum) * 100))}%"></i></span></div>`).join("")
-    : '<p class="empty-state">Aún no hay datos para mostrar.</p>';
+    : '<p class="empty-state">No data to show yet.</p>';
 }
 
 function relativeDate(value: string): string {
   const minutes = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 60_000));
-  if (minutes < 1) return "ahora";
-  if (minutes < 60) return `hace ${minutes} min`;
-  if (minutes < 1440) return `hace ${Math.floor(minutes / 60)} h`;
-  return `hace ${Math.floor(minutes / 1440)} d`;
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)} h ago`;
+  return `${Math.floor(minutes / 1440)} d ago`;
 }
 
 function renderTrend(items: Array<{ date: string; visitors: number }>): void {
+  if (selectedRange === "date" && selectedDate) {
+    const visitors = items[0]?.visitors ?? 0;
+    trendTotalElement.textContent = `${formatNumber(visitors)} visitor${visitors === 1 ? "" : "s"}`;
+    trendChartElement.innerHTML = `<div class="single-day-result"><span>${escapeHtml(formatDateLabel(selectedDate))}</span><strong>${formatNumber(visitors)}</strong><small>unique visitor${visitors === 1 ? "" : "s"}</small></div>`;
+    return;
+  }
   const peak = Math.max(...items.map((item) => item.visitors), 0);
   trendTotalElement.textContent = selectedRange === "all"
-    ? `Últimos 30 días · Máximo ${formatNumber(peak)}`
-    : `Máximo ${formatNumber(peak)} por día`;
+    ? `Last 30 days · Peak ${formatNumber(peak)}`
+    : `Peak ${formatNumber(peak)} per day`;
   if (!items.length || peak === 0) {
-    trendChartElement.innerHTML = '<p class="empty-state">La gráfica comenzará con la próxima persona que visite la tienda.</p>';
+    trendChartElement.innerHTML = '<p class="empty-state">The chart will begin with the next person who visits the store.</p>';
     return;
   }
   const max = Math.max(...items.map((item) => item.visitors), 1);
@@ -687,7 +733,7 @@ function renderTrend(items: Array<{ date: string; visitors: number }>): void {
   const labels = items.filter(
     (_item, index) => index === 0 || index === items.length - 1 || index % labelStep === 0,
   );
-  trendChartElement.innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Personas diferentes por día. ${accessibleSummary}"><defs><linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4d9cff" stop-opacity=".3"/><stop offset="1" stop-color="#4d9cff" stop-opacity="0"/></linearGradient></defs><polygon points="0,100 ${points} 100,100" fill="url(#trend-fill)"/><polyline points="${points}" fill="none" stroke="#64adff" stroke-width="2" vector-effect="non-scaling-stroke"/></svg><div class="trend-labels">${labels.map((item) => `<span title="${item.date}: ${formatNumber(item.visitors)} personas diferentes">${item.date.slice(5)}</span>`).join("")}</div>`;
+  trendChartElement.innerHTML = `<svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Unique visitors by day. ${accessibleSummary}"><defs><linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4d9cff" stop-opacity=".3"/><stop offset="1" stop-color="#4d9cff" stop-opacity="0"/></linearGradient></defs><polygon points="0,100 ${points} 100,100" fill="url(#trend-fill)"/><polyline points="${points}" fill="none" stroke="#64adff" stroke-width="2" vector-effect="non-scaling-stroke"/></svg><div class="trend-labels">${labels.map((item) => `<span title="${item.date}: ${formatNumber(item.visitors)} unique visitors">${item.date.slice(5)}</span>`).join("")}</div>`;
 }
 
 function updateRelativeTime(): void {
@@ -695,10 +741,10 @@ function updateRelativeTime(): void {
   const seconds = Math.max(0, Math.floor((Date.now() - lastUpdatedAt) / 1_000));
   const label =
     seconds < 5
-      ? "Ahora"
+      ? "Now"
       : seconds < 60
-        ? `Hace ${seconds} s`
-        : `Hace ${Math.floor(seconds / 60)} min`;
+        ? `${seconds} s ago`
+        : `${Math.floor(seconds / 60)} min ago`;
   updatedElement.textContent = label;
   footerUpdated.textContent = label;
 }
@@ -854,7 +900,7 @@ async function sessionStillValid(): Promise<boolean> {
 
 function scheduleReconnect(): void {
   if (reconnectTimer) return;
-  setConnectionState("reconnecting", "Reconectando");
+  setConnectionState("reconnecting", "Reconnecting");
   const baseDelay = Math.min(15_000, 750 * 2 ** reconnectAttempt);
   const jitter = Math.floor(Math.random() * 350);
   reconnectAttempt += 1;
@@ -868,12 +914,12 @@ function connect(): void {
   if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) {
     return;
   }
-  setConnectionState(hasSnapshot ? "reconnecting" : "connecting", hasSnapshot ? "Reconectando" : "Conectando");
+  setConnectionState(hasSnapshot ? "reconnecting" : "connecting", hasSnapshot ? "Reconnecting" : "Connecting");
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   socket = new WebSocket(`${protocol}//${location.host}/ws/dashboard`);
 
   socket.addEventListener("open", () => {
-    setConnectionState("connecting", "Sincronizando");
+    setConnectionState("connecting", "Syncing");
   });
 
   socket.addEventListener("message", (event) => {
@@ -897,13 +943,13 @@ function connect(): void {
   });
 
   socket.addEventListener("error", () => {
-    setConnectionState("offline", "Interrumpido");
+    setConnectionState("offline", "Interrupted");
   });
 }
 
 window.setInterval(updateRelativeTime, 1_000);
 window.addEventListener("online", connect);
-window.addEventListener("offline", () => setConnectionState("offline", "Sin conexión"));
+window.addEventListener("offline", () => setConnectionState("offline", "Offline"));
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && socket?.readyState !== WebSocket.OPEN) {
     connect();
@@ -915,12 +961,17 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-range]"
     const range = button.dataset.range;
     if (range !== "today" && range !== "7" && range !== "30" && range !== "all") return;
     selectedRange = range;
+    selectedDate = null;
     sessionPage = 1;
+    specificDateInput.value = "";
+    specificDateLabel.textContent = "Choose date";
+    specificDateInput.setCustomValidity("");
+    datePickerControl.classList.remove("is-active");
     activeRangeLabel.textContent = {
-      today: "Hoy",
-      "7": "Últimos 7 días",
-      "30": "Últimos 30 días",
-      all: "Todo el historial",
+      today: "Today",
+      "7": "Last 7 days",
+      "30": "Last 30 days",
+      all: "All time",
     }[range];
     for (const item of document.querySelectorAll<HTMLButtonElement>("[data-range]")) {
       const selected = item === button;
@@ -930,6 +981,34 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-range]"
     if (latestSnapshot) renderAnalytics(latestSnapshot);
   });
 }
+
+specificDateInput.addEventListener("change", () => {
+  const value = specificDateInput.value;
+  if (!value) return;
+  if (
+    (specificDateInput.min && value < specificDateInput.min) ||
+    (specificDateInput.max && value > specificDateInput.max)
+  ) {
+    specificDateInput.setCustomValidity(
+      `Choose a date between ${formatDateLabel(specificDateInput.min)} and ${formatDateLabel(specificDateInput.max)}.`,
+    );
+    specificDateInput.reportValidity();
+    return;
+  }
+
+  specificDateInput.setCustomValidity("");
+  selectedRange = "date";
+  selectedDate = value;
+  sessionPage = 1;
+  specificDateLabel.textContent = formatShortDateLabel(value);
+  activeRangeLabel.textContent = formatDateLabel(value);
+  datePickerControl.classList.add("is-active");
+  for (const item of document.querySelectorAll<HTMLButtonElement>("[data-range]")) {
+    item.classList.remove("is-active");
+    item.setAttribute("aria-pressed", "false");
+  }
+  if (latestSnapshot) renderAnalytics(latestSnapshot);
+});
 
 sessionListElement.addEventListener("click", (event) => {
   const target = event.target instanceof Element
