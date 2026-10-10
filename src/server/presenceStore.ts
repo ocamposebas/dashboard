@@ -296,13 +296,16 @@ return 1
 `;
 
 const RECORD_ORDER_SCRIPT = `
-if redis.call('SADD', KEYS[1], ARGV[1]) == 0 then return 0 end
-redis.call('INCR', KEYS[2])
-redis.call('HINCRBY', KEYS[3], ARGV[2], 1)
+local recorded = redis.call('SADD', KEYS[1], ARGV[1])
+if recorded == 1 then
+  redis.call('INCR', KEYS[2])
+  redis.call('HINCRBY', KEYS[3], ARGV[2], 1)
+end
+local sessionChanged = 0
 local raw = redis.call('GET', KEYS[4])
 if raw then
   local decoded, session = pcall(cjson.decode, raw)
-  if decoded then
+  if decoded and session.orderCompleted ~= true then
     session.path = ARGV[6]
     session.lastSeenAt = ARGV[5]
     session.orderCompleted = true
@@ -313,9 +316,20 @@ if raw then
     session.events = events
     redis.call('SET', KEYS[4], cjson.encode(session), 'EX', ARGV[4])
     redis.call('ZADD', KEYS[5], ARGV[3], ARGV[7])
+    sessionChanged = 1
   end
 end
-redis.call('PUBLISH', KEYS[6], 'changed')
+if recorded == 1 or sessionChanged == 1 then
+  redis.call('PUBLISH', KEYS[6], 'changed')
+end
+return recorded
+`;
+
+const RECORD_RECONCILED_ORDER_SCRIPT = `
+if redis.call('SADD', KEYS[1], ARGV[1]) == 0 then return 0 end
+redis.call('INCR', KEYS[2])
+redis.call('HINCRBY', KEYS[3], ARGV[2], 1)
+redis.call('PUBLISH', KEYS[4], 'changed')
 return 1
 `;
 
@@ -350,6 +364,7 @@ export class PresenceStore {
   private readonly recentVisitorsKey: string;
   private readonly sessionKeyPrefix: string;
   private readonly sessionSequenceKey: string;
+  private readonly orderSyncCursorKey: string;
   private cleanupTimer: NodeJS.Timeout | undefined;
 
   constructor(
@@ -388,6 +403,7 @@ export class PresenceStore {
     this.recentVisitorsKey = `${keyPrefix}:analytics:recent-visitors`;
     this.sessionKeyPrefix = `${keyPrefix}:analytics:session:`;
     this.sessionSequenceKey = `${keyPrefix}:analytics:session-sequence`;
+    this.orderSyncCursorKey = `${keyPrefix}:analytics:orders:woo-sync-cursor`;
 
     this.client.on("error", (error) => console.error("Redis error", error));
     this.subscriber.on("error", (error) =>
@@ -609,6 +625,34 @@ export class PresenceStore {
       ],
     });
     return Number(recorded) === 1;
+  }
+
+  async recordReconciledOrder(
+    orderFingerprint: string,
+    paidAt: Date,
+  ): Promise<boolean> {
+    const date = analyticsDateKey(paidAt, this.analyticsTimeZone);
+    const recorded = await this.client.eval(RECORD_RECONCILED_ORDER_SCRIPT, {
+      keys: [
+        this.ordersSeenKey,
+        this.totalOrdersKey,
+        this.dailyOrdersKey,
+        this.channelKey,
+      ],
+      arguments: [orderFingerprint, date],
+    });
+    return Number(recorded) === 1;
+  }
+
+  async getOrderSyncCursor(): Promise<Date | null> {
+    const raw = await this.client.get(this.orderSyncCursorKey);
+    if (!raw) return null;
+    const value = new Date(raw);
+    return Number.isFinite(value.getTime()) ? value : null;
+  }
+
+  async setOrderSyncCursor(value: Date): Promise<void> {
+    await this.client.set(this.orderSyncCursorKey, value.toISOString());
   }
 
   async snapshot(): Promise<PresenceSnapshot> {

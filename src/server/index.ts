@@ -2,6 +2,7 @@ import { loadConfig } from "./config.js";
 import { createMonitorServer } from "./httpServer.js";
 import { PresenceStore } from "./presenceStore.js";
 import { SocketHub } from "./socketHub.js";
+import { WooOrderSync } from "./wooOrderSync.js";
 
 const config = loadConfig();
 const store = new PresenceStore(
@@ -12,9 +13,24 @@ const store = new PresenceStore(
 );
 const server = createMonitorServer(config, store);
 const hub = new SocketHub(config, store);
+const orderSync = config.wooCommerce
+  ? new WooOrderSync(
+      {
+        ...config.wooCommerce,
+        analyticsHmacSecret: config.analyticsHmacSecret,
+      },
+      store,
+    )
+  : undefined;
+if (!orderSync) {
+  console.warn(
+    "Woo order reconciliation is disabled; configure the WOOCOMMERCE_* variables",
+  );
+}
 
 await store.connect(() => hub.scheduleSnapshot());
 hub.attach(server);
+orderSync?.start();
 
 server.listen(config.port, "0.0.0.0", () => {
   console.log(`Phase One Live Monitor listening on port ${config.port}`);
@@ -26,6 +42,7 @@ async function shutdown(signal: string): Promise<void> {
   shuttingDown = true;
   console.log(`Received ${signal}; shutting down`);
   server.close();
+  await orderSync?.close();
   await hub.close();
   await store.disconnect();
   process.exit(0);

@@ -24,6 +24,13 @@ export interface AppConfig {
   cookieSecure: boolean;
   trustProxy: boolean;
   analyticsTimeZone: string;
+  wooCommerce?: {
+    baseUrl: string;
+    consumerKey: string;
+    consumerSecret: string;
+    syncIntervalMs: number;
+    backfillDays: number;
+  };
 }
 
 function requireValue(name: string): string {
@@ -45,6 +52,35 @@ function parsePositiveInt(name: string, fallback: number): number {
 function normalizeOrigin(value: string): string {
   const url = new URL(value);
   return url.origin;
+}
+
+function loadWooCommerceConfig(): AppConfig["wooCommerce"] {
+  const baseUrl = process.env.WOOCOMMERCE_URL?.trim() || "";
+  const consumerKey = process.env.WOOCOMMERCE_CONSUMER_KEY?.trim() || "";
+  const consumerSecret = process.env.WOOCOMMERCE_CONSUMER_SECRET?.trim() || "";
+  const supplied = [baseUrl, consumerKey, consumerSecret].filter(Boolean).length;
+
+  if (supplied === 0) return undefined;
+  if (supplied !== 3) {
+    throw new Error(
+      "WOOCOMMERCE_URL, WOOCOMMERCE_CONSUMER_KEY, and " +
+        "WOOCOMMERCE_CONSUMER_SECRET must be set together",
+    );
+  }
+
+  const parsedUrl = new URL(baseUrl);
+  if (parsedUrl.protocol !== "https:" && parsedUrl.hostname !== "localhost") {
+    throw new Error("WOOCOMMERCE_URL must use HTTPS");
+  }
+
+  return {
+    baseUrl: parsedUrl.toString().replace(/\/$/, ""),
+    consumerKey,
+    consumerSecret,
+    syncIntervalMs:
+      parsePositiveInt("WOOCOMMERCE_SYNC_INTERVAL_SECONDS", 60) * 1_000,
+    backfillDays: parsePositiveInt("WOOCOMMERCE_BACKFILL_DAYS", 400),
+  };
 }
 
 export function loadConfig(): AppConfig {
@@ -72,6 +108,7 @@ export function loadConfig(): AppConfig {
   if (analyticsHmacSecret.length < 32) {
     throw new Error("ANALYTICS_HMAC_SECRET must contain at least 32 characters");
   }
+  const wooCommerce = loadWooCommerceConfig();
 
   return {
     nodeEnv,
@@ -94,5 +131,6 @@ export function loadConfig(): AppConfig {
     analyticsTimeZone: validateTimeZone(
       process.env.ANALYTICS_TIME_ZONE?.trim() || DEFAULT_ANALYTICS_TIME_ZONE,
     ),
+    ...(wooCommerce ? { wooCommerce } : {}),
   };
 }

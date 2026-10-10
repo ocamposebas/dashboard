@@ -1,7 +1,7 @@
 import type { IncomingMessage, Server as HttpServer } from "node:http";
-import { createHmac } from "node:crypto";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { isPresenceSection, type PresenceSection } from "../shared/protocol.js";
+import { analyticsFingerprint } from "./analyticsIdentity.js";
 import type { AppConfig } from "./config.js";
 import { verifySessionCookie } from "./auth.js";
 import type { PresenceStore } from "./presenceStore.js";
@@ -463,8 +463,6 @@ export class SocketHub {
   }
 
   private anonymize(purpose: "visitor" | "order", value: string): string {
-    return createHmac("sha256", this.config.analyticsHmacSecret)
-      .update(`${purpose}:${value}`)
-      .digest("hex");
+    return analyticsFingerprint(this.config.analyticsHmacSecret, purpose, value);
   }
 }

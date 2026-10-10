@@ -6,7 +6,7 @@ Monitor privado de presencia y analítica propia para Phase One Labz. No guarda 
 
 ```text
 Phase One Astro -> WSS /ws/presence -> Node + ws -> Redis
-                                                   |
+WooCommerce ----> REST reconciliation ----^          |
 monitor.domain -> sesión HttpOnly -> WSS /ws/dashboard
 ```
 
@@ -15,7 +15,7 @@ monitor.domain -> sesión HttpOnly -> WSS /ws/dashboard
 - El tracker envía un heartbeat cada 15 segundos. Redis expira la presencia activa después de 45 segundos sin señal.
 - Una pestaña oculta sale después de 30 segundos; una pestaña visible sin actividad sale después de 2 minutos y vuelve al detectar actividad.
 - Las vistas, visitas, visitantes únicos diarios, retornos y órdenes pagadas se agrupan usando `ANALYTICS_TIME_ZONE`. Los recorridos detallados expiran a los 30 días y los bocetos diarios se conservan 400 días.
-- Una orden se cuenta solo cuando la página de confirmación verifica estado pagado; Redis deduplica permanentemente la referencia anónima para que una recarga o un reintento no duplique la conversión histórica.
+- Las órdenes pagadas se reciben inmediatamente desde la página de confirmación y se reconcilian directamente contra WooCommerce. Esto recupera Zelle y cualquier evento perdido cuando el cliente cierra la página. Redis deduplica permanentemente la referencia anónima para que ambos caminos nunca dupliquen la conversión histórica.
 - Los dashboards reciben snapshots completos y autoritativos. Al reconectar nunca reutilizan contadores guardados en el navegador.
 - El servidor puede escalar horizontalmente: Redis Pub/Sub invalida el snapshot en todas las instancias.
 
@@ -40,6 +40,8 @@ monitor.domain -> sesión HttpOnly -> WSS /ws/dashboard
    ```text
    PUBLIC_PRESENCE_WS_URL=wss://monitor.phaseonelabz.com/ws/presence
    ```
+
+7. Crea en WooCommerce una clave REST con permiso **Read** y configura en el monitor `WOOCOMMERCE_URL`, `WOOCOMMERCE_CONSUMER_KEY` y `WOOCOMMERCE_CONSUMER_SECRET`. Al arrancar, el monitor reconcilia por defecto los últimos 400 días; después consulta solamente las órdenes modificadas desde el último cursor, con cinco minutos de solapamiento.
 
 El tracker está integrado en `MainLayout.astro` y en la página independiente `/checkout/thank-you`.
 
@@ -89,13 +91,18 @@ REDIS_KEY_PREFIX=phaseone:live
 PRESENCE_TTL_SECONDS=45
 SESSION_TTL_HOURS=12
 ANALYTICS_TIME_ZONE=America/Bogota
+WOOCOMMERCE_URL=https://tu-wordpress.example
+WOOCOMMERCE_CONSUMER_KEY=ck_clave_de_solo_lectura
+WOOCOMMERCE_CONSUMER_SECRET=cs_secreto_de_solo_lectura
+WOOCOMMERCE_SYNC_INTERVAL_SECONDS=60
+WOOCOMMERCE_BACKFILL_DAYS=400
 ```
 
 Marca `MONITOR_PASSWORD_HASH` como **Literal** en Coolify para conservar sus caracteres `$`. Todas estas variables son solo runtime; no contienen datos para el frontend.
 
 Después, despliega Phase One Labz como una segunda aplicación Dockerfile, puerto interno `4321`, y configura `PUBLIC_PRESENCE_WS_URL=wss://monitor.phaseonelabz.com/ws/presence` como **Build Variable**. Al cambiar esta URL debes reconstruir/redeployar Phase One.
 
-Despliega primero el monitor y después la tienda. Conserva siempre el mismo `ANALYTICS_HMAC_SECRET`. La medición mejorada empieza al publicar esta versión: los datos históricos agregados se mantienen, pero no es posible reconstruir retroactivamente qué sesiones antiguas pertenecían a la misma persona.
+Despliega primero el monitor y después la tienda. Conserva siempre el mismo `ANALYTICS_HMAC_SECRET`. La primera reconciliación puede tardar varios minutos según el historial de WooCommerce, pero corre en segundo plano y el dashboard permanece disponible. Los totales y días se corrigen de forma idempotente; las órdenes históricas recuperadas sin una sesión vigente no pueden enlazarse retroactivamente a un recorrido anónimo.
 
 Requisitos importantes:
 

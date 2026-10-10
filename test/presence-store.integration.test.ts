@@ -62,11 +62,15 @@ test(
       await store.recordPageView(rawVisitorId, firstSession, "/");
       await store.recordClick(firstSession, "/", "Shop");
       assert.equal(
-        await store.recordOrder(firstSession, "b".repeat(64), "/checkout/thank-you"),
+        await store.recordReconciledOrder("b".repeat(64), new Date()),
         true,
       );
       assert.equal(
         await store.recordOrder(firstSession, "b".repeat(64), "/checkout/thank-you"),
+        false,
+      );
+      assert.equal(
+        await store.recordReconciledOrder("b".repeat(64), new Date()),
         false,
       );
 
