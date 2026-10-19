@@ -6216,6 +6216,7 @@ function seoDimensionLabel(value: string, dimension: "device" | "country"): stri
   const countryNames: Record<string, string> = {
     usa: "United States", can: "Canada", gbr: "United Kingdom", aus: "Australia", deu: "Germany",
     fra: "France", mex: "Mexico", col: "Colombia", esp: "Spain", ita: "Italy", ind: "India",
+    mys: "Malaysia", pri: "Puerto Rico", nld: "Netherlands", bra: "Brazil", jpn: "Japan",
   };
   return countryNames[normalized] || value.toUpperCase();
 }
@@ -6225,7 +6226,7 @@ function renderSeoInsights(selector: string, rows: SeoRow[], dimension: "device"
   const total = Math.max(1, rows.reduce((sum, item) => sum + item.clicks, 0));
   container.innerHTML = rows.slice(0, 6).map((item) => {
     const share = (item.clicks / total) * 100;
-    return `<div class="insight-row"><div class="insight-row-head"><strong>${escapeHtml(seoDimensionLabel(item.key, dimension))}</strong><span>${formatNumber(Math.round(item.clicks))} click${Math.round(item.clicks) === 1 ? "" : "s"} · ${share.toFixed(0)}%</span></div><div class="insight-row-bar" aria-label="${share.toFixed(0)} percent of organic clicks"><i style="width:${Math.max(3, share)}%"></i></div></div>`;
+    return `<div class="insight-row"><div class="insight-row-head"><strong>${escapeHtml(seoDimensionLabel(item.key, dimension))}</strong><span>${formatNumber(Math.round(item.clicks))} click${Math.round(item.clicks) === 1 ? "" : "s"} · ${share.toFixed(0)}%</span></div><progress class="insight-row-bar" max="100" value="${Math.max(0, Math.min(100, share))}" aria-label="${share.toFixed(0)} percent of organic clicks"></progress></div>`;
   }).join("") || '<p class="empty-state">No data available for this period.</p>';
 }
 

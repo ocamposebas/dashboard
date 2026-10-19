@@ -994,8 +994,10 @@ tbody tr:hover td { background: var(--surface-hover); }
 .insight-row > .insight-row-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .insight-row-head strong { overflow: hidden; color: var(--ink); font-size: 10px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
 .insight-row-head span { flex: 0 0 auto; color: var(--muted); font-size: 8px; }
-.insight-row > .insight-row-bar { display: block; width: 100%; min-width: 0; height: 6px; overflow: hidden; border-radius: 999px; background: var(--surface-hover); }
-.insight-row-bar i { display: block; height: 100%; border-radius: inherit; background: var(--ink-soft); }
+.insight-row > .insight-row-bar { display: block; width: 100%; min-width: 0; height: 6px; overflow: hidden; border: 0; border-radius: 999px; background: var(--surface-hover); appearance: none; }
+.insight-row-bar::-webkit-progress-bar { border-radius: 999px; background: var(--surface-hover); }
+.insight-row-bar::-webkit-progress-value { border-radius: 999px; background: var(--ink-soft); }
+.insight-row-bar::-moz-progress-bar { border-radius: 999px; background: var(--ink-soft); }
 .seo-sitemaps { gap: 10px; }
 .seo-sitemaps article { padding: 12px; border-radius: 11px; }
 .seo-sitemaps strong { font-size: 9px; }
