@@ -1744,6 +1744,32 @@ export function createMonitorServer(
         session && authenticatedUser.authVersion === session.authVersion,
       );
 
+      // Google returns from a different site, so the browser intentionally omits
+      // our SameSite=Strict session cookie on this request. Authenticate this one
+      // callback with the short-lived, single-use server-side OAuth state instead.
+      if (url.pathname === "/api/seo/callback" && request.method === "GET") {
+        if (!searchConsole) { redirect(response, "/?seo=not-configured#seo"); return; }
+        const state = url.searchParams.get("state") || "";
+        const code = url.searchParams.get("code") || "";
+        const ownerId = state ? await store.consumeSeoOauthState(state) : null;
+        const owner = ownerId ? await store.getUserById(ownerId) : null;
+        const ownerCanAdminister = owner?.role === "owner" || owner?.role === "administrator";
+        if (!owner || owner.status !== "active" || !ownerCanAdminister || !code) {
+          redirect(response, "/?seo=invalid#seo");
+          return;
+        }
+        try {
+          await searchConsole.exchangeCode(code);
+          await searchConsole.sync();
+          await store.addNotification({ type: "seo", severity: "success", title: "Search performance connected", message: "Google organic search data is now synchronized with the operations suite.", actionView: "seo" });
+          redirect(response, "/?seo=connected#seo");
+        } catch (error: unknown) {
+          console.error("Search Console connection failed", error instanceof Error ? error.message : error);
+          redirect(response, "/?seo=failed#seo");
+        }
+        return;
+      }
+
       if (url.pathname === "/login" && request.method === "GET") {
         if (commerce) {
           void restoreCommerceCache().then(() => {
@@ -3051,24 +3077,6 @@ export function createMonitorServer(
         if (input.all === true) await store.markAllNotificationsRead(currentUser.id);
         else if (typeof input.id === "string") await store.markNotificationRead(input.id, currentUser.id);
         json(response, 200, { saved: true });
-        return;
-      }
-
-      if (url.pathname === "/api/seo/callback" && request.method === "GET") {
-        if (!searchConsole) { redirect(response, "/?seo=not-configured#seo"); return; }
-        const state = url.searchParams.get("state") || "";
-        const code = url.searchParams.get("code") || "";
-        const ownerId = state ? await store.consumeSeoOauthState(state) : null;
-        if (!ownerId || ownerId !== currentUser.id || !code) { redirect(response, "/?seo=invalid#seo"); return; }
-        try {
-          await searchConsole.exchangeCode(code);
-          await searchConsole.sync();
-          await store.addNotification({ type: "seo", severity: "success", title: "Search performance connected", message: "Google organic search data is now synchronized with the operations suite.", actionView: "seo" });
-          redirect(response, "/?seo=connected#seo");
-        } catch (error: unknown) {
-          console.error("Search Console connection failed", error instanceof Error ? error.message : error);
-          redirect(response, "/?seo=failed#seo");
-        }
         return;
       }
 

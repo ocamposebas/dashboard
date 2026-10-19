@@ -101,11 +101,12 @@ export class SearchConsoleGateway {
     return connection;
   }
 
-  async status(): Promise<{ configured: true; connected: boolean; siteUrl: string | null; sites: SearchConsoleSite[]; connectedAt: string | null }> {
+  async status(): Promise<{ configured: true; connected: boolean; callbackUrl: string; siteUrl: string | null; sites: SearchConsoleSite[]; connectedAt: string | null }> {
     const connection = await this.loadConnection();
     return {
       configured: true,
       connected: Boolean(connection),
+      callbackUrl: this.config.redirectUri,
       siteUrl: connection?.siteUrl || null,
       sites: connection?.sites || [],
       connectedAt: connection?.connectedAt || null,

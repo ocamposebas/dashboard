@@ -6249,6 +6249,9 @@ async function loadSeo(force = false): Promise<void> {
     if (!response.ok || !isRecord(payload)) throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "Search performance could not be loaded");
     const configured = payload.configured !== false;
     const connected = payload.connected === true || (isRecord(payload.report) && payload.report.connected === true);
+    if (typeof payload.callbackUrl === "string" && payload.callbackUrl) {
+      requiredElement<HTMLElement>("#seo-callback-url").textContent = payload.callbackUrl;
+    }
     requiredElement<HTMLElement>("#seo-setup").hidden = configured && connected;
     const connect = requiredElement<HTMLButtonElement>("#seo-connect");
     connect.disabled = !configured || !workspaceSession?.permissions.administer;
