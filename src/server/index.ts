@@ -11,6 +11,7 @@ import { migrateDatabase } from "./databaseMigrations.js";
 import { BarcodeLabelService } from "./barcodeLabels.js";
 import { AffiliateRepository } from "./affiliateRepository.js";
 import { AffiliateShadowSync } from "./affiliateShadowSync.js";
+import { ShipStationGateway } from "./shipStationGateway.js";
 
 const config = loadConfig();
 const fulfillmentDatabase = config.fulfillmentDatabase
@@ -25,6 +26,7 @@ if (fulfillmentDatabase) {
 const barcodeLabels = config.barcodeSigningSecret
   ? new BarcodeLabelService(config.barcodeSigningSecret)
   : undefined;
+const shipStationGateway = new ShipStationGateway(config.shipStation);
 const store = new PresenceStore(
   config.redisUrl,
   config.redisKeyPrefix,
@@ -34,6 +36,7 @@ const store = new PresenceStore(
 const server = createMonitorServer(config, store, {
   ...(fulfillmentDatabase ? { fulfillmentDatabase } : {}),
   ...(barcodeLabels ? { barcodeLabels } : {}),
+  shipStationGateway,
 });
 const hub = new SocketHub(config, store);
 const upstreamMonitor = config.upstreamMonitor
@@ -64,6 +67,31 @@ if (!orderSync) {
     "Woo order reconciliation is disabled; configure the WOOCOMMERCE_* variables",
   );
 }
+
+void shipStationGateway.capabilities()
+  .then((capabilities) => {
+    const carriers = capabilities.carriers.map((carrier) => ({
+      code: carrier.code,
+      name: carrier.name,
+      services: carrier.services.map((service) => service.name),
+    }));
+    console.log("ShipStation connection check", {
+      credentialConfigured: capabilities.credentialConfigured,
+      connected: capabilities.connected,
+      rateMode: capabilities.dataMode,
+      rateShoppingAvailable: capabilities.rateShoppingAvailable,
+      labelPurchaseMode: capabilities.labelPurchaseMode,
+      originConfigured: Boolean(capabilities.originName),
+      carriers,
+      ...(capabilities.error ? { error: capabilities.error } : {}),
+    });
+  })
+  .catch((error: unknown) => {
+    console.warn(
+      "ShipStation connection check failed safely",
+      error instanceof Error ? error.message : "Unknown validation error",
+    );
+  });
 
 if (fulfillmentDatabase) {
   void fulfillmentDatabase.ping()
