@@ -1162,7 +1162,7 @@ export function createMonitorServer(
     let coa: CommerceCoa | undefined;
     if (type === "batch") {
       const coaId = typeof input.coaId === "string" ? input.coaId.trim() : "";
-      coa = (await commerce.listCoas()).find((item) => item.id === coaId);
+      coa = (await fulfillmentCoas()).find((item) => item.id === coaId);
       if (!coa) throw new ProductLocationError("Select an existing COA batch", "not_found");
       if (!coaMatchesCatalogRecord(coa, product, variation)) {
         throw new BarcodeLabelError(
@@ -2349,7 +2349,7 @@ export function createMonitorServer(
           }
           const [order, coas] = await Promise.all([
             commerce.getOrder(session.orderId),
-            commerce.listCoas(),
+            fulfillmentCoas(),
           ]);
           const packed = await fulfillmentRepository.completePacking({
             fulfillmentId,
