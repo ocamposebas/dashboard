@@ -75,7 +75,7 @@ void shipStationGateway.capabilities()
       name: carrier.name,
       services: carrier.services.map((service) => service.name),
     }));
-    console.log("ShipStation connection check", {
+    console.log("ShipStation connection check", JSON.stringify({
       credentialConfigured: capabilities.credentialConfigured,
       connected: capabilities.connected,
       rateMode: capabilities.dataMode,
@@ -84,7 +84,7 @@ void shipStationGateway.capabilities()
       originConfigured: Boolean(capabilities.originName),
       carriers,
       ...(capabilities.error ? { error: capabilities.error } : {}),
-    });
+    }));
   })
   .catch((error: unknown) => {
     console.warn(
