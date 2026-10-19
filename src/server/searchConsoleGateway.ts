@@ -85,9 +85,12 @@ export class SearchConsoleGateway {
     if (!response.ok) throw new Error(`Google token exchange failed (${response.status})`);
     const token = await response.json() as OAuthTokenResponse;
     if (!token.access_token || !token.refresh_token) throw new Error("Google did not return an offline refresh token");
-    const sites = await this.listSitesWithToken(token.access_token);
+    const availableSites = await this.listSitesWithToken(token.access_token);
     const preferred = this.config.preferredSiteUrl;
-    const siteUrl = sites.find((site) => site.siteUrl === preferred)?.siteUrl || sites[0]?.siteUrl || preferred;
+    const preferredSite = preferred ? availableSites.find((site) => site.siteUrl === preferred) : undefined;
+    if (preferred && !preferredSite) throw new Error("The configured Phase One Labz Search Console property is not available to this account");
+    const sites = preferredSite ? [preferredSite] : availableSites;
+    const siteUrl = preferredSite?.siteUrl || sites[0]?.siteUrl;
     if (!siteUrl) throw new Error("No Search Console property is available for this account");
     const connection: StoredConnection = {
       accessToken: token.access_token,
@@ -103,19 +106,24 @@ export class SearchConsoleGateway {
 
   async status(): Promise<{ configured: true; connected: boolean; callbackUrl: string; siteUrl: string | null; sites: SearchConsoleSite[]; connectedAt: string | null }> {
     const connection = await this.loadConnection();
+    const sites = connection ? this.scopedSites(connection.sites) : [];
+    const preferred = this.config.preferredSiteUrl;
+    const siteUrl = preferred
+      ? (sites.some((site) => site.siteUrl === preferred) ? preferred : null)
+      : connection?.siteUrl || null;
     return {
       configured: true,
-      connected: Boolean(connection),
+      connected: Boolean(connection && siteUrl),
       callbackUrl: this.config.redirectUri,
-      siteUrl: connection?.siteUrl || null,
-      sites: connection?.sites || [],
+      siteUrl,
+      sites,
       connectedAt: connection?.connectedAt || null,
     };
   }
 
   async selectSite(siteUrl: string): Promise<void> {
     const connection = await this.requireConnection();
-    if (!connection.sites.some((site) => site.siteUrl === siteUrl)) throw new Error("Unknown Search Console property");
+    if (!this.scopedSites(connection.sites).some((site) => site.siteUrl === siteUrl)) throw new Error("Unknown Search Console property");
     await this.saveConnection({ ...connection, siteUrl });
   }
 
@@ -232,7 +240,22 @@ export class SearchConsoleGateway {
   private async requireConnection(): Promise<StoredConnection> {
     const connection = await this.loadConnection();
     if (!connection) throw new Error("Search Console is not connected");
+    const preferred = this.config.preferredSiteUrl;
+    if (preferred) {
+      const preferredSite = connection.sites.find((site) => site.siteUrl === preferred);
+      if (!preferredSite) throw new Error("The configured Phase One Labz Search Console property is no longer available");
+      if (connection.siteUrl !== preferred || connection.sites.length !== 1) {
+        const scopedConnection = { ...connection, siteUrl: preferred, sites: [preferredSite] };
+        await this.saveConnection(scopedConnection);
+        return scopedConnection;
+      }
+    }
     return connection;
+  }
+
+  private scopedSites(sites: SearchConsoleSite[]): SearchConsoleSite[] {
+    const preferred = this.config.preferredSiteUrl;
+    return preferred ? sites.filter((site) => site.siteUrl === preferred) : sites;
   }
 
   private async saveConnection(connection: StoredConnection): Promise<void> {

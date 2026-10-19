@@ -6208,10 +6208,25 @@ function renderSeoTable(selector: string, rows: SeoRow[], page = false): void {
   body.innerHTML = rows.slice(0, 12).map((row) => `<tr><td><span class="seo-key${page ? " is-page" : ""}" title="${escapeHtml(row.key)}">${escapeHtml(page ? row.key.replace(/^https?:\/\/[^/]+/, "") || "/" : row.key)}</span></td><td class="cell-money">${formatNumber(Math.round(row.clicks))}</td><td>${formatNumber(Math.round(row.impressions))}</td><td>${(row.ctr * 100).toFixed(1)}%</td><td>${row.position.toFixed(1)}</td></tr>`).join("");
 }
 
-function renderSeoInsights(selector: string, rows: SeoRow[]): void {
+function seoDimensionLabel(value: string, dimension: "device" | "country"): string {
+  const normalized = value.trim().toLowerCase();
+  if (dimension === "device") {
+    return ({ mobile: "Mobile", desktop: "Desktop", tablet: "Tablet" } as Record<string, string>)[normalized] || value;
+  }
+  const countryNames: Record<string, string> = {
+    usa: "United States", can: "Canada", gbr: "United Kingdom", aus: "Australia", deu: "Germany",
+    fra: "France", mex: "Mexico", col: "Colombia", esp: "Spain", ita: "Italy", ind: "India",
+  };
+  return countryNames[normalized] || value.toUpperCase();
+}
+
+function renderSeoInsights(selector: string, rows: SeoRow[], dimension: "device" | "country"): void {
   const container = requiredElement<HTMLElement>(selector);
   const total = Math.max(1, rows.reduce((sum, item) => sum + item.clicks, 0));
-  container.innerHTML = rows.slice(0, 6).map((item) => `<div class="insight-row"><span>${escapeHtml(item.key.replace(/^sc-domain:/, ""))}</span><div><i style="width:${Math.max(3, (item.clicks / total) * 100)}%"></i></div><strong>${formatNumber(Math.round(item.clicks))}</strong></div>`).join("") || '<p class="empty-state">No data available.</p>';
+  container.innerHTML = rows.slice(0, 6).map((item) => {
+    const share = (item.clicks / total) * 100;
+    return `<div class="insight-row"><div class="insight-row-head"><strong>${escapeHtml(seoDimensionLabel(item.key, dimension))}</strong><span>${formatNumber(Math.round(item.clicks))} click${Math.round(item.clicks) === 1 ? "" : "s"} · ${share.toFixed(0)}%</span></div><div class="insight-row-bar" aria-label="${share.toFixed(0)} percent of organic clicks"><i style="width:${Math.max(3, share)}%"></i></div></div>`;
+  }).join("") || '<p class="empty-state">No data available for this period.</p>';
 }
 
 function renderSeo(report: SeoReport): void {
@@ -6225,17 +6240,16 @@ function renderSeo(report: SeoReport): void {
   requiredElement<HTMLElement>("#seo-ctr-change").textContent = metricChange(report.changes.ctr);
   requiredElement<HTMLElement>("#seo-position-change").textContent = report.changes.position === null ? "No prior comparison" : `${report.changes.position >= 0 ? "↑" : "↓"} ${Math.abs(report.changes.position).toFixed(1)} positions`;
   requiredElement<HTMLElement>("#seo-opportunity-count").textContent = String(report.opportunities.length);
-  requiredElement<HTMLElement>("#seo-opportunity-label").textContent = report.opportunities.length ? "Prioritized by visibility" : "Performance is healthy";
   requiredElement<HTMLElement>("#seo-period").textContent = `${formatShortDateLabel(report.period.start)} – ${formatShortDateLabel(report.period.end)}`;
   const navCount = requiredElement<HTMLElement>("#seo-nav-count"); navCount.textContent = String(report.opportunities.length); navCount.hidden = report.opportunities.length === 0;
   renderSeoChart(report.daily);
   renderSeoTable("#seo-query-body", report.topQueries);
   renderSeoTable("#seo-page-body", report.topPages, true);
-  renderSeoInsights("#seo-devices", report.devices);
-  renderSeoInsights("#seo-countries", report.countries);
+  renderSeoInsights("#seo-devices", report.devices, "device");
+  renderSeoInsights("#seo-countries", report.countries, "country");
   const opportunities = requiredElement<HTMLElement>("#seo-opportunities");
   opportunities.innerHTML = report.opportunities.map((item, index) => `<article><span>${String(index + 1).padStart(2, "0")}</span><div><strong>${escapeHtml(item.title.replace(/^https?:\/\/[^/]+/, "") || "/")}</strong><p>${escapeHtml(item.message)}</p><small>${escapeHtml(item.impact)}</small></div><b>${item.type === "query" ? "QUERY" : "PAGE"}</b></article>`).join("") || '<div class="customer-empty-detail"><span>✓</span><strong>No urgent SEO opportunities</strong><small>Search performance is currently within healthy thresholds.</small></div>';
-  requiredElement<HTMLElement>("#seo-opportunity-summary").textContent = `${report.opportunities.length} prioritized`;
+  requiredElement<HTMLElement>("#seo-opportunity-summary").textContent = report.opportunities.length === 1 ? "priority" : "priorities";
   const sitemaps = requiredElement<HTMLElement>("#seo-sitemaps");
   sitemaps.innerHTML = report.sitemaps.map((item) => `<article><span>${String(item.isPending) === "true" ? "…" : "✓"}</span><div><strong>${escapeHtml(String(item.path || "Sitemap"))}</strong><small>${formatNumber(Number(item.contents && Array.isArray(item.contents) ? (item.contents as Array<Record<string, unknown>>).reduce((sum, content) => sum + Number(content.submitted || 0), 0) : 0))} submitted · ${item.lastSubmitted ? escapeHtml(formatCommerceTimestamp(String(item.lastSubmitted))) : "Awaiting submission data"}</small></div></article>`).join("") || '<p class="empty-state">No sitemap records were returned.</p>';
 }
@@ -6257,14 +6271,12 @@ async function loadSeo(force = false): Promise<void> {
     connect.disabled = !configured || !workspaceSession?.permissions.administer;
     connect.textContent = connected ? "Reconnect account" : configured ? "Connect search data" : "Credentials required";
     requiredElement<HTMLButtonElement>("#seo-sync").disabled = !connected || !workspaceSession?.permissions.operate;
-    requiredElement<HTMLElement>("#seo-connection-title").textContent = connected ? String(payload.siteUrl || "Search property connected") : configured ? "Ready for secure authorization" : "Google credentials required";
-    requiredElement<HTMLElement>("#seo-connection-copy").textContent = connected ? `Read-only search performance · ${String(payload.siteUrl || "property")}` : configured ? "Authorize the Google account that owns your search property." : "Add the client ID and client secret to activate the OAuth connection.";
+    requiredElement<HTMLElement>("#seo-connection-title").textContent = connected ? "Phase One Labz search data is connected" : configured ? "Ready for secure authorization" : "Google credentials required";
+    requiredElement<HTMLElement>("#seo-connection-copy").textContent = connected ? "Read-only access · phaseonelabz.com · refreshed on demand" : configured ? "Authorize the Google account that owns the Phase One Labz property." : "Add the client ID and client secret to activate the OAuth connection.";
     state.textContent = connected ? "Connected" : configured ? "Ready" : "Setup required";
     state.className = `integration-state${connected ? " integration-state--connected" : " integration-state--planned"}`;
-    const propertyWrap = requiredElement<HTMLElement>("#seo-property-wrap");
     const property = requiredElement<HTMLSelectElement>("#seo-property");
     const sites = Array.isArray(payload.sites) ? payload.sites as Array<{ siteUrl: string }> : [];
-    propertyWrap.hidden = !connected || !sites.length;
     property.innerHTML = sites.map((site) => `<option value="${escapeHtml(site.siteUrl)}"${site.siteUrl === payload.siteUrl ? " selected" : ""}>${escapeHtml(site.siteUrl)}</option>`).join("");
     if (isRecord(payload.report)) renderSeo(payload.report as unknown as SeoReport);
     if (isRecord(payload.report) && force) showToast("Search data synchronized", "SEO metrics and opportunities now reflect the latest available Search Console data.");
@@ -8431,23 +8443,18 @@ requiredElement<HTMLButtonElement>("#seo-connect").addEventListener("click", () 
   location.assign("/api/seo/connect");
 });
 requiredElement<HTMLButtonElement>("#seo-sync").addEventListener("click", () => void loadSeo(true));
-requiredElement<HTMLSelectElement>("#seo-property").addEventListener("change", async (event) => {
-  const select = event.currentTarget as HTMLSelectElement;
-  select.disabled = true;
-  try {
-    const response = await fetch("/api/seo/property", {
-      method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ siteUrl: select.value }),
-    });
-    const payload: unknown = await response.json();
-    if (!response.ok || !isRecord(payload) || !isRecord(payload.report)) throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The search property could not be selected");
-    renderSeo(payload.report as unknown as SeoReport);
-    showToast("Search property changed", "The selected property is now the source for SEO intelligence.");
-  } catch (error) {
-    showToast("Property change failed", error instanceof Error ? error.message : "Try again.", false);
-  } finally { select.disabled = false; }
-});
+document.querySelectorAll<HTMLButtonElement>("[data-seo-ranking]").forEach((button) => button.addEventListener("click", () => {
+  const view = button.dataset.seoRanking;
+  if (!view) return;
+  document.querySelectorAll<HTMLButtonElement>("[data-seo-ranking]").forEach((item) => {
+    const active = item.dataset.seoRanking === view;
+    item.classList.toggle("is-active", active);
+    item.setAttribute("aria-selected", String(active));
+  });
+  document.querySelectorAll<HTMLElement>("[data-seo-ranking-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.seoRankingPanel !== view;
+  });
+}));
 
 requiredElement<HTMLButtonElement>("#open-user-create").addEventListener("click", () => setDialogVisibility("#user-dialog", "#user-dialog-backdrop", true));
 requiredElement<HTMLButtonElement>("#user-dialog-cancel").addEventListener("click", closeUserDialog);
