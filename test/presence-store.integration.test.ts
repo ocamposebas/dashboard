@@ -61,6 +61,28 @@ test(
       });
       await store.recordPageView(rawVisitorId, firstSession, "/");
       await store.recordClick(firstSession, "/", "Shop");
+      await store.recordSearch(firstSession, "/shop", {
+        query: "bpc 157",
+        resultCount: 3,
+      });
+      await store.recordSearch(firstSession, "/shop", {
+        query: "missing compound",
+        resultCount: 0,
+      });
+      await store.recordCart(firstSession, "/shop", {
+        customerName: "Research Customer",
+        customerEmail: "customer@example.com",
+        expiresAt: Date.now() + 48 * 60 * 60_000,
+        items: [{
+          productId: 101,
+          variationId: 0,
+          name: "BPC-157",
+          sku: "BPC-157",
+          quantity: 2,
+          price: 39.5,
+          imageUrl: "https://example.com/bpc-157.webp",
+        }],
+      });
       assert.equal(
         await store.recordReconciledOrder("b".repeat(64), new Date()),
         true,
@@ -69,6 +91,7 @@ test(
         await store.recordOrder(firstSession, "b".repeat(64), "/checkout/thank-you"),
         false,
       );
+      await store.markCartConverted(firstSession, "/checkout/thank-you");
       assert.equal(
         await store.recordReconciledOrder("b".repeat(64), new Date()),
         false,
@@ -83,6 +106,20 @@ test(
         path: "/shop",
       });
       await store.recordPageView(rawVisitorId, secondSession, "/shop");
+      await store.recordCart(secondSession, "/shop", {
+        customerName: "",
+        customerEmail: "",
+        expiresAt: Date.now() + 48 * 60 * 60_000,
+        items: [{
+          productId: 202,
+          variationId: 204,
+          name: "Research Blend",
+          sku: "BLEND-204",
+          quantity: 1,
+          price: 62,
+          imageUrl: "",
+        }],
+      });
 
       const snapshot = await store.snapshot();
       assert.equal(snapshot.analytics.uniqueVisitors, 1);
@@ -122,6 +159,52 @@ test(
       assert.equal(second?.visitNumber, 2);
       assert.equal(second?.returningVisitor, true);
       assert.equal(first?.visitorNumber, second?.visitorNumber);
+      assert.equal(snapshot.analytics.marketing?.activeCarts, 1);
+      assert.equal(snapshot.analytics.marketing?.abandonedCarts, 0);
+      assert.equal(snapshot.analytics.marketing?.capturedValue, 62);
+      assert.equal(snapshot.analytics.marketing?.zeroResultSearches, 1);
+      assert.equal(snapshot.analytics.marketing?.topSearches.length, 2);
+      assert.equal(snapshot.analytics.marketing?.carts.find(
+        (cart) => cart.sessionId === firstSession,
+      )?.status, "converted");
+      assert.equal(snapshot.analytics.marketing?.recentSearches[0]?.visitorNumber, first?.visitorNumber);
+    } finally {
+      await store.disconnect();
+      const keys = await cleanup.keys(`${prefix}:*`);
+      if (keys.length) await cleanup.unlink(keys);
+      await cleanup.quit();
+    }
+  },
+);
+
+test(
+  "persists one actionable notification for repeated order discovery",
+  { skip: redisUrl ? false : "Set TEST_REDIS_URL to run the Redis integration test" },
+  async () => {
+    assert.ok(redisUrl);
+    const prefix = `phaseone:test:${randomUUID()}`;
+    const store = new PresenceStore(redisUrl, prefix, 45_000, "America/Bogota");
+    const cleanup = createClient({ url: redisUrl });
+    await cleanup.connect();
+    await store.connect(() => undefined);
+    try {
+      const input = {
+        type: "order" as const,
+        severity: "success" as const,
+        title: "New order #P1-903",
+        message: "Research Customer · USD 149.50",
+        actionView: "orders",
+        actionEntityId: 903,
+      };
+      const created = await store.addNotificationOnce("commerce-order:903", input);
+      const repeated = await store.addNotificationOnce("commerce-order:903", input);
+      assert.ok(created);
+      assert.equal(repeated, null);
+      const notifications = await store.listNotifications("operator-1");
+      assert.equal(notifications.length, 1);
+      assert.equal(notifications[0]?.actionEntityId, 903);
+      assert.equal(await store.markNotificationRead(created.id, "operator-1"), true);
+      assert.deepEqual((await store.listNotifications("operator-1"))[0]?.readBy, ["operator-1"]);
     } finally {
       await store.disconnect();
       const keys = await cleanup.keys(`${prefix}:*`);

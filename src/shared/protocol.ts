@@ -11,6 +11,49 @@ export type PresenceSection = (typeof PRESENCE_SECTIONS)[number];
 
 export type PresenceCounts = Record<PresenceSection, number>;
 
+export interface MarketingCartItem {
+  productId: number;
+  variationId: number;
+  name: string;
+  sku: string;
+  quantity: number;
+  price: number;
+  imageUrl: string;
+}
+
+export interface MarketingCart {
+  sessionId: string;
+  visitorNumber: number;
+  customerName: string;
+  customerEmail: string;
+  items: MarketingCartItem[];
+  itemCount: number;
+  total: number;
+  status: "active" | "abandoned" | "converted" | "cleared";
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string | null;
+  path: string;
+}
+
+export interface MarketingAnalytics {
+  topSearches: Array<{ query: string; count: number; zeroResults: number }>;
+  recentSearches: Array<{
+    sessionId: string;
+    visitorNumber: number;
+    query: string;
+    resultCount: number;
+    path: string;
+    searchedAt: string;
+  }>;
+  carts: MarketingCart[];
+  activeCarts: number;
+  abandonedCarts: number;
+  capturedValue: number;
+  abandonedValue: number;
+  zeroResultSearches: number;
+}
+
 export interface PresenceSnapshot {
   type: "presence:snapshot";
   counts: PresenceCounts;
@@ -70,6 +113,11 @@ export interface PresenceSnapshot {
         status?: "paid";
       }>;
     }>;
+    /**
+     * Customer-intent data is optional so older monitor relays can continue to
+     * feed a newer dashboard during a rolling deployment.
+     */
+    marketing?: MarketingAnalytics;
   };
 }
 

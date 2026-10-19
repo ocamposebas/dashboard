@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Phase One Labz affiliate workspace" />
+    <title>Affiliate Workspace — Phase One Labz</title>
+  </head>
+  <body>
+    <div class="affiliate-access" id="affiliate-access">
+      <header class="affiliate-public-header"><a href="https://phaseonelabz.com/" aria-label="Phase One Labz home"><img id="affiliate-public-logo" alt="Phase One Labz" /></a><span>Affiliate Workspace</span></header>
+      <main class="affiliate-access-shell">
+        <section class="affiliate-access-story"><span class="affiliate-story-kicker">PHASE ONE PARTNERS</span><h1>Build your audience.<br /><em>Track every result.</em></h1><p>Your sales, coupon performance, commissions and payout requests—organized in one private workspace.</p><div class="affiliate-story-proof"><div><b>Live</b><span>Commission visibility</span></div><div><b>Clear</b><span>Payout history</span></div><div><b>Private</b><span>Secure access</span></div></div></section>
+        <section class="affiliate-login-card" id="affiliate-login-card">
+          <div><span class="affiliate-card-mark">P1</span><p>WELCOME BACK</p><h2>Affiliate sign in</h2><small>Use the credentials created for your Phase One partner account.</small></div>
+          <form id="affiliate-login-form"><label><span>Email address</span><input id="affiliate-login-email" type="email" autocomplete="username" required /></label><label><span>Password</span><input id="affiliate-login-password" type="password" autocomplete="current-password" required /></label><p class="affiliate-form-error" id="affiliate-login-error" hidden></p><button type="submit">Open my workspace <span>→</span></button></form>
+          <footer><span>Need access?</span> Contact the Phase One Labz team for your private invitation.</footer>
+        </section>
+        <section class="affiliate-login-card" id="affiliate-activation-card" hidden>
+          <div><span class="affiliate-card-mark">P1</span><p>PRIVATE INVITATION</p><h2>Create your password</h2><small>Finish activating your own Phase One partner account.</small></div>
+          <form id="affiliate-activation-form"><label><span>New password</span><input id="affiliate-activation-password" type="password" minlength="12" autocomplete="new-password" required /></label><label><span>Confirm password</span><input id="affiliate-activation-confirm" type="password" minlength="12" autocomplete="new-password" required /></label><p class="affiliate-form-error" id="affiliate-activation-error" hidden></p><button type="submit">Activate my account <span>→</span></button></form>
+          <footer><button type="button" id="affiliate-back-login">← Return to sign in</button></footer>
+        </section>
+      </main>
+    </div>
+
+    <div class="affiliate-app" id="affiliate-app" hidden>
+      <aside class="affiliate-sidebar"><a class="affiliate-brand" href="https://phaseonelabz.com/"><img id="affiliate-logo" alt="Phase One Labz" /></a><nav><button class="is-active" type="button" data-affiliate-section="overview"><span>⌂</span>Overview</button><button type="button" data-affiliate-section="performance"><span>↗</span>Performance</button><button type="button" data-affiliate-section="payouts"><span>$</span>Payouts</button></nav><div class="affiliate-support"><span>Need help?</span><p>Our team can help with links, coupons or payments.</p><a href="mailto:support@phaseonelabz.com">Contact support</a></div></aside>
+      <main class="affiliate-main"><header class="affiliate-topbar"><div><p>Affiliate workspace</p><h1 id="affiliate-greeting">Good to see you</h1></div><div><button class="affiliate-refresh" id="affiliate-refresh" type="button">↻ <span>Refresh</span></button><button class="affiliate-account" id="affiliate-logout" type="button"><span id="affiliate-avatar">P1</span><div><b id="affiliate-account-name">Partner</b><small>Sign out</small></div></button></div></header><div id="affiliate-workspace"><div class="affiliate-loading"><span></span><strong>Preparing your workspace…</strong></div></div></main>
+    </div>
+    <script type="module" src="/affiliate.ts"></script>
+  </body>
+</html>

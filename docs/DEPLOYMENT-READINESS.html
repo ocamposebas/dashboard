@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Phase One Labz — Centro de preparación de lanzamiento</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg:#080a0d; --panel:#111419; --panel-2:#171b21; --line:#272d35;
+      --text:#f5f7fa; --muted:#98a2af; --brand:#75d8ec; --good:#70d6a0;
+      --warn:#f1c26f; --danger:#f08b8b; --shadow:0 18px 50px rgba(0,0,0,.28);
+    }
+    [data-theme="light"] {
+      color-scheme: light;
+      --bg:#f2f4f6; --panel:#fff; --panel-2:#f7f9fa; --line:#dce1e6;
+      --text:#12161c; --muted:#64707d; --brand:#187b91; --good:#187f50;
+      --warn:#986614; --danger:#b43f45; --shadow:0 18px 50px rgba(19,28,38,.09);
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
+    button,input{font:inherit}
+    .shell{max-width:1440px;margin:0 auto;padding:28px}
+    .topbar{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:24px}
+    .brand{display:flex;align-items:center;gap:13px}
+    .mark{display:grid;place-items:center;width:42px;height:42px;border:1px solid var(--line);border-radius:13px;background:var(--panel);font-weight:850;letter-spacing:-.04em}
+    .eyebrow{margin:0 0 3px;color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.15em;text-transform:uppercase}
+    h1,h2,h3,p{margin-top:0}
+    h1{font-size:clamp(25px,4vw,42px);line-height:1.08;letter-spacing:-.04em;margin-bottom:10px}
+    h2{font-size:18px;letter-spacing:-.02em;margin-bottom:5px}
+    h3{font-size:15px;margin:0}
+    .muted{color:var(--muted)}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .button{border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);padding:9px 12px;cursor:pointer;font-weight:700}
+    .button:hover{border-color:var(--brand);color:var(--brand)}
+    .hero{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px;margin-bottom:18px}
+    .hero-main,.score,.gate,.sequence{border:1px solid var(--line);background:var(--panel);border-radius:18px;box-shadow:var(--shadow)}
+    .hero-main{padding:28px;min-height:216px;display:flex;flex-direction:column;justify-content:space-between}
+    .hero-copy{max-width:760px;color:var(--muted);font-size:16px}
+    .status-row{display:flex;gap:8px;flex-wrap:wrap}
+    .pill{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:999px;padding:7px 10px;font-size:12px;font-weight:800}
+    .pill i{width:7px;height:7px;border-radius:50%;background:currentColor}
+    .safe{color:var(--good)} .hold{color:var(--warn)} .block{color:var(--danger)}
+    .score{padding:22px;display:flex;flex-direction:column;justify-content:center}
+    .score strong{font-size:52px;letter-spacing:-.07em;line-height:1}
+    .progress{height:10px;background:var(--panel-2);border:1px solid var(--line);border-radius:99px;overflow:hidden;margin:18px 0 10px}
+    .progress span{display:block;height:100%;width:0;background:var(--brand);transition:width .25s ease}
+    .filters{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}
+    .filter[aria-pressed="true"]{background:var(--text);color:var(--bg);border-color:var(--text)}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+    .gate{padding:20px;box-shadow:none}
+    .gate-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding-bottom:15px;border-bottom:1px solid var(--line)}
+    .number{width:30px;height:30px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:var(--panel-2);font-weight:850;color:var(--brand);flex:0 0 auto}
+    .gate-title{display:flex;gap:11px}
+    .gate-count{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px;white-space:nowrap}
+    .checklist{display:grid;gap:0;margin-top:4px}
+    .item{display:grid;grid-template-columns:22px 1fr;gap:10px;padding:13px 0;border-bottom:1px solid color-mix(in srgb,var(--line) 70%,transparent);cursor:pointer}
+    .item:last-child{border-bottom:0}
+    .item input{appearance:none;width:19px;height:19px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);margin:2px 0 0;cursor:pointer}
+    .item input:checked{background:var(--good);border-color:var(--good);box-shadow:inset 0 0 0 4px var(--panel)}
+    .item input:checked + span{text-decoration:line-through;color:var(--muted)}
+    .badge{display:inline-block;margin-top:5px;padding:3px 7px;border-radius:6px;background:var(--panel-2);color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+    .badge.red{color:var(--danger)} .badge.amber{color:var(--warn)} .badge.green{color:var(--good)}
+    .sequence{padding:22px;margin-top:16px;box-shadow:none}
+    .steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:16px}
+    .step{background:var(--panel-2);border:1px solid var(--line);border-radius:11px;padding:13px;min-height:106px}
+    .step b{display:block;color:var(--brand);font-size:11px;letter-spacing:.12em;text-transform:uppercase;margin-bottom:7px}
+    .footer{display:flex;justify-content:space-between;gap:18px;margin-top:18px;color:var(--muted);font-size:12px}
+    [hidden]{display:none!important}
+    @media(max-width:900px){.hero{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.steps{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:560px){.shell{padding:16px}.topbar{align-items:flex-start}.brand-copy{display:none}.hero-main{padding:20px}.steps{grid-template-columns:1fr}.footer{flex-direction:column}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark">P1</div>
+        <div class="brand-copy"><p class="eyebrow">Phase One Labz</p><strong>Launch Command Center</strong></div>
+      </div>
+      <div class="actions">
+        <button class="button" id="theme" type="button">Cambiar tema</button>
+        <button class="button" id="reset" type="button">Reiniciar checks</button>
+      </div>
+    </header>
+
+    <section class="hero">
+      <div class="hero-main">
+        <div>
+          <p class="eyebrow">Preparación de producción</p>
+          <h1>Un solo control para desplegar sin sorpresas.</h1>
+          <p class="hero-copy">El producto ya funciona localmente. Esta lista separa lo que bloquea producción de lo que puede desplegarse apagado y activarse después con una prueba controlada.</p>
+        </div>
+        <div class="status-row">
+          <span class="pill safe"><i></i>Código local validado</span>
+          <span class="pill block"><i></i>Infraestructura por certificar</span>
+          <span class="pill hold"><i></i>Compras ShipStation apagadas</span>
+        </div>
+      </div>
+      <aside class="score">
+        <p class="eyebrow">Avance verificado</p>
+        <strong id="percent">0%</strong>
+        <div class="progress"><span id="bar"></span></div>
+        <span class="muted" id="counter">0 de 0 controles listos</span>
+      </aside>
+    </section>
+
+    <nav class="filters" aria-label="Filtros del checklist">
+      <button class="button filter" data-filter="all" aria-pressed="true">Todo</button>
+      <button class="button filter" data-filter="blocking" aria-pressed="false">Bloquea salida</button>
+      <button class="button filter" data-filter="safe-off" aria-pressed="false">Puede salir apagado</button>
+      <button class="button filter" data-filter="activation" aria-pressed="false">Activación posterior</button>
+    </nav>
+
+    <section class="grid" id="gates"></section>
+
+    <section class="sequence">
+      <p class="eyebrow">Orden de lanzamiento recomendado</p>
+      <h2>Despliegue por capas, con salida de emergencia.</h2>
+      <div class="steps">
+        <div class="step"><b>01 · Proteger</b>Backups y restauración probada para WordPress, PostgreSQL, Redis y evidencias.</div>
+        <div class="step"><b>02 · Preparar</b>Secretos, volúmenes, DNS/TLS y puente WordPress 1.5.0.</div>
+        <div class="step"><b>03 · Desplegar seguro</b>Migraciones 001–011, compras y correos aún desactivados.</div>
+        <div class="step"><b>04 · Certificar</b>Pedido de prueba, escáner, cámara, impresoras, reinicio y recuperación.</div>
+        <div class="step"><b>05 · Activar</b>Correo, SEO, rates y afiliados uno por uno; compras reales requieren aprobación separada.</div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span>No guarda claves: solo conserva checks en este navegador.</span>
+      <span>Fuente técnica: REQUIRED-CONFIGURATION.md · Actualizado 2026-10-18</span>
+    </footer>
+  </main>
+
+  <script>
+    const groups = [
+      {n:1,title:'Infraestructura y seguridad',desc:'Lo mínimo para que el servicio sobreviva y sea recuperable.',tag:'blocking',items:[
+        'Dominio final, DNS y certificado HTTPS válidos.',
+        'Secretos finales cargados en Coolify; el hash de contraseña queda como Literal.',
+        'PostgreSQL, Redis y evidencias usan volúmenes persistentes.',
+        'Backups y restauración real probados para las cuatro fuentes de datos.',
+        'Migraciones PostgreSQL 001–012 aplicadas y registradas.',
+        'Health check, cookies seguras, proxy y zona horaria verificados tras reiniciar.'
+      ]},
+      {n:2,title:'WordPress y comercio',desc:'El puente correcto y las reglas de pago reales.',tag:'blocking',items:[
+        'Operations Bridge 1.6.0 instalado después de respaldar WordPress.',
+        'Clave WooCommerce dedicada Read/Write guardada solo en servidor.',
+        'Productos, COAs, puntos, Site Controls y evidencia probados con datos de staging.',
+        'Diferencias de versión Zelle/Venmo y eDebit reconciliadas.',
+        'PRISM, Zelle/Venmo, eDebit y pagos manuales pasan elegibilidad sin descontar stock dos veces.'
+      ]},
+      {n:3,title:'Fulfillment físico',desc:'Certificación completa del flujo de una persona.',tag:'blocking',items:[
+        'Cada SKU, variante y lote piloto tiene ubicación, QR de vial registrado y COA aprobada.',
+        'Un pedido completa queue → picking → packing y sobrevive refresh/restart.',
+        'Los QR de dos lotes aprobados se reflejan una sola vez en el Order COA; un conflicto manual queda bloqueado.',
+        'Escáner HID 2D supera 100 lecturas QR consecutivas de Freedom, ILS y Kovera.',
+        'Cámara funciona en iPhone y Android bajo HTTPS.',
+        'Impresora 203 dpi produce etiquetas de envío 4×6 a tamaño exacto.',
+        'SKU/lote/COA incorrecto, exceso, reintento y concurrencia quedan bloqueados.'
+      ]},
+      {n:4,title:'Evidencia y correo',desc:'Puede desplegarse apagado hasta validar WordPress SMTP.',tag:'safe-off',items:[
+        'Vault privado persistente y cifrado; no accesible por URL ni después de logout.',
+        'Operations Bridge 1.6.0 envía un correo controlado con dos fotos adjuntas.',
+        'Remitente, plantilla, tamaños y registro del proveedor SMTP verificados.',
+        'Política de retención, rebotes y recuperación de estado uncertain documentada.',
+        'Solo entonces EVIDENCE_NOTIFICATION_MODE cambia de disabled a outbox.'
+      ]},
+      {n:5,title:'Integraciones externas',desc:'Se encienden individualmente después del núcleo.',tag:'activation',items:[
+        'Search Console OAuth conecta la propiedad verificada y sincroniza datos read-only.',
+        'ShipStation descubre carriers y obtiene un rate sin comprar.',
+        'SHIPSTATION_LABEL_PURCHASE_ENABLED permanece false hasta un piloto aprobado.',
+        'Ledger afiliado corre en shadow y se reconcilian balances/payouts antes del cutover.',
+        'Coupon Affiliates sigue siendo autoridad hasta aprobación explícita.'
+      ]},
+      {n:6,title:'Storefront y salida final',desc:'Última verificación visible y rollback listo.',tag:'blocking',items:[
+        'WebSocket, búsquedas, carrito, fuentes de tráfico y sonido de orden reciben eventos staged.',
+        'Site Controls cierra y reabre la tienda con respuesta 503/200 como corresponde.',
+        'Desktop, tablet y móvil funcionan en tema claro/oscuro y con teclado.',
+        'Logs no contienen claves, headers de autorización ni reintentos anormales.',
+        'Imagen anterior de Coolify y procedimiento de rollback están disponibles.'
+      ]}
+    ];
+    const key='phaseone-deploy-readiness-v1';
+    const saved=JSON.parse(localStorage.getItem(key)||'{}');
+    const host=document.getElementById('gates');
+    const escapeHtml=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    groups.forEach(group=>{
+      const card=document.createElement('article');
+      card.className='gate'; card.dataset.tag=group.tag;
+      const tagText=group.tag==='blocking'?'Bloquea producción':group.tag==='safe-off'?'Salir apagado':'Activación posterior';
+      const tagClass=group.tag==='blocking'?'red':group.tag==='safe-off'?'amber':'green';
+      card.innerHTML=`<div class="gate-head"><div class="gate-title"><span class="number">${group.n}</span><div><h2>${escapeHtml(group.title)}</h2><p class="muted">${escapeHtml(group.desc)}</p><span class="badge ${tagClass}">${tagText}</span></div></div><span class="gate-count" data-count></span></div><div class="checklist"></div>`;
+      const list=card.querySelector('.checklist');
+      group.items.forEach((text,index)=>{
+        const id=`g${group.n}-${index}`;
+        const label=document.createElement('label'); label.className='item';
+        label.innerHTML=`<input type="checkbox" data-id="${id}" ${saved[id]?'checked':''}><span>${escapeHtml(text)}</span>`;
+        list.appendChild(label);
+      });
+      host.appendChild(card);
+    });
+    function update(){
+      const boxes=[...document.querySelectorAll('.item input')];
+      const checked=boxes.filter(box=>box.checked).length;
+      const percent=boxes.length?Math.round(checked/boxes.length*100):0;
+      document.getElementById('percent').textContent=`${percent}%`;
+      document.getElementById('bar').style.width=`${percent}%`;
+      document.getElementById('counter').textContent=`${checked} de ${boxes.length} controles listos`;
+      document.querySelectorAll('.gate').forEach(card=>{
+        const own=[...card.querySelectorAll('input')];
+        card.querySelector('[data-count]').textContent=`${own.filter(x=>x.checked).length}/${own.length}`;
+      });
+      const state={}; boxes.forEach(box=>state[box.dataset.id]=box.checked);
+      localStorage.setItem(key,JSON.stringify(state));
+    }
+    host.addEventListener('change',update); update();
+    document.querySelectorAll('.filter').forEach(button=>button.addEventListener('click',()=>{
+      document.querySelectorAll('.filter').forEach(x=>x.setAttribute('aria-pressed','false'));
+      button.setAttribute('aria-pressed','true');
+      document.querySelectorAll('.gate').forEach(card=>card.hidden=button.dataset.filter!=='all'&&card.dataset.tag!==button.dataset.filter);
+    }));
+    document.getElementById('reset').addEventListener('click',()=>{document.querySelectorAll('.item input').forEach(x=>x.checked=false);update()});
+    document.getElementById('theme').addEventListener('click',()=>{
+      document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light';
+    });
+  </script>
+</body>
+</html>

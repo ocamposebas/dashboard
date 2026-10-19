@@ -1,6 +1,11 @@
 import type { IncomingMessage, Server as HttpServer } from "node:http";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
-import { isPresenceSection, type PresenceSection } from "../shared/protocol.js";
+import {
+  isPresenceSection,
+  type MarketingCartItem,
+  type PresenceSection,
+  type PresenceSnapshot,
+} from "../shared/protocol.js";
 import { analyticsFingerprint } from "./analyticsIdentity.js";
 import type { AppConfig } from "./config.js";
 import { verifySessionCookie } from "./auth.js";
@@ -49,6 +54,58 @@ function validOrderReference(value: unknown): value is string {
     value.length <= 128 &&
     /^[a-z0-9._:-]+$/i.test(value)
   );
+}
+
+function validOptionalText(value: unknown, max: number): value is string | undefined {
+  return value === undefined || (typeof value === "string" && value.length <= max);
+}
+
+function validEmail(value: unknown): value is string | undefined {
+  return (
+    value === undefined ||
+    (typeof value === "string" &&
+      value.length <= 254 &&
+      (value === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)))
+  );
+}
+
+function parseCartItems(value: unknown): MarketingCartItem[] | null {
+  if (!Array.isArray(value) || value.length > 25) return null;
+  const items: MarketingCartItem[] = [];
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      return null;
+    }
+    const item = candidate as Record<string, unknown>;
+    if (
+      !Number.isSafeInteger(item.productId) ||
+      Number(item.productId) < 0 ||
+      !Number.isSafeInteger(item.variationId) ||
+      Number(item.variationId) < 0 ||
+      !validLabel(item.name, 140) ||
+      !validOptionalText(item.sku, 80) ||
+      !Number.isSafeInteger(item.quantity) ||
+      Number(item.quantity) < 1 ||
+      Number(item.quantity) > 1_000 ||
+      typeof item.price !== "number" ||
+      !Number.isFinite(item.price) ||
+      item.price < 0 ||
+      item.price > 1_000_000 ||
+      !validOptionalText(item.imageUrl, 1_000)
+    ) {
+      return null;
+    }
+    items.push({
+      productId: Number(item.productId),
+      variationId: Number(item.variationId),
+      name: item.name.trim(),
+      sku: typeof item.sku === "string" ? item.sku.trim() : "",
+      quantity: Number(item.quantity),
+      price: Number(item.price.toFixed(2)),
+      imageUrl: typeof item.imageUrl === "string" ? item.imageUrl.trim() : "",
+    });
+  }
+  return items;
 }
 
 function validDevice(value: unknown): value is "Mobile" | "Tablet" | "Desktop" {
@@ -119,7 +176,7 @@ function parseMessage(data: RawData): unknown {
 export class SocketHub {
   private readonly trackerServer = new WebSocketServer({
     noServer: true,
-    maxPayload: 4_096,
+    maxPayload: 16_384,
   });
   private readonly dashboardServer = new WebSocketServer({
     noServer: true,
@@ -132,6 +189,7 @@ export class SocketHub {
   private snapshotTimer: NodeJS.Timeout | undefined;
   private snapshotOperation: Promise<void> = Promise.resolve();
   private lastSnapshotSignature = "";
+  private upstreamSnapshot: PresenceSnapshot | undefined;
   private closing = false;
 
   constructor(
@@ -193,8 +251,8 @@ export class SocketHub {
     this.heartbeatTimer = setInterval(() => this.heartbeatSockets(), 25_000);
     this.heartbeatTimer.unref();
     this.periodicSnapshotTimer = setInterval(() => {
-      void this.broadcastSnapshot(false);
-    }, 60_000);
+      void this.broadcastSnapshot(Boolean(this.config.upstreamMonitor));
+    }, this.config.upstreamMonitor ? 20_000 : 60_000);
     this.periodicSnapshotTimer.unref();
   }
 
@@ -211,11 +269,23 @@ export class SocketHub {
   }
 
   scheduleSnapshot(): void {
-    if (this.closing || this.snapshotTimer) return;
+    if (this.closing || this.snapshotTimer || this.config.upstreamMonitor) return;
     this.snapshotTimer = setTimeout(() => {
       this.snapshotTimer = undefined;
       void this.broadcastSnapshot(false);
     }, 50);
+  }
+
+  publishUpstreamSnapshot(snapshot: PresenceSnapshot): void {
+    if (this.closing || !this.config.upstreamMonitor) return;
+    this.upstreamSnapshot = snapshot;
+    const signature = JSON.stringify([snapshot.counts, snapshot.analytics]);
+    if (signature === this.lastSnapshotSignature) return;
+    this.lastSnapshotSignature = signature;
+    const serialized = JSON.stringify(snapshot);
+    for (const socket of this.dashboardSockets) {
+      if (socket.readyState === WebSocket.OPEN) socket.send(serialized);
+    }
   }
 
   private handleTracker(socket: LiveSocket): void {
@@ -359,6 +429,53 @@ export class SocketHub {
         }
 
         if (
+          payload.type === "analytics:search" &&
+          validPagePath(payload.path) &&
+          validLabel(payload.query, 120) &&
+          Number.isSafeInteger(payload.resultCount) &&
+          Number(payload.resultCount) >= 0 &&
+          Number(payload.resultCount) <= 100_000
+        ) {
+          await this.store.recordSearch(state.sessionId, payload.path, {
+            query: payload.query.replace(/\s+/g, " ").trim(),
+            resultCount: Number(payload.resultCount),
+          });
+          return;
+        }
+
+        if (payload.type === "analytics:cart" && validPagePath(payload.path)) {
+          const items = parseCartItems(payload.items);
+          const expiresAt = payload.expiresAt === null || payload.expiresAt === undefined
+            ? null
+            : typeof payload.expiresAt === "number" &&
+                Number.isFinite(payload.expiresAt) &&
+                payload.expiresAt > 0 &&
+                payload.expiresAt <= Date.now() + 7 * 24 * 60 * 60_000
+              ? payload.expiresAt
+              : Number.NaN;
+          if (
+            items &&
+            validOptionalText(payload.customerName, 120) &&
+            validEmail(payload.customerEmail) &&
+            (expiresAt === null || Number.isFinite(expiresAt))
+          ) {
+            await this.store.recordCart(state.sessionId, payload.path, {
+              customerName:
+                typeof payload.customerName === "string"
+                  ? payload.customerName.replace(/\s+/g, " ").trim()
+                  : "",
+              customerEmail:
+                typeof payload.customerEmail === "string"
+                  ? payload.customerEmail.trim().toLocaleLowerCase("en")
+                  : "",
+              items,
+              expiresAt,
+            });
+          }
+          return;
+        }
+
+        if (
           payload.type === "analytics:order-completed" &&
           validOrderReference(payload.orderReference)
         ) {
@@ -367,6 +484,7 @@ export class SocketHub {
             this.anonymize("order", payload.orderReference),
             state.path,
           );
+          await this.store.markCartConverted(state.sessionId, state.path);
           if (socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({
               type: "analytics:order-recorded",
@@ -398,6 +516,12 @@ export class SocketHub {
   private sendSnapshot(socket: WebSocket): Promise<void> {
     return this.queueSnapshotOperation(async () => {
       try {
+        if (this.config.upstreamMonitor) {
+          if (this.upstreamSnapshot && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify(this.upstreamSnapshot));
+          }
+          return;
+        }
         const snapshot = await this.store.snapshot();
         if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(snapshot));
       } catch (error) {
@@ -411,7 +535,10 @@ export class SocketHub {
     return this.queueSnapshotOperation(async () => {
       if (this.dashboardSockets.size === 0) return;
       try {
-        const snapshot = await this.store.snapshot();
+        const snapshot = this.config.upstreamMonitor
+          ? this.upstreamSnapshot
+          : await this.store.snapshot();
+        if (!snapshot) return;
         const signature = JSON.stringify([snapshot.counts, snapshot.analytics]);
         if (!force && signature === this.lastSnapshotSignature) return;
         this.lastSnapshotSignature = signature;

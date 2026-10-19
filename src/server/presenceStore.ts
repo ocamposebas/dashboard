@@ -1,7 +1,11 @@
 import { createClient, type RedisClientType } from "redis";
+import { randomUUID } from "node:crypto";
 import {
   emptyPresenceCounts,
   isPresenceSection,
+  type MarketingAnalytics,
+  type MarketingCart,
+  type MarketingCartItem,
   type PresenceSection,
   type PresenceSnapshot,
 } from "../shared/protocol.js";
@@ -42,6 +46,66 @@ interface AnalyticsSession {
   orderCompleted: boolean;
   orderCompletedAt?: string;
   events: AnalyticsEvent[];
+}
+
+interface StoredSearchIntent {
+  sessionId: string;
+  query: string;
+  resultCount: number;
+  path: string;
+  searchedAt: string;
+}
+
+interface StoredMarketingCart {
+  sessionId: string;
+  customerName: string;
+  customerEmail: string;
+  items: MarketingCartItem[];
+  itemCount: number;
+  total: number;
+  status: "active" | "converted" | "cleared";
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string | null;
+  path: string;
+}
+
+export type ManagedUserRole = "owner" | "administrator" | "operations" | "analyst";
+
+export interface ManagedUserRecord {
+  id: string;
+  username: string;
+  displayName: string;
+  email: string;
+  role: ManagedUserRole;
+  status: "active" | "suspended";
+  passwordHash: string;
+  authVersion: number;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt: string | null;
+}
+
+export interface NotificationRecord {
+  id: string;
+  type: "order" | "seo" | "security" | "system";
+  severity: "info" | "success" | "warning" | "critical";
+  title: string;
+  message: string;
+  createdAt: string;
+  actionView: string;
+  actionEntityId?: number;
+  readBy: string[];
+}
+
+export interface IndependentSiteControlsRecord {
+  version: string;
+  source: "operations-control-plane";
+  revision: number;
+  updatedAt: string;
+  updatedBy: string;
+  promo: Record<string, unknown>;
+  maintenance: Record<string, unknown>;
 }
 
 function parseStoredSession(value: string | null): AnalyticsSession | null {
@@ -134,6 +198,9 @@ function parseStoredSession(value: string | null): AnalyticsSession | null {
 const ANALYTICS_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 const RECENT_VISITOR_WINDOW_MS = 30 * 60_000;
 const DAILY_ANALYTICS_TTL_SECONDS = 400 * 24 * 60 * 60;
+const MARKETING_RETENTION_MS = 180 * 24 * 60 * 60_000;
+const MARKETING_RETENTION_SECONDS = Math.floor(MARKETING_RETENTION_MS / 1000);
+const ABANDONED_CART_WINDOW_MS = 30 * 60_000;
 const TOUCH_SCRIPT = `
 local current = redis.call('HGET', KEYS[1], ARGV[3])
 local changed = 0
@@ -365,6 +432,24 @@ export class PresenceStore {
   private readonly sessionKeyPrefix: string;
   private readonly sessionSequenceKey: string;
   private readonly orderSyncCursorKey: string;
+  private readonly searchTermsKey: string;
+  private readonly zeroResultSearchesKey: string;
+  private readonly recentSearchesKey: string;
+  private readonly marketingCartsKey: string;
+  private readonly marketingCartTimelineKey: string;
+  private readonly productCostsKey: string;
+  private readonly commerceCacheKey: string;
+  private readonly customerCacheKey: string;
+  private readonly upstreamSnapshotKey: string;
+  private readonly usersKey: string;
+  private readonly notificationsKey: string;
+  private readonly notificationTimelineKey: string;
+  private readonly notificationDedupePrefix: string;
+  private readonly seoConnectionKey: string;
+  private readonly seoReportKey: string;
+  private readonly seoOauthStatePrefix: string;
+  private readonly independentSiteControlsKey: string;
+  private readonly independentSiteControlsRevisionKey: string;
   private cleanupTimer: NodeJS.Timeout | undefined;
 
   constructor(
@@ -404,6 +489,24 @@ export class PresenceStore {
     this.sessionKeyPrefix = `${keyPrefix}:analytics:session:`;
     this.sessionSequenceKey = `${keyPrefix}:analytics:session-sequence`;
     this.orderSyncCursorKey = `${keyPrefix}:analytics:orders:woo-sync-cursor`;
+    this.searchTermsKey = `${keyPrefix}:marketing:searches:v1`;
+    this.zeroResultSearchesKey = `${keyPrefix}:marketing:searches:zero:v1`;
+    this.recentSearchesKey = `${keyPrefix}:marketing:searches:recent:v1`;
+    this.marketingCartsKey = `${keyPrefix}:marketing:carts:v1`;
+    this.marketingCartTimelineKey = `${keyPrefix}:marketing:carts:timeline:v1`;
+    this.productCostsKey = `${keyPrefix}:commerce:product-costs`;
+    this.commerceCacheKey = `${keyPrefix}:commerce:dashboard-cache:v1`;
+    this.customerCacheKey = `${keyPrefix}:commerce:customer-directory-cache:v1`;
+    this.upstreamSnapshotKey = `${keyPrefix}:analytics:upstream-snapshot:v1`;
+    this.usersKey = `${keyPrefix}:access:users:v1`;
+    this.notificationsKey = `${keyPrefix}:notifications:records:v1`;
+    this.notificationTimelineKey = `${keyPrefix}:notifications:timeline:v1`;
+    this.notificationDedupePrefix = `${keyPrefix}:notifications:dedupe:v1:`;
+    this.seoConnectionKey = `${keyPrefix}:seo:connection:v1`;
+    this.seoReportKey = `${keyPrefix}:seo:report:v1`;
+    this.seoOauthStatePrefix = `${keyPrefix}:seo:oauth-state:`;
+    this.independentSiteControlsKey = `${keyPrefix}:site-controls:independent:v1`;
+    this.independentSiteControlsRevisionKey = `${keyPrefix}:site-controls:revision:v1`;
 
     this.client.on("error", (error) => console.error("Redis error", error));
     this.subscriber.on("error", (error) =>
@@ -598,6 +701,133 @@ export class PresenceStore {
     await this.client.publish(this.channelKey, "changed");
   }
 
+  async recordSearch(
+    sessionId: string,
+    path: string,
+    input: { query: string; resultCount: number },
+  ): Promise<void> {
+    const searchedAt = new Date().toISOString();
+    const record: StoredSearchIntent = {
+      sessionId,
+      query: input.query,
+      resultCount: input.resultCount,
+      path,
+      searchedAt,
+    };
+    const transaction = this.client.multi();
+    transaction.hIncrBy(this.searchTermsKey, input.query, 1);
+    if (input.resultCount === 0) {
+      transaction.hIncrBy(this.zeroResultSearchesKey, input.query, 1);
+    }
+    transaction.lPush(this.recentSearchesKey, JSON.stringify(record));
+    transaction.lTrim(this.recentSearchesKey, 0, 99);
+    transaction.expire(this.searchTermsKey, MARKETING_RETENTION_SECONDS);
+    transaction.expire(this.zeroResultSearchesKey, MARKETING_RETENTION_SECONDS);
+    transaction.expire(this.recentSearchesKey, MARKETING_RETENTION_SECONDS);
+    transaction.publish(this.channelKey, "changed");
+    await transaction.exec();
+  }
+
+  async recordCart(
+    sessionId: string,
+    path: string,
+    input: {
+      customerName: string;
+      customerEmail: string;
+      items: MarketingCartItem[];
+      expiresAt: number | null;
+    },
+  ): Promise<void> {
+    const now = new Date();
+    const nowMs = now.getTime();
+    const existingRaw = await this.client.hGet(this.marketingCartsKey, sessionId);
+    let existing: StoredMarketingCart | null = null;
+    if (existingRaw) {
+      try {
+        existing = JSON.parse(existingRaw) as StoredMarketingCart;
+      } catch {
+        existing = null;
+      }
+    }
+
+    // An empty cart on a visitor's first page view is not a useful marketing
+    // event. Empty updates do, however, close a cart that was previously seen.
+    if (input.items.length === 0 && !existing) return;
+
+    const hasItems = input.items.length > 0;
+    const retainedItems = hasItems ? input.items : existing?.items || [];
+    const itemCount = retainedItems.reduce(
+      (sum, item) => sum + Math.max(0, item.quantity),
+      0,
+    );
+    const total = Number(retainedItems.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0,
+    ).toFixed(2));
+    const cart: StoredMarketingCart = {
+      sessionId,
+      customerName: input.customerName || existing?.customerName || "",
+      customerEmail: input.customerEmail || existing?.customerEmail || "",
+      items: retainedItems,
+      itemCount,
+      total,
+      status: hasItems ? "active" : "cleared",
+      createdAt: existing?.createdAt || now.toISOString(),
+      updatedAt: now.toISOString(),
+      expiresAt: input.expiresAt
+        ? new Date(input.expiresAt).toISOString()
+        : existing?.expiresAt || null,
+      path,
+    };
+
+    const staleIds = await this.client.zRangeByScore(
+      this.marketingCartTimelineKey,
+      0,
+      nowMs - MARKETING_RETENTION_MS,
+    );
+    const transaction = this.client.multi();
+    if (staleIds.length) transaction.hDel(this.marketingCartsKey, staleIds);
+    transaction.zRemRangeByScore(
+      this.marketingCartTimelineKey,
+      0,
+      nowMs - MARKETING_RETENTION_MS,
+    );
+    transaction.hSet(this.marketingCartsKey, sessionId, JSON.stringify(cart));
+    transaction.zAdd(this.marketingCartTimelineKey, {
+      score: nowMs,
+      value: sessionId,
+    });
+    transaction.expire(this.marketingCartsKey, MARKETING_RETENTION_SECONDS);
+    transaction.expire(this.marketingCartTimelineKey, MARKETING_RETENTION_SECONDS);
+    transaction.publish(this.channelKey, "changed");
+    await transaction.exec();
+  }
+
+  async markCartConverted(sessionId: string, path: string): Promise<void> {
+    const raw = await this.client.hGet(this.marketingCartsKey, sessionId);
+    if (!raw) return;
+    try {
+      const cart = JSON.parse(raw) as StoredMarketingCart;
+      const now = new Date();
+      const updated: StoredMarketingCart = {
+        ...cart,
+        path,
+        status: "converted",
+        updatedAt: now.toISOString(),
+      };
+      const transaction = this.client.multi();
+      transaction.hSet(this.marketingCartsKey, sessionId, JSON.stringify(updated));
+      transaction.zAdd(this.marketingCartTimelineKey, {
+        score: now.getTime(),
+        value: sessionId,
+      });
+      transaction.publish(this.channelKey, "changed");
+      await transaction.exec();
+    } catch {
+      // A malformed marketing record must never interfere with order tracking.
+    }
+  }
+
   async recordOrder(
     sessionId: string,
     orderFingerprint: string,
@@ -655,6 +885,331 @@ export class PresenceStore {
     await this.client.set(this.orderSyncCursorKey, value.toISOString());
   }
 
+  async getProductCosts(
+    productIds: number[],
+  ): Promise<Record<string, { unitCost: number; packagingCost: number; feeRate: number }>> {
+    if (!productIds.length) return {};
+    const fields = [...new Set(productIds.map(String))];
+    const values = await this.client.hmGet(this.productCostsKey, fields);
+    const result: Record<
+      string,
+      { unitCost: number; packagingCost: number; feeRate: number }
+    > = {};
+
+    fields.forEach((field, index) => {
+      const raw = values[index];
+      if (!raw) return;
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object") return;
+        const record = parsed as Record<string, unknown>;
+        if (
+          typeof record.unitCost !== "number" ||
+          typeof record.packagingCost !== "number" ||
+          typeof record.feeRate !== "number"
+        ) {
+          return;
+        }
+        result[field] = {
+          unitCost: record.unitCost,
+          packagingCost: record.packagingCost,
+          feeRate: record.feeRate,
+        };
+      } catch {
+        // Ignore malformed legacy values so one record never breaks the catalog.
+      }
+    });
+    return result;
+  }
+
+  async setProductCost(
+    productId: number,
+    value: { unitCost: number; packagingCost: number; feeRate: number },
+  ): Promise<void> {
+    await this.client.hSet(
+      this.productCostsKey,
+      String(productId),
+      JSON.stringify(value),
+    );
+  }
+
+  async getCommerceCache(): Promise<{ payload: Record<string, unknown>; updatedAt: number } | null> {
+    const raw = await this.client.get(this.commerceCacheKey);
+    if (!raw) return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return null;
+      const value = parsed as Record<string, unknown>;
+      if (!value.payload || typeof value.payload !== "object" || typeof value.updatedAt !== "number") return null;
+      return { payload: value.payload as Record<string, unknown>, updatedAt: value.updatedAt };
+    } catch {
+      return null;
+    }
+  }
+
+  async setCommerceCache(payload: Record<string, unknown>, updatedAt: number): Promise<void> {
+    await this.client.set(this.commerceCacheKey, JSON.stringify({ payload, updatedAt }), { EX: 86_400 });
+  }
+
+  async clearCommerceCache(): Promise<void> {
+    await this.client.del(this.commerceCacheKey);
+  }
+
+  async getUpstreamSnapshot(): Promise<PresenceSnapshot | null> {
+    const raw = await this.client.get(this.upstreamSnapshotKey);
+    if (!raw) return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (
+        !parsed || typeof parsed !== "object" ||
+        (parsed as Record<string, unknown>).type !== "presence:snapshot" ||
+        typeof (parsed as Record<string, unknown>).serverTime !== "string" ||
+        !(parsed as Record<string, unknown>).counts ||
+        !(parsed as Record<string, unknown>).analytics
+      ) return null;
+      return parsed as PresenceSnapshot;
+    } catch {
+      return null;
+    }
+  }
+
+  async setUpstreamSnapshot(snapshot: PresenceSnapshot): Promise<void> {
+    await this.client.set(this.upstreamSnapshotKey, JSON.stringify(snapshot), { EX: 86_400 });
+  }
+
+  async getCustomerCache(): Promise<{ payload: Record<string, unknown>; updatedAt: number } | null> {
+    const raw = await this.client.get(this.customerCacheKey);
+    if (!raw) return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return null;
+      const value = parsed as Record<string, unknown>;
+      if (!value.payload || typeof value.payload !== "object" || typeof value.updatedAt !== "number") return null;
+      return { payload: value.payload as Record<string, unknown>, updatedAt: value.updatedAt };
+    } catch {
+      return null;
+    }
+  }
+
+  async setCustomerCache(payload: Record<string, unknown>, updatedAt: number): Promise<void> {
+    await this.client.set(this.customerCacheKey, JSON.stringify({ payload, updatedAt }), { EX: 86_400 });
+  }
+
+  async getIndependentSiteControls(): Promise<IndependentSiteControlsRecord | null> {
+    const raw = await this.client.get(this.independentSiteControlsKey);
+    if (!raw) return null;
+    try {
+      const value = JSON.parse(raw) as Partial<IndependentSiteControlsRecord>;
+      if (
+        value.source !== "operations-control-plane" ||
+        typeof value.version !== "string" ||
+        !Number.isSafeInteger(value.revision) ||
+        typeof value.updatedAt !== "string" ||
+        typeof value.updatedBy !== "string" ||
+        !value.promo || typeof value.promo !== "object" ||
+        !value.maintenance || typeof value.maintenance !== "object"
+      ) {
+        return null;
+      }
+      return value as IndependentSiteControlsRecord;
+    } catch {
+      return null;
+    }
+  }
+
+  async saveIndependentSiteControls(
+    input: Omit<IndependentSiteControlsRecord, "revision" | "updatedAt">,
+  ): Promise<IndependentSiteControlsRecord> {
+    const revision = await this.client.incr(this.independentSiteControlsRevisionKey);
+    const value: IndependentSiteControlsRecord = {
+      ...input,
+      revision,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.client.set(this.independentSiteControlsKey, JSON.stringify(value));
+    return value;
+  }
+
+  async seedIndependentSiteControls(
+    input: Omit<IndependentSiteControlsRecord, "revision" | "updatedAt">,
+  ): Promise<IndependentSiteControlsRecord> {
+    const existing = await this.getIndependentSiteControls();
+    if (existing) return existing;
+    return this.saveIndependentSiteControls(input);
+  }
+
+  async ensureBootstrapAdmin(username: string, passwordHash: string): Promise<void> {
+    const users = await this.listUsers();
+    if (users.length) return;
+    const now = new Date().toISOString();
+    const user: ManagedUserRecord = {
+      id: randomUUID(), username, displayName: "Primary administrator", email: "",
+      role: "owner", status: "active", passwordHash, authVersion: 1,
+      createdAt: now, updatedAt: now, lastLoginAt: null,
+    };
+    await this.client.hSet(this.usersKey, user.id, JSON.stringify(user));
+    await this.addNotification({
+      type: "security", severity: "success", title: "Team access is ready",
+      message: "The primary administrator account is protected and role management is available.",
+      actionView: "team",
+    });
+  }
+
+  async listUsers(): Promise<ManagedUserRecord[]> {
+    const values = await this.client.hVals(this.usersKey);
+    return values.flatMap((value) => {
+      try {
+        const user = JSON.parse(value) as ManagedUserRecord;
+        return user && typeof user.id === "string" && typeof user.username === "string" ? [user] : [];
+      } catch { return []; }
+    }).sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  async getUserById(id: string): Promise<ManagedUserRecord | null> {
+    const value = await this.client.hGet(this.usersKey, id);
+    if (!value) return null;
+    try { return JSON.parse(value) as ManagedUserRecord; } catch { return null; }
+  }
+
+  async getUserByUsername(username: string): Promise<ManagedUserRecord | null> {
+    const normalized = username.trim().toLocaleLowerCase("en");
+    return (await this.listUsers()).find((user) => user.username.toLocaleLowerCase("en") === normalized) || null;
+  }
+
+  async createUser(input: {
+    username: string; displayName: string; email: string; role: ManagedUserRole; passwordHash: string;
+  }): Promise<ManagedUserRecord> {
+    if (await this.getUserByUsername(input.username)) throw new Error("USERNAME_EXISTS");
+    const now = new Date().toISOString();
+    const user: ManagedUserRecord = {
+      id: randomUUID(), username: input.username, displayName: input.displayName,
+      email: input.email, role: input.role, status: "active", passwordHash: input.passwordHash,
+      authVersion: 1, createdAt: now, updatedAt: now, lastLoginAt: null,
+    };
+    await this.client.hSet(this.usersKey, user.id, JSON.stringify(user));
+    return user;
+  }
+
+  async updateUser(id: string, input: Partial<Pick<ManagedUserRecord, "displayName" | "email" | "role" | "status">>): Promise<ManagedUserRecord | null> {
+    const user = await this.getUserById(id);
+    if (!user) return null;
+    const updated: ManagedUserRecord = { ...user, ...input, updatedAt: new Date().toISOString() };
+    if (input.status === "suspended") updated.authVersion += 1;
+    await this.client.hSet(this.usersKey, id, JSON.stringify(updated));
+    return updated;
+  }
+
+  async setUserPassword(id: string, passwordHash: string): Promise<ManagedUserRecord | null> {
+    const user = await this.getUserById(id);
+    if (!user) return null;
+    const updated = { ...user, passwordHash, authVersion: user.authVersion + 1, updatedAt: new Date().toISOString() };
+    await this.client.hSet(this.usersKey, id, JSON.stringify(updated));
+    return updated;
+  }
+
+  async recordUserLogin(id: string): Promise<void> {
+    const user = await this.getUserById(id);
+    if (!user) return;
+    await this.client.hSet(this.usersKey, id, JSON.stringify({ ...user, lastLoginAt: new Date().toISOString() }));
+  }
+
+  async addNotification(input: Omit<NotificationRecord, "id" | "createdAt" | "readBy">): Promise<NotificationRecord> {
+    const record: NotificationRecord = { ...input, id: randomUUID(), createdAt: new Date().toISOString(), readBy: [] };
+    await this.client.hSet(this.notificationsKey, record.id, JSON.stringify(record));
+    await this.client.zAdd(this.notificationTimelineKey, { score: Date.parse(record.createdAt), value: record.id });
+    await this.client.zRemRangeByRank(this.notificationTimelineKey, 0, -201);
+    return record;
+  }
+
+  async addNotificationOnce(
+    dedupeKey: string,
+    input: Omit<NotificationRecord, "id" | "createdAt" | "readBy">,
+  ): Promise<NotificationRecord | null> {
+    const normalizedKey = dedupeKey.trim();
+    if (!normalizedKey) throw new Error("A notification deduplication key is required");
+    const record: NotificationRecord = {
+      ...input,
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      readBy: [],
+    };
+    const claimKey = `${this.notificationDedupePrefix}${normalizedKey}`;
+    const claimed = await this.client.set(claimKey, record.id, {
+      NX: true,
+      EX: 63_072_000,
+    });
+    if (!claimed) return null;
+    try {
+      const transaction = this.client.multi();
+      transaction.hSet(this.notificationsKey, record.id, JSON.stringify(record));
+      transaction.zAdd(this.notificationTimelineKey, {
+        score: Date.parse(record.createdAt),
+        value: record.id,
+      });
+      transaction.zRemRangeByRank(this.notificationTimelineKey, 0, -201);
+      await transaction.exec();
+      return record;
+    } catch (error) {
+      await this.client.del(claimKey).catch(() => 0);
+      throw error;
+    }
+  }
+
+  async listNotifications(_userId: string, limit = 50): Promise<NotificationRecord[]> {
+    const ids = await this.client.zRange(this.notificationTimelineKey, 0, Math.max(0, limit - 1), { REV: true });
+    const values = ids.length ? await this.client.hmGet(this.notificationsKey, ids) : [];
+    return values.flatMap((value) => {
+      if (!value) return [];
+      try { return [JSON.parse(value) as NotificationRecord]; } catch { return []; }
+    }).map((item) => ({ ...item, readBy: Array.isArray(item.readBy) ? item.readBy : [] }));
+  }
+
+  async markNotificationRead(notificationId: string, userId: string): Promise<boolean> {
+    const raw = await this.client.hGet(this.notificationsKey, notificationId);
+    if (!raw) return false;
+    try {
+      const record = JSON.parse(raw) as NotificationRecord;
+      record.readBy = [...new Set([...(record.readBy || []), userId])];
+      await this.client.hSet(this.notificationsKey, notificationId, JSON.stringify(record));
+      return true;
+    } catch { return false; }
+  }
+
+  async markAllNotificationsRead(userId: string): Promise<void> {
+    const records = await this.listNotifications(userId, 200);
+    const transaction = this.client.multi();
+    for (const record of records) {
+      record.readBy = [...new Set([...(record.readBy || []), userId])];
+      transaction.hSet(this.notificationsKey, record.id, JSON.stringify(record));
+    }
+    await transaction.exec();
+  }
+
+  async saveSeoConnection(encryptedValue: string): Promise<void> {
+    await this.client.set(this.seoConnectionKey, encryptedValue);
+  }
+
+  async getSeoConnection(): Promise<string | null> { return this.client.get(this.seoConnectionKey); }
+  async clearSeoConnection(): Promise<void> { await this.client.del([this.seoConnectionKey, this.seoReportKey]); }
+
+  async saveSeoReport(payload: Record<string, unknown>): Promise<void> {
+    await this.client.set(this.seoReportKey, JSON.stringify(payload));
+  }
+
+  async getSeoReport(): Promise<Record<string, unknown> | null> {
+    const value = await this.client.get(this.seoReportKey);
+    if (!value) return null;
+    try { return JSON.parse(value) as Record<string, unknown>; } catch { return null; }
+  }
+
+  async saveSeoOauthState(state: string, userId: string): Promise<void> {
+    await this.client.set(`${this.seoOauthStatePrefix}${state}`, userId, { EX: 600 });
+  }
+
+  async consumeSeoOauthState(state: string): Promise<string | null> {
+    return this.client.getDel(`${this.seoOauthStatePrefix}${state}`);
+  }
+
   async snapshot(): Promise<PresenceSnapshot> {
     await this.cleanupExpired();
     const now = new Date();
@@ -691,6 +1246,10 @@ export class PresenceStore {
       dailyVisitorCounts,
       visitorsLast7Days,
       visitorsLast30Days,
+      searchTerms,
+      zeroResultSearches,
+      recentSearchValues,
+      marketingCartIds,
     ] = await Promise.all([
       this.client.hVals(this.recordsKey),
       this.client.get(this.totalViewsKey),
@@ -718,6 +1277,10 @@ export class PresenceStore {
       Promise.all(visitorKeys.map((key) => this.client.pfCount(key))),
       this.client.pfCount(last7VisitorKeys),
       this.client.pfCount(visitorKeys),
+      this.client.hGetAll(this.searchTermsKey),
+      this.client.hGetAll(this.zeroResultSearchesKey),
+      this.client.lRange(this.recentSearchesKey, 0, 99),
+      this.client.zRange(this.marketingCartTimelineKey, 0, 99, { REV: true }),
     ]);
 
     const recentRaw = recentIds.length
@@ -734,6 +1297,21 @@ export class PresenceStore {
         Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt) ||
         right.number - left.number,
     );
+
+    const marketingCartValues = marketingCartIds.length
+      ? await this.client.hmGet(this.marketingCartsKey, marketingCartIds)
+      : [];
+    const visitorNumbers = new Map(
+      recentSessions.map((session) => [session.id, session.visitorNumber]),
+    );
+    const marketing = this.buildMarketingAnalytics({
+      nowMs,
+      searchTerms,
+      zeroResultSearches,
+      recentSearchValues,
+      marketingCartValues,
+      visitorNumbers,
+    });
 
     const counts = emptyPresenceCounts();
     const latestPresenceByVisitor = new Map<string, PresenceRecord>();
@@ -826,6 +1404,7 @@ export class PresenceStore {
           orders: Number(dailyOrders[date] || 0),
         })),
         recentSessions,
+        marketing,
       },
     };
   }
@@ -848,6 +1427,151 @@ export class PresenceStore {
       .map(([label, count]) => ({ label, count: Number(count) }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 8);
+  }
+
+  private buildMarketingAnalytics(input: {
+    nowMs: number;
+    searchTerms: Record<string, string>;
+    zeroResultSearches: Record<string, string>;
+    recentSearchValues: string[];
+    marketingCartValues: Array<string | null>;
+    visitorNumbers: Map<string, number>;
+  }): MarketingAnalytics {
+    const topSearches = Object.entries(input.searchTerms)
+      .map(([query, count]) => ({
+        query,
+        count: Math.max(0, Number(count) || 0),
+        zeroResults: Math.max(0, Number(input.zeroResultSearches[query]) || 0),
+      }))
+      .sort(
+        (left, right) =>
+          right.count - left.count ||
+          right.zeroResults - left.zeroResults ||
+          left.query.localeCompare(right.query),
+      )
+      .slice(0, 20);
+
+    const recentSearches = input.recentSearchValues.flatMap((value) => {
+      try {
+        const item = JSON.parse(value) as Partial<StoredSearchIntent>;
+        if (
+          typeof item.sessionId !== "string" ||
+          typeof item.query !== "string" ||
+          typeof item.path !== "string" ||
+          typeof item.searchedAt !== "string" ||
+          !Number.isFinite(Date.parse(item.searchedAt)) ||
+          !Number.isFinite(item.resultCount)
+        ) {
+          return [];
+        }
+        return [{
+          sessionId: item.sessionId,
+          visitorNumber: input.visitorNumbers.get(item.sessionId) || 0,
+          query: item.query,
+          resultCount: Math.max(0, Number(item.resultCount)),
+          path: item.path,
+          searchedAt: item.searchedAt,
+        }];
+      } catch {
+        return [];
+      }
+    });
+
+    const carts = input.marketingCartValues.flatMap((value): MarketingCart[] => {
+      if (!value) return [];
+      try {
+        const item = JSON.parse(value) as Partial<StoredMarketingCart>;
+        if (
+          typeof item.sessionId !== "string" ||
+          typeof item.path !== "string" ||
+          typeof item.createdAt !== "string" ||
+          typeof item.updatedAt !== "string" ||
+          !Number.isFinite(Date.parse(item.createdAt)) ||
+          !Number.isFinite(Date.parse(item.updatedAt)) ||
+          !Array.isArray(item.items)
+        ) {
+          return [];
+        }
+        const items = item.items.flatMap((cartItem): MarketingCartItem[] => {
+          if (
+            !cartItem ||
+            typeof cartItem !== "object" ||
+            typeof cartItem.name !== "string" ||
+            typeof cartItem.sku !== "string" ||
+            typeof cartItem.imageUrl !== "string" ||
+            !Number.isFinite(cartItem.productId) ||
+            !Number.isFinite(cartItem.variationId) ||
+            !Number.isFinite(cartItem.quantity) ||
+            !Number.isFinite(cartItem.price)
+          ) {
+            return [];
+          }
+          return [{
+            productId: cartItem.productId,
+            variationId: cartItem.variationId,
+            name: cartItem.name,
+            sku: cartItem.sku,
+            quantity: cartItem.quantity,
+            price: cartItem.price,
+            imageUrl: cartItem.imageUrl,
+          }];
+        });
+        if (!items.length) return [];
+        const storedStatus = item.status === "converted" || item.status === "cleared"
+          ? item.status
+          : "active";
+        const status: MarketingCart["status"] = storedStatus === "active" &&
+          input.nowMs - Date.parse(item.updatedAt) >= ABANDONED_CART_WINDOW_MS
+          ? "abandoned"
+          : storedStatus;
+        const total = Number(items.reduce(
+          (sum, cartItem) => sum + cartItem.price * cartItem.quantity,
+          0,
+        ).toFixed(2));
+        return [{
+          sessionId: item.sessionId,
+          visitorNumber: input.visitorNumbers.get(item.sessionId) || 0,
+          customerName: typeof item.customerName === "string" ? item.customerName : "",
+          customerEmail: typeof item.customerEmail === "string" ? item.customerEmail : "",
+          items,
+          itemCount: items.reduce((sum, cartItem) => sum + cartItem.quantity, 0),
+          total,
+          status,
+          createdAt: item.createdAt,
+          updatedAt: item.updatedAt,
+          expiresAt:
+            typeof item.expiresAt === "string" && Number.isFinite(Date.parse(item.expiresAt))
+              ? item.expiresAt
+              : null,
+          path: item.path,
+        }];
+      } catch {
+        return [];
+      }
+    });
+    carts.sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+
+    const activeCarts = carts.filter((cart) => cart.status === "active");
+    const abandonedCarts = carts.filter((cart) => cart.status === "abandoned");
+    return {
+      topSearches,
+      recentSearches,
+      carts,
+      activeCarts: activeCarts.length,
+      abandonedCarts: abandonedCarts.length,
+      capturedValue: Number([...activeCarts, ...abandonedCarts].reduce(
+        (sum, cart) => sum + cart.total,
+        0,
+      ).toFixed(2)),
+      abandonedValue: Number(abandonedCarts.reduce(
+        (sum, cart) => sum + cart.total,
+        0,
+      ).toFixed(2)),
+      zeroResultSearches: Object.values(input.zeroResultSearches).reduce(
+        (sum, count) => sum + Math.max(0, Number(count) || 0),
+        0,
+      ),
+    };
   }
 
   private async updateSessionMetadata(

@@ -17,15 +17,24 @@
     "dev:server": "tsx --env-file-if-exists=.env watch src/server/index.ts",
     "start": "node --env-file-if-exists=.env dist/server/server/index.js",
     "test": "tsx --test test/**/*.test.ts",
-    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.dashboard.json --noEmit",
+    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.dashboard.json --noEmit && tsc -p tsconfig.scripts.json --noEmit",
+    "db:migrate": "tsx --env-file-if-exists=.env scripts/migrate.ts",
+    "shipstation:validate": "tsx --env-file-if-exists=.env scripts/validate-shipstation.ts",
     "password:hash": "tsx scripts/hash-password.ts"
   },
   "dependencies": {
+    "@zxing/browser": "^0.1.5",
+    "@zxing/library": "^0.21.3",
+    "bwip-js": "^4.11.4",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.4.299",
+    "pg": "^8.23.1",
     "redis": "^5.8.2",
     "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
+    "@types/pg": "^8.23.1",
     "@types/ws": "^8.18.1",
     "concurrently": "^9.2.1",
     "tsx": "^4.20.5",

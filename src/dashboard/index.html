@@ -4,184 +4,668 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="noindex,nofollow" />
-    <meta name="theme-color" content="#07111f" />
-    <title>Phase One — Visitor Monitor</title>
+    <meta name="theme-color" content="#f4f4f2" />
+    <title>Phase One Labz — Operations Suite</title>
   </head>
 
   <body>
-    <div class="shell">
-      <header class="masthead">
-        <div class="identity">
-          <div class="wordmark" aria-label="Phase One">PHASE ONE</div>
-          <div class="product-name">Visitor Monitor</div>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar">
+        <div class="brand-block">
+          <img class="brand-logo" src="/phase-one-labz-logo.webp" alt="Phase One Labz" />
+          <button class="mobile-close" id="mobile-close" type="button" aria-label="Close navigation">×</button>
         </div>
 
-        <div class="masthead-actions">
-          <div class="connection" id="connection" data-state="connecting" role="status" aria-live="polite">
-            <span class="connection-dot" aria-hidden="true"></span>
-            <span id="connection-label">Connecting</span>
+        <nav class="primary-nav" aria-label="Primary navigation">
+          <div class="nav-group" role="group" aria-labelledby="nav-command-center">
+            <p class="nav-label" id="nav-command-center">Command center</p>
+            <button class="nav-item is-active" type="button" data-view="overview" aria-current="page"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg></span><span>Overview</span></button>
+            <button class="nav-item" type="button" data-view="orders"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6"/></svg></span><span>Orders</span><b class="nav-count" id="orders-nav-count">0</b></button>
+            <button class="nav-item" type="button" data-view="fulfillment"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m4 7 8-4 8 4-8 4zM4 7v10l8 4 8-4V7M8.5 14l2 2 4-4"/></svg></span><span>Fulfillment</span><b class="nav-count" id="fulfillment-nav-count">0</b></button>
+            <button class="nav-item" type="button" data-view="monitor"><span class="nav-icon nav-icon--live" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg></span><span>Live monitor</span><b class="nav-count nav-presence-count" id="nav-live-count" hidden>0</b></button>
           </div>
-          <form method="post" action="/logout">
-            <button class="sign-out" type="submit">Sign out</button>
-          </form>
+
+          <div class="nav-group" role="group" aria-labelledby="nav-catalog-lab">
+            <p class="nav-label" id="nav-catalog-lab">Catalog & lab</p>
+            <button class="nav-item" type="button" data-view="products"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m4 7 8-4 8 4-8 4zM4 7v10l8 4 8-4V7M12 11v10"/></svg></span><span>Products</span></button>
+            <button class="nav-item" type="button" data-view="labels" hidden aria-hidden="true"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h10l6 6-10 10-6-6zM9 9h.01"/></svg></span><span>Storage locations</span><b class="nav-count" id="labels-nav-count">0</b></button>
+            <button class="nav-item" type="button" data-view="coa"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6zM14 3v4h4M9 12l2 2 4-4M9 17h6"/></svg></span><span>COA Manager</span><b class="nav-count" id="coa-nav-count">0</b></button>
+            <button class="nav-item" type="button" data-view="media"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m4 17 5-5 4 4 2-2 5 5"/></svg></span><span>Media library</span></button>
+          </div>
+
+          <div class="nav-group" role="group" aria-labelledby="nav-customers-growth">
+            <p class="nav-label" id="nav-customers-growth">Customers & growth</p>
+            <button class="nav-item" type="button" data-view="customers"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM17 11a3 3 0 0 0 0-6M16 15h1a4 4 0 0 1 4 4v2"/></svg></span><span>Customers</span></button>
+            <button class="nav-item" type="button" data-view="affiliates"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="17" cy="7" r="2"/><path d="M3 20v-2a5 5 0 0 1 5-5h1a5 5 0 0 1 5 5v2M15 13h2a4 4 0 0 1 4 4v2M17 3v8M13 7h8"/></svg></span><span>Affiliates</span><b class="nav-count" id="affiliates-nav-count" hidden>0</b></button>
+            <button class="nav-item" type="button" data-view="loyalty"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg></span><span>Loyalty control</span></button>
+            <button class="nav-item" type="button" data-view="marketing"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 11v3l10 4V7zM14 9l5-3v13l-5-3M7 15l1 5h3"/></svg></span><span>Marketing</span></button>
+            <button class="nav-item" type="button" data-view="seo"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5M7 11l2-2 2 2 3-3"/></svg></span><span>SEO intelligence</span><b class="nav-count" id="seo-nav-count" hidden>0</b></button>
+          </div>
+
+          <div class="nav-group" role="group" aria-labelledby="nav-store-control">
+            <p class="nav-label" id="nav-store-control">Store control</p>
+            <button class="nav-item" type="button" data-view="site-controls"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h3M11 12h9M4 18h7M15 18h5"/><circle cx="16" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="13" cy="18" r="2"/></svg></span><span>Site Controls</span></button>
+            <button class="nav-item" type="button" data-view="integrations"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 12h8M9 8V5M15 8V5M7 8h10v4a5 5 0 0 1-10 0zM12 17v4"/></svg></span><span>Integrations</span></button>
+            <button class="nav-item" type="button" data-view="settings"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z"/></svg></span><span>Settings</span></button>
+          </div>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="system-mini"><span class="system-mini-dot"></span><div><strong id="footer-connection">Connecting</strong><small>Operational services</small></div></div>
         </div>
-      </header>
+      </aside>
 
-      <main>
-        <section class="hero-copy" aria-labelledby="page-title">
-          <div class="hero-title">
-            <p class="eyebrow">At-a-glance overview</p>
-            <h1 id="page-title">Visitors and sales</h1>
-            <p class="hero-description">Unique visitors, repeat visits, and completed orders.</p>
-          </div>
-
-          <div class="range-control">
-            <span id="active-range-label">Last 30 days</span>
-            <div class="range-actions">
-              <div class="range-filter" aria-label="Date range">
-                <button type="button" data-range="today" aria-pressed="false">Today</button>
-                <button type="button" data-range="7" aria-pressed="false">7 days</button>
-                <button type="button" data-range="30" class="is-active" aria-pressed="true">30 days</button>
-                <button type="button" data-range="all" aria-pressed="false">All time</button>
+      <div class="workspace">
+        <header class="masthead topbar">
+          <div class="topbar-start"><button class="menu-toggle" id="menu-toggle" type="button" aria-label="Open navigation">☰</button><div class="breadcrumb"><span>Phase One</span><i>/</i><strong id="current-view-name">Overview</strong></div></div>
+          <div class="topbar-actions">
+            <button class="search-trigger" id="search-trigger" type="button"><span>⌕</span> Search workspace <kbd>⌘ K</kbd></button>
+            <div class="connection" id="connection" data-state="connecting" role="status" aria-live="polite"><span class="connection-dot" aria-hidden="true"></span><span id="connection-label">Connecting</span></div>
+            <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark mode" aria-pressed="false"><span class="theme-toggle-icon" aria-hidden="true">☾</span><span id="theme-toggle-label">Dark</span></button>
+            <button class="icon-button notification-button" id="notification-button" type="button" aria-label="Open notification center"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path></svg><i id="notification-badge" hidden>0</i></button>
+            <div class="account-menu">
+              <button class="account-button" type="button" aria-label="Open account menu" aria-haspopup="menu"><span class="account-avatar" id="account-initials">P1</span><div><strong id="account-name">Administrator</strong><small id="account-role">Owner</small></div><i class="account-chevron" aria-hidden="true">⌄</i></button>
+              <div class="account-popover" role="menu" aria-label="Account menu">
+                <div class="account-popover-head"><span class="account-avatar" id="account-menu-initials">P1</span><div><strong id="account-menu-name">Administrator</strong><small id="account-menu-role">Owner account</small></div></div>
+                <button type="button" role="menuitem" data-go-view="team"><span>⊙</span><div><strong>Team & access</strong><small>People, roles and permissions</small></div></button>
+                <button type="button" role="menuitem" data-go-view="settings"><span>⚙</span><div><strong>Settings</strong><small>Preferences and appearance</small></div></button>
+                <form method="post" action="/logout"><button class="account-sign-out" type="submit" role="menuitem"><span>↗</span><div><strong>Sign out</strong><small>Close this secure session</small></div></button></form>
               </div>
-              <label class="date-picker" id="date-picker-control" for="specific-date">
-                <span><i aria-hidden="true">▦</i> Specific day</span>
-                <span class="date-picker-value" id="specific-date-label">Choose date</span>
-                <input id="specific-date" type="date" lang="en-US" aria-label="Choose a specific day" />
-              </label>
             </div>
           </div>
-        </section>
+        </header>
 
-        <section class="metric-grid" aria-label="Key metrics">
-          <article class="metric-card metric-card--primary">
-            <div class="metric-heading"><span>Unique visitors</span><i aria-hidden="true">01</i></div>
-            <strong id="unique-visitors">—</strong>
-            <small>Unique browsers during this period</small>
-          </article>
-
-          <article class="metric-card metric-card--returning">
-            <div class="metric-heading"><span>Repeat visits</span><i aria-hidden="true">02</i></div>
-            <strong id="returning-visits">—</strong>
-            <small>Visits from returning people</small>
-          </article>
-
-          <article class="metric-card metric-card--orders">
-            <div class="metric-heading"><span>Completed orders</span><i aria-hidden="true">03</i></div>
-            <strong id="total-orders">—</strong>
-            <small>Confirmed payments during this period</small>
-          </article>
-
-          <article class="metric-card">
-            <div class="metric-heading"><span>Total visits</span><i aria-hidden="true">04</i></div>
-            <strong id="total-visits">—</strong>
-            <small>All visits recorded</small>
-          </article>
-        </section>
-
-        <section class="today-strip" aria-labelledby="today-title">
-          <div class="today-heading">
-            <span class="today-pulse" aria-hidden="true"></span>
-            <div>
-              <h2 id="today-title">Today</h2>
-              <small>Activity since 12:00 a.m. in Bogotá</small>
+        <main class="main-content">
+          <section class="new-order-banner" id="new-order-banner" aria-live="assertive" hidden><span class="new-order-signal" aria-hidden="true">!</span><div><small>NEW ORDER</small><strong id="new-order-title">New order received</strong><p id="new-order-message">Open the order workspace to review it.</p></div><button class="button button--primary" id="new-order-open" type="button">Review order</button><button class="new-order-dismiss" id="new-order-dismiss" type="button" aria-label="Dismiss notification">×</button></section>
+          <section class="view-panel is-active" data-view-panel="overview" aria-labelledby="overview-title">
+            <div class="page-header">
+              <div><p class="eyebrow">Executive overview</p><h1 id="overview-title">Good morning, Sebastian.</h1><p class="page-description">Revenue, profitability and store operations in one focused command center.</p></div>
+              <div class="page-actions"><button class="button button--secondary" type="button" data-go-view="monitor">View live activity</button><button class="button button--primary" type="button" data-open-product>+ Add product</button></div>
             </div>
-          </div>
-          <div class="today-stat"><span>People</span><strong id="today-visitors">—</strong></div>
-          <div class="today-stat"><span>Visits</span><strong id="today-visits">—</strong></div>
-          <div class="today-stat today-stat--order"><span>Orders</span><strong id="today-orders">—</strong></div>
-        </section>
-
-        <section class="main-grid">
-          <article class="panel chart-panel" id="traffic-overview">
-            <div class="panel-heading">
-              <div><p class="eyebrow">Daily count</p><h2>Visitors by day</h2></div>
-              <strong id="trend-total">Peak 0 per day</strong>
+            <div class="integration-notice" id="commerce-notice" hidden><span class="notice-icon">!</span><div><strong>Connect the live catalog to activate business data</strong><p id="commerce-notice-message">Orders, inventory and financial performance will appear here.</p></div><button type="button" data-go-view="integrations">Configure connection</button></div>
+            <section class="kpi-grid" aria-label="Key performance indicators">
+              <article class="kpi-card kpi-card--featured"><div class="kpi-head"><span>Net revenue</span><i>Recent orders</i></div><strong id="finance-revenue">—</strong><div class="kpi-foot"><span class="trend trend--neutral" id="finance-revenue-change">Live business data</span><small>Confirmed revenue</small></div></article>
+              <article class="kpi-card"><div class="kpi-head"><span>Estimated profit</span><i class="status-label status-label--finance">Profitability</i></div><strong id="finance-profit">—</strong><div class="kpi-foot"><span class="trend trend--neutral" id="finance-profit-change">Add product costs</span><small id="profit-coverage">0% cost coverage</small></div></article>
+              <article class="kpi-card"><div class="kpi-head"><span>Orders</span><i>Selected period</i></div><strong id="total-orders">—</strong><div class="kpi-foot"><span class="trend trend--positive">↑ Sync active</span><small>Confirmed payments</small></div></article>
+              <article class="kpi-card"><div class="kpi-head"><span>Current lots</span><i>Certificate control</i></div><strong id="overview-current-lots">—</strong><div class="kpi-foot"><span class="trend trend--neutral" id="overview-coa-families">Live certificate data</span><small>Shipping now</small></div></article>
+              <article class="kpi-card"><div class="kpi-head"><span>Unique visitors</span><i>Selected period</i></div><strong id="unique-visitors">—</strong><div class="kpi-foot"><span class="trend trend--neutral"><b id="visitors-30">—</b> in 30 min</span><small>Anonymous browsers</small></div></article>
+            </section>
+            <section class="today-strip" aria-labelledby="today-title"><div class="today-intro"><span class="today-pulse"></span><div><strong id="today-title">Today</strong><small>Activity since 12:00 AM · Bogotá</small></div></div><div class="today-stat"><span>Visitors</span><strong id="today-visitors">—</strong></div><div class="today-stat"><span>Sessions</span><strong id="today-visits">—</strong></div><div class="today-stat"><span>Orders</span><strong id="today-orders">—</strong></div><div class="today-stat"><span>Online now</span><strong id="overview-online">—</strong></div></section>
+            <div class="dashboard-grid">
+              <article class="surface performance-panel"><div class="surface-head"><div><p class="section-kicker">Performance</p><h2>Daily visitors</h2></div><div class="range-filter compact-range" aria-label="Date range"><button type="button" data-range="today">Today</button><button type="button" data-range="7">7 days</button><button type="button" data-range="30" class="is-active">30 days</button><button type="button" data-range="all">All time</button></div></div><div class="chart-meta"><span id="active-range-label">Last 30 days</span><strong id="trend-total">Peak 0 per day</strong></div><div class="trend-chart" id="trend-chart"></div><label class="date-picker visually-hidden" id="date-picker-control" for="specific-date"><span id="specific-date-label">Choose date</span><input id="specific-date" type="date" /></label></article>
+              <article class="surface financial-health"><div class="surface-head"><div><p class="section-kicker">Financial health</p><h2>Business margin</h2></div><button class="text-button" type="button" data-go-view="products">Manage costs →</button></div><div class="margin-hero"><div class="margin-ring" id="margin-ring"><span><strong id="finance-margin">—</strong><small>margin</small></span></div><div><p>Estimated profit</p><strong id="finance-profit-secondary">—</strong><small>Revenue less recorded costs, packaging and estimated fees.</small></div></div><div class="financial-legend"><div><i class="legend-dot legend-dot--sales"></i><span>Revenue</span><strong id="legend-revenue">—</strong></div><div><i class="legend-dot legend-dot--cost"></i><span>Costs</span><strong id="legend-costs">—</strong></div><div><i class="legend-dot legend-dot--profit"></i><span>Profit</span><strong id="legend-profit">—</strong></div></div></article>
             </div>
-            <p class="panel-description">Each point represents unique visitors who entered that day.</p>
-            <div class="trend-chart" id="trend-chart"></div>
-          </article>
+            <article class="surface overview-sales-panel">
+              <div class="surface-head overview-sales-head"><div><p class="section-kicker">Sales intelligence</p><h2>Best-selling products</h2><p>Real paid-order performance, grouped by product and SKU.</p></div><div class="overview-sales-actions"><div class="range-filter compact-range" role="group" aria-label="Best-selling product period"><button class="is-active" type="button" data-sales-range="today">Today</button><button type="button" data-sales-range="week">7 days</button><button type="button" data-sales-range="month">This month</button></div><button class="button button--secondary" id="download-sales-report" type="button">Download report</button></div></div>
+              <div class="overview-sales-summary" id="overview-sales-summary"><span>Waiting for order data</span></div>
+              <div class="overview-top-products" id="overview-top-products"><div class="table-loading">Calculating product performance…</div></div>
+            </article>
+            <article class="surface table-surface"><div class="surface-head"><div><p class="section-kicker">Operations</p><h2>Recent orders</h2></div><button class="text-button" type="button" data-go-view="orders">View all orders →</button></div><div class="table-scroll"><table><thead><tr><th>Order</th><th>Customer</th><th>Status</th><th>Date</th><th>Total</th><th>Est. profit</th></tr></thead><tbody id="orders-preview-body"><tr><td colspan="6"><div class="table-loading">Syncing orders…</div></td></tr></tbody></table></div></article>
+          </section>
 
-          <aside class="panel recent-panel" id="recent-sessions">
-            <div class="panel-heading">
-              <div><p class="eyebrow">Who visited</p><h2>Recent visits</h2></div>
-              <span>Newest first</span>
+          <section class="view-panel" data-view-panel="orders" aria-labelledby="orders-title">
+            <div class="page-header order-page-header"><div><p class="eyebrow">Sales command center</p><h1 id="orders-title">Orders</h1><p class="page-description">Control payments, fulfillment and profitability with exact date and time visibility.</p></div><div class="page-actions"><span class="order-feed-state"><i></i><b id="order-feed-status">Connecting order feed</b></span><button class="button button--secondary" id="orders-report-open" type="button">Generate PDF report</button><button class="button button--secondary" id="order-alert-toggle" type="button">Enable sale sound</button></div></div>
+            <nav class="workspace-switcher" aria-label="Order workspace"><button class="is-active" type="button" data-orders-workspace="ledger"><span>01</span><strong>Order ledger</strong><small>All sales and fulfillment</small></button><button type="button" data-orders-workspace="payments"><span>02</span><strong>Payment review</strong><small>Manual approvals and references</small></button><button type="button" data-orders-workspace="reconciliation"><span>03</span><strong>Daily reconciliation</strong><small>Charged, fees, refunds and net</small></button></nav>
+            <div data-orders-workspace-panel="ledger">
+              <div class="mini-stat-grid"><article><span>Visible orders</span><strong id="orders-visible-count">0</strong><small>Recent order volume</small></article><article><span>Processing</span><strong id="orders-processing-count">0</strong><small>Require attention</small></article><article><span>Visible revenue</span><strong id="orders-visible-revenue">—</strong><small>Paid orders</small></article><article><span>Calculated profit</span><strong id="orders-visible-profit">—</strong><small>Complete cost coverage</small></article></div>
+              <article class="surface order-command-surface">
+                <div class="order-command-primary"><div class="table-tabs"><button class="is-active" type="button" data-order-filter="all">All</button><button type="button" data-order-filter="processing">Processing</button><button type="button" data-order-filter="completed">Completed</button><button type="button" data-order-filter="pending">Pending</button><button type="button" data-order-filter="on-hold">On hold</button></div><label class="table-search"><span>⌕</span><input id="orders-search" type="search" placeholder="Order, customer or product" /></label></div>
+                <div class="order-time-controls"><div class="order-date-presets" role="group" aria-label="Order date range"><button class="is-active" type="button" data-order-date="today">Today</button><button type="button" data-order-date="7">7 days</button><button type="button" data-order-date="30">30 days</button><button type="button" data-order-date="all">All time</button><button type="button" data-order-date="custom">Custom</button></div><div class="order-custom-range" id="order-custom-range" hidden><label><span>From</span><input id="orders-date-from" type="datetime-local" /></label><label><span>To</span><input id="orders-date-to" type="datetime-local" /></label></div><label class="order-sort"><span>Sort</span><select id="orders-sort"><option value="date-desc">Newest first</option><option value="date-asc">Oldest first</option><option value="total-desc">Highest value</option><option value="total-asc">Lowest value</option></select></label></div>
+              </article>
+              <article class="surface table-surface orders-ledger"><div class="table-scroll"><table><thead><tr><th><input type="checkbox" aria-label="Select all orders" /></th><th>Order</th><th>Customer</th><th>Payment</th><th>Items</th><th>Status</th><th>Date & time</th><th>Total</th><th>Est. profit</th><th></th></tr></thead><tbody id="orders-table-body"><tr><td colspan="10"><div class="table-loading">Loading live orders…</div></td></tr></tbody></table></div></article>
             </div>
-            <p class="panel-description">See who returned and who completed an order.</p>
-            <div class="session-list" id="session-list"></div>
-            <div class="session-pagination" id="session-pagination" hidden>
-              <button type="button" id="sessions-previous" aria-label="Previous visits">←</button>
-              <span id="sessions-page">Page 1 of 1</span>
-              <button type="button" id="sessions-next" aria-label="Next visits">→</button>
+            <section data-orders-workspace-panel="payments" hidden><div class="operations-kpi-grid" id="payment-review-kpis"></div><article class="surface operations-table"><div class="surface-head"><div><p class="section-kicker">Exception queue</p><h2>Payments requiring review</h2><p>Open a record to inspect proof, approve or reject the payment, and retain the audit trail.</p></div></div><div class="table-scroll"><table><thead><tr><th>Order</th><th>Customer</th><th>Method</th><th>Reference</th><th>Received</th><th>Amount</th><th>Decision</th></tr></thead><tbody id="payment-review-body"></tbody></table></div></article></section>
+            <section data-orders-workspace-panel="reconciliation" hidden><div class="operations-kpi-grid" id="reconciliation-kpis"></div><div class="reconciliation-layout"><article class="surface"><div class="surface-head"><div><p class="section-kicker">Payment rails</p><h2>Collection summary</h2></div></div><div id="reconciliation-methods" class="reconciliation-methods"></div></article><article class="surface"><div class="surface-head"><div><p class="section-kicker">Daily close</p><h2>Settlement ledger</h2></div></div><div class="table-scroll"><table><thead><tr><th>Date</th><th>Orders</th><th>Charged</th><th>Fees</th><th>Refunds</th><th>Net</th></tr></thead><tbody id="reconciliation-days"></tbody></table></div></article></div></section>
+          </section>
+
+          <section class="view-panel" data-view-panel="products" aria-labelledby="products-title">
+            <div class="page-header catalog-header"><div><p class="eyebrow">Product operations</p><h1 id="products-title">Product catalog</h1><p class="page-description">Control merchandising, visibility, inventory, variants and contribution margin from one workspace.</p></div><div class="page-actions"><button class="button button--secondary" type="button" data-go-view="media">Media library</button><button class="button button--primary" type="button" data-open-product>+ Add product</button></div></div>
+            <nav class="workspace-switcher workspace-switcher--compact" aria-label="Product workspace"><button class="is-active" type="button" data-products-workspace="catalog"><span>01</span><strong>Catalog</strong><small>Products, variants and pricing</small></button><button type="button" data-products-workspace="inventory"><span>02</span><strong>Inventory & restock</strong><small>Stock risk, ETAs and waitlists</small></button></nav>
+            <div data-products-workspace-panel="catalog">
+              <div class="catalog-command"><div><span class="catalog-command-mark">P1</span><div><strong>Commercial catalog control</strong><p>Open any product to manage images, channel visibility, pricing, inventory and every variant.</p></div></div><span class="catalog-sync"><i></i><b id="catalog-sync-label">Catalog connected</b></span></div>
+              <div class="mini-stat-grid"><article><span>Products</span><strong id="products-count">0</strong><small>Synced catalog</small></article><article><span>Cost configured</span><strong id="products-costed-count">0</strong><small id="products-coverage-label">0% coverage</small></article><article><span>Low stock</span><strong id="products-low-stock">0</strong><small>Fewer than 5 units</small></article><article><span>Average margin</span><strong id="products-average-margin">—</strong><small>Configured products</small></article></div>
+              <article class="surface table-surface catalog-table"><div class="table-toolbar"><div class="table-tabs"><button class="is-active" type="button" data-product-filter="all">All</button><button type="button" data-product-filter="public">Public</button><button type="button" data-product-filter="hidden">Hidden</button><button type="button" data-product-filter="private">Admin only</button><button type="button" data-product-filter="low">Low stock</button></div><label class="table-search"><span>⌕</span><input id="products-search" type="search" placeholder="Search product or SKU" /></label></div><div class="table-scroll"><table><thead><tr><th>Product</th><th>SKU</th><th>Price</th><th>Cost</th><th>Profit / unit</th><th>Margin</th><th>Inventory</th><th>Visibility</th><th></th></tr></thead><tbody id="products-table-body"><tr><td colspan="9"><div class="table-loading">Loading live catalog…</div></td></tr></tbody></table></div></article>
             </div>
-          </aside>
-        </section>
+            <section data-products-workspace-panel="inventory" hidden class="inventory-workspace"><div class="inventory-command"><div><p class="section-kicker">Inventory command center</p><h2>Stock, restocks and customer demand — without the clutter.</h2><p>Start with urgent products, open detailed SKU stock only when needed, and manage back-in-stock subscribers in one place.</p></div><button class="button button--secondary" id="refresh-inventory-operations" type="button">Refresh live stock</button></div><nav class="inventory-view-tabs" aria-label="Inventory views"><button class="is-active" type="button" data-inventory-view="attention"><span>01</span><strong>Needs attention</strong><small>Out of stock and low stock</small></button><button type="button" data-inventory-view="stock"><span>02</span><strong>Stock by SKU</strong><small>Products and variations</small></button><button type="button" data-inventory-view="restocks"><span>03</span><strong>Restock & notify</strong><small>Incoming units and subscribers</small></button></nav><div class="operations-kpi-grid inventory-kpis" id="inventory-kpis"></div><div data-inventory-view-panel="attention"><article class="surface inventory-focus-surface"><div class="surface-head"><div><p class="section-kicker">Priority queue</p><h2>Products requiring a decision</h2><p>Highest-risk products appear first. Open stock editing or review the customers waiting for availability.</p></div></div><div class="inventory-exception-list" id="inventory-exceptions-list"><div class="table-loading">Loading inventory operations…</div></div></article></div><div data-inventory-view-panel="stock" hidden><article class="surface sku-stock-panel"><div class="surface-head sku-stock-head"><div><p class="section-kicker">SKU stock ledger</p><h2>Stock by product, strength and variation</h2><p>Expand a variable product only when you need its individual SKU balances.</p></div><label class="table-search"><span>⌕</span><input id="sku-stock-search" type="search" placeholder="Search product, SKU or strength" /></label></div><div class="table-scroll"><table class="sku-stock-table"><thead><tr><th>Product / variation</th><th>SKU</th><th>Strength</th><th>Available</th><th>Status</th><th></th></tr></thead><tbody id="sku-stock-body"><tr><td colspan="6"><div class="table-loading">Loading synchronized stock…</div></td></tr></tbody></table></div></article></div><div data-inventory-view-panel="restocks" hidden><div class="inventory-restock-grid"><article class="surface restock-program"><div class="surface-head"><div><p class="section-kicker">Incoming inventory</p><h2>Restock schedule</h2><p>Products expected back and their recorded arrival dates.</p></div></div><div id="restock-program-list"></div></article><article class="surface waitlist-program"><div class="surface-head"><div><p class="section-kicker">Back-in-stock audience</p><h2>Stock notifications</h2><p>See the real people waiting for each product. Automatic delivery remains managed by the store plugin.</p></div></div><div id="waitlist-overview-list"></div></article></div></div></section>
+          </section>
 
-        <section class="panel live-panel" id="live-presence">
-          <div class="panel-heading live-panel-heading">
-            <div><p class="eyebrow">Right now</p><h2>Live activity</h2></div>
-            <small id="updated">Waiting for data</small>
-          </div>
+          <section class="view-panel" data-view-panel="fulfillment" aria-labelledby="fulfillment-title">
+            <div class="page-header fulfillment-page-header"><div><p class="eyebrow">Warehouse</p><h1 id="fulfillment-title">Fulfillment</h1><p class="page-description">Processing orders only, arranged oldest first so the queue is completed in arrival order.</p></div><div class="page-actions"><span class="fulfillment-live-state" id="fulfillment-live-state" role="status" aria-live="polite"><i></i><b>Checking live orders</b></span><button class="button button--secondary" id="refresh-fulfillment" type="button">Refresh</button></div></div>
 
-          <div class="live-summary">
-            <div class="live-summary-item live-summary-item--active">
-              <span><i aria-hidden="true"></i> Online now</span><strong id="total">—</strong>
+            <div id="fulfillment-queue-view">
+              <div id="fulfillment-active-banner" class="fulfillment-active-banner" hidden></div>
+              <nav class="fulfillment-status-tabs" aria-label="Fulfillment status" role="tablist">
+                <button class="is-active" type="button" data-fulfillment-filter="waiting" role="tab" aria-selected="true"><i aria-hidden="true">✓</i><span>Ready</span><b>0</b></button>
+                <button type="button" data-fulfillment-filter="active" role="tab" aria-selected="false"><i aria-hidden="true">→</i><span>Picking</span><b>0</b></button>
+                <button type="button" data-fulfillment-filter="paused" role="tab" aria-selected="false"><i aria-hidden="true">Ⅱ</i><span>Paused</span><b>0</b></button>
+                <button type="button" data-fulfillment-filter="blocked" role="tab" aria-selected="false"><i aria-hidden="true">!</i><span>Needs attention</span><b>0</b></button>
+                <button type="button" data-fulfillment-filter="packed" role="tab" aria-selected="false"><i aria-hidden="true">✓</i><span>Packed</span><b>0</b></button>
+              </nav>
+              <div id="fulfillment-order-list" class="fulfillment-order-list"><div class="fulfillment-empty"><span></span><strong>Loading verified orders…</strong><p>This may take a moment while payment, order status and product mappings are checked live.</p></div></div>
             </div>
-            <div class="live-summary-item"><span>Last 30 minutes</span><strong id="visitors-30">—</strong></div>
-            <div class="live-summary-item"><span>Page views</span><strong id="total-views">—</strong></div>
-          </div>
 
-          <div class="section-heading"><h3>Where they are now</h3><span>Active visitors by section</span></div>
-          <div class="section-grid" id="section-grid" aria-label="Active visitors by store section"></div>
-        </section>
+            <section id="fulfillment-detail-view" class="fulfillment-detail-view" hidden>
+              <nav class="fulfillment-detail-nav" aria-label="Open fulfillment order">
+                <button class="fulfillment-back" id="fulfillment-back" type="button"><span aria-hidden="true">←</span><span><small>FULFILLMENT</small><strong>Back to all orders</strong></span></button>
+                <span class="fulfillment-detail-context" id="fulfillment-detail-context">Open order</span>
+                <button class="fulfillment-close" id="fulfillment-close" type="button" aria-label="Close this order and return to all orders">×</button>
+              </nav>
+              <div id="fulfillment-order-detail"></div>
+            </section>
+          </section>
 
-        <details class="more-details">
-          <summary>
-            <span><strong>More statistics</strong><small>Pages, traffic sources, and devices</small></span>
-            <i aria-hidden="true">+</i>
-          </summary>
+          <section class="view-panel" data-view-panel="labels" aria-labelledby="labels-title">
+            <div class="page-header label-page-header"><div><p class="eyebrow">Warehouse organization</p><h1 id="labels-title">Storage locations</h1><p class="page-description">Assign the shelf for each product and variation. Picking now reads the COA QR already printed on every vial.</p></div><div class="page-actions"><span class="label-service-state" id="label-service-state" role="status" aria-live="polite"><i></i><span><small>WAREHOUSE DATA</small><b>Checking connection</b></span></span><button class="button button--secondary" id="refresh-label-workspace" type="button">Refresh</button></div></div>
+            <div class="label-operations-strip label-operations-strip--locations" aria-label="Storage location summary"><span hidden><small>LEGACY LABELS</small><strong id="label-ready-count">—</strong></span><span><small>PRODUCT SHELVES</small><strong id="label-products-located">—</strong></span><span><small>VARIATION OVERRIDES</small><strong id="label-variations-located">—</strong></span><span><small>CURRENT COA BATCHES</small><strong id="label-current-batches">—</strong></span></div>
 
-          <div class="details-grid">
-            <article class="panel pages-panel" aria-labelledby="ranking-title">
-              <div class="panel-heading">
-                <div><p class="eyebrow">Content</p><h2 id="ranking-title">Most viewed pages</h2></div>
-                <span>Selected period</span>
+            <section class="label-subview" data-label-workspace-panel="print" hidden>
+              <div class="label-wizard-shell">
+                <div class="label-wizard-progress" aria-label="Print progress"><span data-label-step-indicator="product"><i>1</i><em><strong>Choose product</strong><small>Catalog</small></em></span><b></b><span data-label-step-indicator="details"><i>2</i><em><strong>Confirm details</strong><small>Label setup</small></em></span><b></b><span data-label-step-indicator="preview"><i>3</i><em><strong>Print</strong><small>Thermal preview</small></em></span></div>
+
+                <article class="surface label-wizard-card label-product-browser" data-label-print-step="product">
+                  <header class="label-browser-heading"><div><p class="section-kicker">Step 1 of 3</p><h2>Choose a product</h2><p>Search the live catalog and select the exact product you are labeling.</p></div><span class="label-browser-count" id="label-catalog-count">0 products</span></header>
+                  <div class="label-browser-toolbar">
+                    <label class="label-product-search label-product-search--large"><span>⌕</span><input id="label-product-search" type="search" placeholder="Search product name or SKU" autocomplete="off" /></label>
+                    <label class="label-compact-select"><span>Category</span><select id="label-category-filter"><option value="all">All categories</option></select></label>
+                    <label class="label-compact-select"><span>Sort</span><select id="label-product-sort"><option value="name">Product name</option><option value="stock-low">Lowest stock</option><option value="location">Storage location</option></select></label>
+                    <div class="label-view-toggle" role="group" aria-label="Product display"><button class="is-active" type="button" data-label-product-view="grid" aria-pressed="true" title="Grid view">▦</button><button type="button" data-label-product-view="list" aria-pressed="false" title="List view">☷</button></div>
+                  </div>
+                  <div class="label-search-meta"><span id="label-catalog-result">Browse the live catalog</span><small>Images and stock use current catalog values</small></div>
+                  <div class="label-product-list is-grid" id="label-product-list"><div class="label-skeleton-grid" aria-label="Loading products"><i></i><i></i><i></i><i></i></div></div>
+                </article>
+
+                <article class="surface label-wizard-card label-details-card" data-label-print-step="details" hidden>
+                  <div class="label-card-topbar"><button class="label-back-link" id="label-change-product" type="button">← Change product</button><span>STEP 2 OF 3</span></div>
+                  <div class="label-details-layout">
+                    <aside class="label-details-context">
+                      <div class="label-selected-product label-selected-product--print" id="label-selected-product"><span>◇</span><div><small>SELECTED PRODUCT</small><strong>Loading product…</strong><p>Please wait a moment.</p></div></div>
+                      <div class="label-effective-location" id="label-effective-location"><span>⌖</span><div><small>STORAGE LOCATION</small><strong>Checking location…</strong><p>The assigned shelf appears automatically.</p></div></div>
+                      <div class="label-context-service" id="label-context-service"><i></i><div><small>PRINT SERVICE</small><strong>Checking availability</strong><p>Server-validated Code 128 labels</p></div></div>
+                    </aside>
+                    <div class="label-confirm-body">
+                    <header class="label-wizard-heading label-wizard-heading--compact"><span>2</span><div><p class="section-kicker">Confirm details</p><h2>What should this label identify?</h2><p>Only options supported by the selected product are shown.</p></div></header>
+                    <div class="label-form-grid label-form-grid--primary"><label><span>Label for</span><select id="label-type-select"><option value="product">Product</option></select></label><label id="label-variation-field"><span>Variation</span><select id="label-variation-select" disabled><option value="0">Base product</option></select></label><label id="label-batch-field" hidden><span>Batch / COA</span><select id="label-batch-select"><option value="">Select a verified batch</option></select></label></div>
+                    <details class="label-advanced-settings"><summary><span>Optional print settings</span><small>2 × 1 inch · 1 copy</small></summary><div class="label-form-grid"><label><span>Thermal size</span><select id="label-size-select"><option value="2x1">2 × 1 inch</option><option value="3x1">3 × 1 inch</option></select></label><label><span>Copies</span><input id="label-copy-count" type="number" min="1" max="50" step="1" value="1" /></label></div></details>
+                    <button class="button button--primary label-generate" id="generate-barcode-label" type="button" disabled>Continue to preview</button>
+                    <p class="label-action-note">The barcode is validated and registered by the existing secure label service.</p>
+                    </div>
+                  </div>
+                </article>
+
+                <article class="surface label-wizard-card label-preview-card" data-label-print-step="preview" hidden>
+                  <div class="label-card-topbar"><button class="label-back-link" id="label-back-to-details" type="button">← Change details</button><span>STEP 3 OF 3</span></div>
+                  <div class="label-preview-title"><span>✓</span><div><p class="section-kicker">Label ready</p><h2>Review and print</h2><p>Confirm the physical label before sending it to your printer.</p></div></div>
+                  <div class="label-preview-layout"><div class="thermal-label-stage" id="thermal-label-stage"><div class="label-empty-panel"><span>3</span><strong>Your label will appear here</strong><p>Complete the previous step to generate it.</p></div></div><aside class="label-preview-side"><div class="label-print-summary"><span><small>LABEL SIZE</small><strong id="label-preview-size">2 × 1</strong></span><span><small>PRINT QUANTITY</small><strong id="label-preview-copies">1 copy</strong></span><span><small>SERVICE</small><strong id="label-preview-service">Checking</strong></span></div><div class="label-preview-actions"><button class="button button--secondary" id="copy-barcode-token" type="button" disabled>Copy barcode</button><button class="button button--primary" id="print-barcode-label" type="button" disabled>Print label</button></div><button class="label-start-over" id="label-start-over" type="button">Print a different product</button><p class="label-print-hint">Printing does not change stock, orders or shipping.</p></aside></div>
+                </article>
               </div>
-              <div class="page-ranking" id="page-ranking"><p class="empty-state">Waiting for the first visit.</p></div>
+            </section>
+
+            <section class="label-subview" data-label-workspace-panel="locations">
+              <div class="label-subview-heading"><div><p class="section-kicker">Storage locations</p><h2>Find every product quickly</h2><p>Assign a primary shelf once. Add variation overrides only when a specific variation lives somewhere else.</p></div><span class="label-admin-badge" id="label-admin-badge">View only</span></div>
+              <div class="label-location-simple">
+                <article class="surface label-location-browser" data-location-step="browse"><header><div><p class="section-kicker">Catalog</p><h2>Products</h2><p>Select one to manage its shelf assignments.</p></div><span id="label-location-catalog-count">0</span></header><div class="label-location-toolbar"><label class="label-product-search"><span>⌕</span><input id="label-location-search" type="search" placeholder="Search product or SKU" autocomplete="off" /></label><label class="label-compact-select"><span>Show</span><select id="label-location-filter"><option value="all">All products</option><option value="assigned">Assigned</option><option value="unassigned">Needs location</option></select></label></div><div id="label-location-product-list" class="label-location-product-list"><div class="label-skeleton-list" aria-label="Loading locations"><i></i><i></i><i></i></div></div></article>
+                <article class="surface label-location-card" data-location-step="edit"><div class="label-card-topbar"><button class="label-back-link" id="location-change-product" type="button">← Product list</button><span>LOCATION EDITOR</span></div><header class="label-selected-header"><div class="label-selected-product" id="location-selected-product"><span>◇</span><div><small>NO PRODUCT SELECTED</small><strong>Choose a product</strong><p>Its primary shelf and variation overrides will appear here.</p></div></div></header><div id="label-location-editor" class="label-location-editor"><div class="label-empty-panel"><span>⌖</span><strong>Select a catalog product</strong><p>Choose a product from the list to manage its location.</p></div></div></article>
+              </div>
+            </section>
+
+            <section class="label-subview" data-label-workspace-panel="history" hidden>
+              <div class="label-subview-heading"><div><p class="section-kicker">Existing labels</p><h2>Find and reprint a registered label</h2><p>This view contains real barcode identities saved by the current system—not fabricated print history.</p></div><span id="label-history-count">0 registered</span></div>
+              <article class="surface label-history-card"><div class="label-history-toolbar"><label class="label-product-search"><span>⌕</span><input id="label-history-search" type="search" placeholder="Search product, SKU, lot or barcode" autocomplete="off" /></label><label class="label-compact-select"><span>Type</span><select id="label-history-type"><option value="all">All label types</option><option value="product">Products</option><option value="variation">Variations</option><option value="batch">Batches / COAs</option></select></label><label class="label-compact-select"><span>Sort</span><select id="label-history-sort"><option value="newest">Newest registered</option><option value="oldest">Oldest registered</option><option value="product">Product name</option></select></label></div><div id="registered-label-list" class="registered-label-list"><div class="label-skeleton-list" aria-label="Loading registered labels"><i></i><i></i><i></i></div></div></article>
+            </section>
+          </section>
+
+          <section class="view-panel" data-view-panel="media" aria-labelledby="media-title">
+            <div class="page-header"><div><p class="eyebrow">Asset management</p><h1 id="media-title">Media library</h1><p class="page-description">A reusable visual library for product covers, galleries and variant-specific imagery.</p></div><div class="page-actions"><button class="button button--secondary" type="button" data-go-view="products">Back to products</button><button class="button button--primary" type="button" data-open-product>+ Add product</button></div></div>
+            <div class="media-summary"><div><span>Reusable assets</span><strong id="media-count">0</strong><small>Images currently connected to the catalog</small></div><div><span>Catalog coverage</span><strong id="media-coverage">0%</strong><small>Products with at least one image</small></div><label class="media-search"><span>⌕</span><input id="media-search" type="search" placeholder="Search image or product" /></label></div>
+            <div class="media-grid" id="media-grid"><div class="media-empty"><span>▧</span><strong>Loading media library…</strong></div></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="customers" aria-labelledby="customers-title">
+            <div class="page-header customer-page-header"><div><p class="eyebrow">Customer operations</p><h1 id="customers-title">Customer directory</h1><p class="page-description">Every account, guest buyer, order, reward balance and relationship detail in one governed record.</p></div><div class="page-actions"><span class="customer-sync" id="customer-sync"><i></i><b>Waiting to sync</b></span><button class="button button--secondary" id="refresh-customers" type="button">Refresh directory</button></div></div>
+            <div class="customer-trust-strip"><div><span class="customer-trust-mark">P1</span><div><strong>The live store remains the source of truth</strong><p>Customer identities and reward records stay intact. This workspace organizes them without replacing or duplicating the original data.</p></div></div><span id="customer-record-status">Preparing complete customer records</span></div>
+            <div class="customer-kpi-grid"><article><span>Total profiles</span><strong id="customer-total-profiles">—</strong><small id="customer-profile-breakdown">Registered accounts + guest buyers</small></article><article><span>Customers with orders</span><strong id="customer-paying-count">—</strong><small>Complete historical order matching</small></article><article><span>Lifetime customer value</span><strong id="customer-lifetime-revenue">—</strong><small>Net of recorded refunds</small></article><article class="customer-points-kpi"><span>Points in circulation</span><strong id="customer-points-outstanding">—</strong><small id="customer-points-status">Checking live reward balances</small></article><article><span>Store credit</span><strong id="customer-credit-outstanding">—</strong><small>Current outstanding balance</small></article></div>
+            <article class="surface customer-directory-surface">
+              <div class="customer-directory-toolbar"><div class="customer-directory-title"><p class="section-kicker">Complete directory</p><h2>All customers</h2><span id="customer-directory-count">Loading records…</span></div><div class="customer-directory-controls"><div class="table-tabs customer-tabs"><button class="is-active" type="button" data-customer-filter="all">All</button><button type="button" data-customer-filter="buyers">Buyers</button><button type="button" data-customer-filter="registered">Registered</button><button type="button" data-customer-filter="guest">Guest buyers</button><button type="button" data-customer-filter="rewards">With points</button></div><label class="customer-sort"><span>Sort</span><select id="customer-sort"><option value="recent">Latest order</option><option value="spend">Highest value</option><option value="orders">Most orders</option><option value="points">Most points</option><option value="registered">Newest account</option><option value="name">Name A–Z</option></select></label><label class="table-search customer-search"><span>⌕</span><input id="customer-search" type="search" placeholder="Search name, email, phone or order" /></label></div></div>
+              <div class="customer-loading" id="customer-loading"><span></span><div><strong>Building the complete customer directory…</strong><small>Matching 1,841 accounts, guest buyers, orders and reward history. The first secure sync may take a moment.</small></div></div>
+              <div class="table-scroll" id="customer-table-wrap" hidden><table class="customer-table"><thead><tr><th>Customer</th><th>Account</th><th>Contact</th><th>Orders</th><th>Net spend</th><th>Points</th><th>Store credit</th><th>Last order</th><th></th></tr></thead><tbody id="customers-table-body"></tbody></table></div>
+              <div class="customer-pagination" id="customer-pagination" hidden><span id="customer-page-summary">1–50 of 0</span><div><button id="customer-page-previous" type="button" aria-label="Previous customers">←</button><span id="customer-page-number">Page 1</span><button id="customer-page-next" type="button" aria-label="Next customers">→</button></div></div>
+            </article>
+          </section>
+
+          <section class="view-panel affiliate-admin" data-view-panel="affiliates" aria-labelledby="affiliates-title">
+            <div class="page-header affiliate-admin-header"><div><p class="eyebrow">Partner revenue</p><h1 id="affiliates-title">Affiliate center</h1><p class="page-description">Partners, applications, coupon performance, commissions and payout requests in one workspace.</p></div><div class="page-actions"><span class="affiliate-sync-state" id="affiliate-sync-state"><i></i><span><b>Dual tracking</b><small>Preparing partner data</small></span></span><button class="button button--secondary" id="affiliate-admin-refresh" type="button">Refresh program</button><button class="button button--primary" id="affiliate-new-invite" type="button">Create invitation</button></div></div>
+            <section class="affiliate-admin-kpis" aria-label="Affiliate metrics"><article><span>Total affiliates</span><strong id="affiliate-kpi-people">—</strong><small id="affiliate-kpi-active">Loading active accounts</small></article><article><span>Attributed sales</span><strong id="affiliate-kpi-sales">—</strong><small>Imported lifetime coupon revenue</small></article><article><span>Total commission</span><strong id="affiliate-kpi-commission">—</strong><small>Earned by all partners</small></article><article><span>Available balances</span><strong id="affiliate-kpi-available">—</strong><small>Currently eligible to request</small></article><article class="affiliate-admin-kpi-alert"><span>Pending payouts</span><strong id="affiliate-kpi-payouts">—</strong><small id="affiliate-kpi-payout-count">Waiting for review</small></article></section>
+            <section class="affiliate-shadow-card" id="affiliate-shadow-card" aria-labelledby="affiliate-shadow-title">
+              <div class="affiliate-shadow-intro"><span class="affiliate-shadow-icon">↔</span><div><p class="section-kicker">Safe migration monitor</p><h2 id="affiliate-shadow-title">Plugin + Phase One are counting together</h2><p>The current plugin remains active and controls balances. Phase One records new attributed orders independently so both totals can be compared before cutover.</p></div><span class="affiliate-shadow-status is-collecting" id="affiliate-shadow-status">Collecting</span></div>
+              <div class="affiliate-shadow-comparison">
+                <article><span>Current plugin</span><strong id="affiliate-shadow-plugin-commission">—</strong><small><b id="affiliate-shadow-plugin-orders">0</b> new coupon uses · <b id="affiliate-shadow-plugin-sales">—</b> sales</small></article>
+                <span class="affiliate-shadow-divider" aria-hidden="true">vs</span>
+                <article><span>Phase One ledger</span><strong id="affiliate-shadow-custom-commission">—</strong><small><b id="affiliate-shadow-custom-orders">0</b> verified orders · <b id="affiliate-shadow-custom-sales">—</b> eligible sales</small></article>
+                <article class="affiliate-shadow-variance"><span>Difference</span><strong id="affiliate-shadow-variance">—</strong><small id="affiliate-shadow-updated">Waiting for first sync</small></article>
+              </div>
+            </section>
+            <nav class="affiliate-admin-tabs" aria-label="Affiliate center sections"><button class="is-active" type="button" data-affiliate-admin-tab="directory"><span>01</span><b>Affiliates</b><small>People, coupons and earnings</small></button><button type="button" data-affiliate-admin-tab="commissions"><span>02</span><b>Commission history</b><small id="affiliate-commission-tab-copy">Every attributed order</small></button><button type="button" data-affiliate-admin-tab="applications"><span>03</span><b>Applications</b><small id="affiliate-application-tab-copy">Public and account requests</small></button><button type="button" data-affiliate-admin-tab="payouts"><span>04</span><b>Payout requests</b><small>Approve and record payments</small></button><button type="button" data-affiliate-admin-tab="program"><span>05</span><b>Program rules</b><small>Commission and payout policy</small></button></nav>
+            <section class="affiliate-admin-panel" data-affiliate-admin-panel="directory"><article class="surface affiliate-directory-card"><div class="affiliate-admin-toolbar"><div><p class="section-kicker">Complete directory</p><h2>All affiliates</h2><span id="affiliate-directory-count">Synchronizing records…</span></div><label class="table-search"><span>⌕</span><input id="affiliate-admin-search" type="search" placeholder="Search affiliate, email or coupon" /></label></div><div class="affiliate-admin-table-wrap"><table><thead><tr><th>Affiliate</th><th>Coupon</th><th>Uses</th><th>Sales</th><th>Commission</th><th>Available</th><th>Status</th><th></th></tr></thead><tbody id="affiliate-admin-body"><tr><td colspan="8"><div class="table-loading">Building the affiliate directory…</div></td></tr></tbody></table></div></article></section>
+            <section class="affiliate-admin-panel" data-affiliate-admin-panel="commissions" hidden><article class="surface affiliate-directory-card"><div class="affiliate-admin-toolbar"><div><p class="section-kicker">Audited earnings ledger</p><h2>Commission history</h2><span id="affiliate-commission-summary">Synchronizing attributed orders…</span></div><label class="table-search"><span>⌕</span><input id="affiliate-commission-search" type="search" placeholder="Search order, affiliate or coupon" /></label></div><div class="affiliate-admin-table-wrap"><table class="affiliate-commission-table"><thead><tr><th>Order</th><th>Affiliate</th><th>Coupon</th><th>Eligible sale</th><th>Rule</th><th>Commission</th><th>Status</th><th>Attributed</th></tr></thead><tbody id="affiliate-commission-body"><tr><td colspan="8"><div class="table-loading">Building the commission ledger…</div></td></tr></tbody></table></div></article></section>
+            <section class="affiliate-admin-panel" data-affiliate-admin-panel="applications" hidden><article class="surface affiliate-directory-card"><div class="affiliate-admin-toolbar"><div><p class="section-kicker">Application inbox</p><h2>Affiliate applications</h2><span id="affiliate-application-summary">Waiting for applications…</span></div><label class="table-search"><span>⌕</span><input id="affiliate-application-search" type="search" placeholder="Search applicant, email or coupon" /></label></div><div class="affiliate-admin-table-wrap"><table><thead><tr><th>Applicant</th><th>Requested coupon</th><th>Channel</th><th>Audience</th><th>Source</th><th>Received</th><th>Status</th></tr></thead><tbody id="affiliate-application-body"><tr><td colspan="7"><div class="table-loading">Loading application inbox…</div></td></tr></tbody></table></div></article></section>
+            <section class="affiliate-admin-panel" data-affiliate-admin-panel="payouts" hidden><article class="surface affiliate-directory-card"><div class="affiliate-admin-toolbar"><div><p class="section-kicker">Payment queue</p><h2>Payout requests</h2><span id="affiliate-payout-summary">No requests loaded</span></div><div class="affiliate-status-legend"><span><i class="is-requested"></i>Requested</span><span><i class="is-processing"></i>Processing</span><span><i class="is-paid"></i>Paid</span></div></div><div class="affiliate-admin-table-wrap"><table><thead><tr><th>Affiliate</th><th>Requested</th><th>Method</th><th>Destination</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead><tbody id="affiliate-payout-body"></tbody></table></div></article></section>
+            <section class="affiliate-admin-panel" data-affiliate-admin-panel="program" hidden><div class="affiliate-program-grid"><article class="surface affiliate-program-rules"><div><p class="section-kicker">Current policy</p><h2>Simple rules partners can understand</h2><p>These values are stored by the Phase One platform. Editing controls will be enabled after historical balances pass reconciliation.</p></div><dl><div><dt>Default commission</dt><dd id="affiliate-rule-commission">—</dd></div><div><dt>Minimum payout</dt><dd id="affiliate-rule-minimum">—</dd></div><div><dt>Approval hold</dt><dd id="affiliate-rule-hold">—</dd></div><div><dt>Currency</dt><dd id="affiliate-rule-currency">—</dd></div></dl></article><aside class="surface affiliate-migration-checklist"><p class="section-kicker">Migration controls</p><h2>Safe cutover</h2><ul><li class="is-done"><span>✓</span><div><strong>Own database authority</strong><small>Profiles, coupons and payouts are durable.</small></div></li><li class="is-done"><span>✓</span><div><strong>Legacy snapshot import</strong><small>Existing coupon balances remain visible.</small></div></li><li class="is-done"><span>✓</span><div><strong>Shadow order ledger</strong><small>New attributed orders are counted without disabling the plugin.</small></div></li><li><span>4</span><div><strong>Validation and cutover</strong><small>Compare both systems over real orders before making Phase One authoritative.</small></div></li></ul></aside></div></section>
+            <div class="affiliate-manage-dialog" id="affiliate-manage-dialog" hidden>
+              <form class="surface affiliate-manage-card" id="affiliate-manage-form">
+                <button class="affiliate-dialog-close" type="button" data-close-affiliate-manage aria-label="Close">×</button>
+                <header><div class="affiliate-manage-avatar" id="affiliate-manage-avatar">P1</div><div><p class="section-kicker">Affiliate management</p><h2 id="affiliate-manage-name">Affiliate</h2><p id="affiliate-manage-email">—</p></div><span class="affiliate-admin-status" id="affiliate-manage-status">—</span></header>
+                <input id="affiliate-manage-id" type="hidden" />
+                <input id="affiliate-manage-coupon-id" type="hidden" />
+                <section class="affiliate-manage-section">
+                  <div class="affiliate-manage-section-head"><div><span>Coupon & earnings</span><strong id="affiliate-manage-coupon-title">Assign the first coupon</strong></div><small>Saved in both tracking systems</small></div>
+                  <div class="affiliate-manage-notice" id="affiliate-manage-notice" hidden></div>
+                  <label class="affiliate-manage-code"><span>Coupon code</span><input id="affiliate-manage-code" type="text" maxlength="40" autocomplete="off" spellcheck="false" placeholder="PARTNER10" required /></label>
+                  <div class="affiliate-manage-fields"><label><span>Customer discount</span><div><input id="affiliate-manage-discount" type="number" min="0.01" max="100" step="0.01" required /><b>%</b></div></label><label><span>Affiliate commission</span><div><input id="affiliate-manage-commission" type="number" min="0.01" max="100" step="0.01" required /><b>%</b></div></label></div>
+                  <p class="affiliate-manage-help">The coupon becomes available on the storefront and new qualifying sales begin entering the Phase One shadow ledger automatically.</p>
+                  <button class="button button--primary" id="affiliate-save-coupon" type="submit">Assign coupon</button>
+                </section>
+                <section class="affiliate-access-control"><div><span>Portal access</span><strong id="affiliate-access-title">Affiliate is active</strong><p id="affiliate-access-copy">Pausing access keeps all historical sales, commissions and payout records.</p></div><button class="button button--secondary" id="affiliate-toggle-status" type="button">Pause affiliate</button></section>
+              </form>
+            </div>
+            <div class="affiliate-invite-dialog" id="affiliate-invite-dialog" hidden><form class="surface" id="affiliate-invite-form"><button class="affiliate-dialog-close" type="button" data-close-affiliate-dialog aria-label="Close">×</button><p class="section-kicker">Private invitation</p><h2>Invite a new affiliate</h2><p>Create a secure, single-use link connected to the recipient's email address.</p><label><span>Full name</span><input id="affiliate-invite-name" type="text" maxlength="200" autocomplete="name" required placeholder="Affiliate name" /></label><label><span>Email address</span><input id="affiliate-invite-email" type="email" maxlength="320" autocomplete="email" required placeholder="name@example.com" /></label><button class="button button--primary" id="affiliate-create-invite" type="submit">Generate invitation link</button></form></div>
+            <div class="affiliate-invite-result" id="affiliate-invite-result" hidden><button type="button" data-close-affiliate-invite aria-label="Close">×</button><p class="section-kicker">Private activation link</p><h2>Invitation ready</h2><p>Send this link privately to the affiliate. It expires in 72 hours and can only be used once.</p><label><input id="affiliate-invite-url" type="text" readonly /><button id="affiliate-copy-invite" type="button">Copy link</button></label><small id="affiliate-invite-expiry"></small></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="loyalty" aria-labelledby="loyalty-title">
+            <div class="page-header loyalty-page-header"><div><p class="eyebrow">Customer rewards</p><h1 id="loyalty-title">Rewards</h1><p class="page-description">Manage customer points without changing orders or losing account history.</p></div><div class="page-actions"><span class="loyalty-live-state" id="loyalty-live-state"><i></i><span><b>Checking program</b><small id="loyalty-bridge-version">Secure rewards service</small></span></span><button class="button button--secondary" id="loyalty-refresh" type="button">Refresh</button></div></div>
+
+            <nav class="loyalty-section-tabs" aria-label="Rewards sections">
+              <button class="is-active" type="button" data-loyalty-section="overview" aria-selected="true"><span>01</span><b>Overview</b><small>Program status</small></button>
+              <button type="button" data-loyalty-section="settings" aria-selected="false"><span>02</span><b>Program rules</b><small>How points work</small></button>
+              <button type="button" data-loyalty-section="customers" aria-selected="false"><span>03</span><b>Customer balances</b><small>Add or deduct points</small></button>
+              <button type="button" data-loyalty-section="history" aria-selected="false"><span>04</span><b>History</b><small>Activity and audit</small></button>
+            </nav>
+
+            <div class="loyalty-subpanel" data-loyalty-panel="overview">
+              <div class="loyalty-command loyalty-command--simple" id="loyalty-command"><div class="loyalty-command-mark">✓</div><div><small>REWARDS PROGRAM</small><strong id="loyalty-command-title">Loading current program</strong><p id="loyalty-command-copy">Customer balances and history remain protected.</p></div><span class="integration-state" id="loyalty-command-state">Checking</span></div>
+              <section class="loyalty-kpi-grid loyalty-kpi-grid--simple" aria-label="Rewards summary"><article><span>Points in circulation</span><strong id="loyalty-points-outstanding">—</strong><small>Total points held by customers</small></article><article><span>Members with points</span><strong id="loyalty-members">—</strong><small>Customers with an active balance</small></article><article><span>Available reward value</span><strong id="loyalty-liability">—</strong><small>Estimated credit customers can redeem</small></article></section>
+              <div class="loyalty-overview-grid">
+                <section class="surface loyalty-start-card"><div><p class="section-kicker">Common tasks</p><h2>What would you like to do?</h2><p>Choose one task. The dashboard will only show the controls needed for that action.</p></div><div class="loyalty-start-actions"><button type="button" data-loyalty-open="customers"><span>+</span><div><strong>Change a customer balance</strong><small>Add points, deduct points or correct a balance.</small></div><b>Continue →</b></button><button type="button" data-loyalty-open="settings"><span>⚙</span><div><strong>Change how points work</strong><small>Set earning rules and the value of points.</small></div><b>Continue →</b></button></div></section>
+                <aside class="surface loyalty-current-rule"><p class="section-kicker">Current setup</p><h2>Program at a glance</h2><div><span>Customer accounts</span><strong id="loyalty-customers">—</strong></div><div><span>Store credit issued</span><strong id="loyalty-credit">—</strong></div><ul><li><span>✓</span>Existing balances stay protected</li><li><span>✓</span>Every manual change requires a reason</li><li><span>✓</span>No customer can receive a negative balance</li></ul></aside>
+              </div>
+              <section class="surface loyalty-help-strip"><div><span>1</span><p><strong>Customers earn points</strong><small>Eligible orders automatically create points.</small></p></div><i>→</i><div><span>2</span><p><strong>Points build a balance</strong><small>Each customer keeps their complete history.</small></p></div><i>→</i><div><span>3</span><p><strong>Points become credit</strong><small>Customers redeem according to your rule.</small></p></div></section>
+            </div>
+
+            <div class="loyalty-subpanel" data-loyalty-panel="settings" hidden>
+              <div class="loyalty-panel-heading"><div><p class="section-kicker">Program rules</p><h2>Decide how customers earn and use points</h2><p>Start with the two basic rules. Advanced settings can stay unchanged.</p></div><button class="text-button" type="button" data-loyalty-open="overview">← Back to overview</button></div>
+              <div class="loyalty-layout">
+                <form class="surface loyalty-policy loyalty-policy--guided" id="loyalty-policy-form">
+                  <div class="surface-head"><div><p class="section-kicker">Program status</p><h2>Rewards are controlled here</h2></div><span id="loyalty-policy-status">Current values</span></div>
+                  <div class="loyalty-program-switches"><label><input id="loyalty-earning-enabled" type="checkbox" /><span aria-hidden="true"></span><div><strong>Customers can earn points</strong><small>New eligible orders create points</small></div></label><label><input id="loyalty-redemption-enabled" type="checkbox" /><span aria-hidden="true"></span><div><strong>Customers can use points</strong><small>Points can become store credit</small></div></label></div>
+                  <div class="loyalty-policy-section"><div class="loyalty-section-heading"><span>01</span><div><strong>How customers earn</strong><small>Example: 1 point for every $1 spent.</small></div></div><div class="loyalty-field-grid"><label><span>Points for every $1</span><div class="loyalty-unit-field"><input id="loyalty-points-rate" type="number" min="0.01" max="100" step="0.01" required /><em>points</em></div><small>Higher numbers give rewards faster</small></label><label><span>Minimum order to earn</span><div class="loyalty-unit-field is-prefix"><em>$</em><input id="loyalty-minimum-order" type="number" min="0" max="1000000" step="0.01" required /></div><small>Use $0 if every order should qualify</small></label></div></div>
+                  <div class="loyalty-policy-section"><div class="loyalty-section-heading"><span>02</span><div><strong>What points are worth</strong><small>Example: 500 points becomes $5 in credit.</small></div></div><div class="loyalty-conversion-row"><label><span>Customer uses</span><div class="loyalty-unit-field"><input id="loyalty-block-points" type="number" min="1" max="1000000" step="1" required /><em>points</em></div></label><span class="loyalty-equals">=</span><label><span>Customer receives</span><div class="loyalty-unit-field is-prefix"><em>$</em><input id="loyalty-block-credit" type="number" min="0.01" max="100000" step="0.01" required /></div></label></div><div class="loyalty-impact-note"><span>!</span><div><strong>Changing this rule also changes the value of points customers already own</strong><p id="loyalty-impact-copy">The estimated financial impact appears in the preview before you save.</p></div></div></div>
+                  <details class="loyalty-advanced"><summary><span><strong>Advanced settings</strong><small>Order limits, rounding, shipping, tax and valid statuses</small></span><b>Show options</b></summary><div class="loyalty-policy-section"><div class="loyalty-field-grid"><label><span>Maximum points per order</span><input id="loyalty-maximum-points" type="number" min="0" max="1000000" step="1" required /><small>Use 0 for no maximum</small></label><label><span>Point rounding</span><select id="loyalty-rounding"><option value="floor">Round down</option><option value="round">Nearest point</option><option value="ceil">Round up</option></select><small>Applied after calculating points</small></label></div><div class="loyalty-inline-options"><label><input id="loyalty-include-shipping" type="checkbox" /> Include shipping</label><label><input id="loyalty-include-tax" type="checkbox" /> Include tax</label></div><div class="loyalty-status-options"><span>Give points when order is</span><label><input id="loyalty-status-processing" type="checkbox" /> Processing</label><label><input id="loyalty-status-completed" type="checkbox" /> Completed</label></div></div></details>
+                  <div class="loyalty-publish"><div class="loyalty-save-explainer"><span>✓</span><p><strong>Nothing changes until you save.</strong><small>We keep a record of who changed the program and why.</small></p></div><label><span>Why are you making this change?</span><textarea id="loyalty-policy-reason" maxlength="300" required placeholder="Example: Holiday rewards campaign"></textarea></label><label class="loyalty-confirm"><input id="loyalty-policy-confirm" type="checkbox" /> I understand this can change the value of points customers already have.</label><button class="button button--primary" id="loyalty-policy-save" type="submit">Save program rules</button></div>
+                </form>
+                <div class="loyalty-side-column"><article class="surface loyalty-simulator"><div class="surface-head"><div><p class="section-kicker">Simple preview</p><h2>See what customers receive</h2></div><span>Updates as you type</span></div><label><span>Example order</span><div class="loyalty-unit-field is-prefix"><em>$</em><input id="loyalty-example-order" type="number" min="0" step="1" value="100" /></div></label><div class="loyalty-simulation-flow"><div><span>Customer earns</span><strong id="loyalty-preview-earned">—</strong><small>points</small></div><i>→</i><div><span>Estimated value</span><strong id="loyalty-preview-credit">—</strong><small>in credit</small></div></div><div class="loyalty-simulator-summary"><span>Reward value per order</span><strong id="loyalty-preview-rate">—</strong></div></article><article class="surface loyalty-safeguards"><div class="surface-head"><div><p class="section-kicker">Built-in protection</p><h2>The system checks every change</h2></div></div><ul><li><span>✓</span><div><strong>Balances are never reset</strong><small>Historical points stay attached to each customer.</small></div></li><li><span>✓</span><div><strong>Financial changes need approval</strong><small>You will see the estimated impact before saving.</small></div></li><li><span>✓</span><div><strong>Changes remain traceable</strong><small>The reason and administrator are recorded.</small></div></li></ul></article></div>
+              </div>
+            </div>
+
+            <div class="loyalty-subpanel" data-loyalty-panel="customers" hidden>
+              <div class="loyalty-panel-heading"><div><p class="section-kicker">Customer balances</p><h2>Change points for one customer</h2><p>Follow the three steps. The final balance is shown before anything changes.</p></div><button class="text-button" type="button" data-loyalty-open="overview">← Back to overview</button></div>
+              <section class="loyalty-operations" aria-labelledby="loyalty-adjustment-title"><div class="loyalty-operations-grid"><form class="surface loyalty-adjustment" id="loyalty-adjustment-form"><div class="loyalty-adjustment-head"><div><span>Guided adjustment</span><strong id="loyalty-adjustment-title">Complete one step at a time</strong></div><small>Every change is recorded</small></div><div class="loyalty-adjustment-workflow"><section class="loyalty-adjustment-step loyalty-customer-step"><div class="loyalty-step-heading"><b>01</b><div><strong>Find the customer</strong><small>Search by name or email.</small></div></div><label class="loyalty-customer-search"><span>Customer search</span><div><i>⌕</i><input id="loyalty-customer-search" type="search" autocomplete="off" placeholder="Name or email" /></div></label><div class="loyalty-search-results" id="loyalty-search-results" hidden></div><div class="loyalty-selected-customer" id="loyalty-selected-customer"><span>◎</span><div><strong>No customer selected</strong><small>Choose an account to continue.</small></div><b>—</b></div></section><section class="loyalty-adjustment-step loyalty-change-step"><div class="loyalty-step-heading"><b>02</b><div><strong>Choose the change</strong><small>Enter the points and a short reason.</small></div></div><div class="loyalty-adjustment-controls"><label><span>What should happen?</span><select id="loyalty-adjustment-operation"><option value="add">Add points</option><option value="subtract">Deduct points</option><option value="set">Set exact balance</option></select></label><label><span>How many points?</span><input id="loyalty-adjustment-amount" type="number" min="0" max="1000000" step="1" placeholder="0" required /></label></div><label class="loyalty-reason-field"><span>Why?</span><textarea id="loyalty-adjustment-reason" maxlength="300" required placeholder="Example: Customer service correction"></textarea></label></section><section class="loyalty-adjustment-step loyalty-review-step"><div class="loyalty-step-heading"><b>03</b><div><strong>Review and apply</strong><small>Confirm the new balance.</small></div></div><div class="loyalty-adjustment-preview"><span><small>New customer balance</small><b>After this adjustment</b></span><strong id="loyalty-adjustment-result">—</strong></div><label class="loyalty-notification-option"><input id="loyalty-adjustment-notify" type="checkbox" checked /><span aria-hidden="true"></span><div><strong>Email the customer</strong><small>Send a confirmation after the change.</small></div></label><div class="loyalty-review-note"><span>✓</span><p>The customer, reason and new balance will be saved in the history.</p></div><button class="button button--primary" id="loyalty-adjustment-save" type="submit" disabled>Apply adjustment</button></section></div></form></div></section>
+            </div>
+
+            <div class="loyalty-subpanel" data-loyalty-panel="history" hidden>
+              <div class="loyalty-panel-heading"><div><p class="section-kicker">History</p><h2>Review what changed</h2><p>Customer point movements and program-rule changes are kept separately.</p></div><button class="text-button" type="button" data-loyalty-open="overview">← Back to overview</button></div>
+              <article class="surface loyalty-activity"><div class="surface-head"><div><p class="section-kicker">Customer activity</p><h2>Recent point changes</h2><p>Additions, deductions and account corrections.</p></div><button class="text-button" type="button" data-go-view="customers">Open customer directory →</button></div><div class="loyalty-activity-columns" aria-hidden="true"><span>Change</span><span>Customer and reason</span><span>Date</span><span>Balance</span></div><div class="loyalty-activity-list" id="loyalty-activity-list"><p class="empty-state">Loading the reward history…</p></div></article>
+              <article class="surface loyalty-audit"><div class="surface-head"><div><p class="section-kicker">Program changes</p><h2>Rules audit trail</h2></div><span>Most recent changes</span></div><div class="loyalty-audit-list" id="loyalty-audit-list"><p class="empty-state">No program changes recorded yet.</p></div></article>
+            </div>
+          </section>
+
+          <section class="view-panel" data-view-panel="seo" aria-labelledby="seo-title">
+            <div class="page-header seo-page-header"><div><p class="eyebrow">Organic growth command center</p><h1 id="seo-title">SEO intelligence</h1><p class="page-description">Search visibility, clicks, ranking opportunities and sitemap health in one focused workspace.</p></div><div class="page-actions"><label class="seo-property-select" id="seo-property-wrap" hidden><span>Property</span><select id="seo-property"></select></label><button class="button button--secondary" id="seo-sync" type="button" disabled>Sync search data</button><button class="button button--primary" id="seo-connect" type="button">Connect search data</button></div></div>
+            <div class="seo-connection" id="seo-connection"><span class="seo-connection-mark">G</span><div><small>SEARCH PERFORMANCE</small><strong id="seo-connection-title">Checking secure connection</strong><p id="seo-connection-copy">Preparing the organic search workspace.</p></div><span class="integration-state" id="seo-connection-state">Checking</span></div>
+            <div class="seo-setup" id="seo-setup" hidden><div><p class="section-kicker">Secure connection</p><h2>Connect your search property</h2><p>The read-only connection imports clicks, impressions, CTR, positions, queries, pages, countries, devices and sitemap status. It cannot modify your website.</p></div><ol><li><b>01</b><span><strong>Add Google credentials</strong><small>Register the callback address shown below.</small></span></li><li><b>02</b><span><strong>Authorize access</strong><small>Choose the account that owns the property.</small></span></li><li><b>03</b><span><strong>Select the property</strong><small>The dashboard begins the first 28-day sync.</small></span></li></ol><code id="seo-callback-url">http://localhost:8080/api/seo/callback</code></div>
+            <section class="kpi-grid seo-kpi-grid" aria-label="SEO performance"><article class="kpi-card"><div class="kpi-head"><span>Organic clicks</span><i>28 days</i></div><strong id="seo-clicks">—</strong><div class="kpi-foot"><span class="trend" id="seo-clicks-change">Awaiting data</span><small>Search visits</small></div></article><article class="kpi-card"><div class="kpi-head"><span>Impressions</span><i>28 days</i></div><strong id="seo-impressions">—</strong><div class="kpi-foot"><span class="trend" id="seo-impressions-change">Awaiting data</span><small>Search appearances</small></div></article><article class="kpi-card"><div class="kpi-head"><span>Average CTR</span><i>Performance</i></div><strong id="seo-ctr">—</strong><div class="kpi-foot"><span class="trend" id="seo-ctr-change">Awaiting data</span><small>Click-through rate</small></div></article><article class="kpi-card"><div class="kpi-head"><span>Average position</span><i>Google Search</i></div><strong id="seo-position">—</strong><div class="kpi-foot"><span class="trend" id="seo-position-change">Awaiting data</span><small>Lower is better</small></div></article><article class="kpi-card"><div class="kpi-head"><span>Opportunities</span><i>Priority</i></div><strong id="seo-opportunity-count">—</strong><div class="kpi-foot"><span class="trend" id="seo-opportunity-label">Awaiting analysis</span><small>Growth actions</small></div></article></section>
+            <div class="seo-main-grid"><article class="surface seo-performance"><div class="surface-head"><div><p class="section-kicker">Search demand</p><h2>Clicks and impressions</h2></div><span id="seo-period">Last 28 days</span></div><div class="seo-chart-legend"><span><i class="is-clicks"></i>Clicks</span><span><i class="is-impressions"></i>Impressions</span></div><div class="seo-chart" id="seo-chart"><p class="empty-state">Connect search data to build the trend.</p></div></article><article class="surface seo-opportunity-panel"><div class="surface-head"><div><p class="section-kicker">Action center</p><h2>Growth opportunities</h2></div><span id="seo-opportunity-summary">Waiting</span></div><div class="seo-opportunities" id="seo-opportunities"><p class="empty-state">No search analysis yet.</p></div></article></div>
+            <div class="seo-data-grid"><article class="surface seo-table-card"><div class="surface-head"><div><p class="section-kicker">Search intent</p><h2>Top queries</h2></div><span>Click leaders</span></div><div class="table-scroll"><table><thead><tr><th>Query</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Position</th></tr></thead><tbody id="seo-query-body"><tr><td colspan="5"><div class="table-loading">Awaiting search data…</div></td></tr></tbody></table></div></article><article class="surface seo-table-card"><div class="surface-head"><div><p class="section-kicker">Landing performance</p><h2>Top pages</h2></div><span>Organic entrances</span></div><div class="table-scroll"><table><thead><tr><th>Page</th><th>Clicks</th><th>Impressions</th><th>CTR</th><th>Position</th></tr></thead><tbody id="seo-page-body"><tr><td colspan="5"><div class="table-loading">Awaiting search data…</div></td></tr></tbody></table></div></article></div>
+            <div class="seo-support-grid"><article class="surface compact-panel"><div class="surface-head"><div><p class="section-kicker">Devices</p><h2>Search by device</h2></div></div><div class="insight-list" id="seo-devices"></div></article><article class="surface compact-panel"><div class="surface-head"><div><p class="section-kicker">Markets</p><h2>Top countries</h2></div></div><div class="insight-list" id="seo-countries"></div></article><article class="surface compact-panel"><div class="surface-head"><div><p class="section-kicker">Index discovery</p><h2>Sitemaps</h2></div></div><div class="seo-sitemaps" id="seo-sitemaps"><p class="empty-state">Awaiting property data.</p></div></article></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="marketing" aria-labelledby="marketing-title">
+            <div class="page-header marketing-page-header"><div><p class="eyebrow">Customer intelligence</p><h1 id="marketing-title">Marketing &amp; Customer Intent</h1><p class="page-description">See what customers want, what they placed in a cart and where revenue can be recovered.</p></div><div class="page-actions"><button class="button button--secondary" type="button" data-go-view="products">Manage products</button><button class="button button--primary" type="button" data-go-view="site-controls">Create promotion</button></div></div>
+
+            <div class="marketing-signal-banner" id="marketing-signal-banner" data-state="waiting"><span class="marketing-signal-icon" aria-hidden="true">↗</span><div><strong>Storefront intelligence is listening</strong><p id="marketing-signal-copy">Waiting for the first search or cart signal from the storefront.</p></div><span class="marketing-signal-status" id="marketing-signal-status">Waiting for activity</span></div>
+
+            <section class="marketing-kpi-grid" aria-label="Customer intent summary">
+              <article><span>Active carts</span><strong id="marketing-active-carts">0</strong><small>Updated within 30 minutes</small></article>
+              <article><span>Abandoned carts</span><strong id="marketing-abandoned-carts">0</strong><small>Ready for recovery</small></article>
+              <article><span>Recoverable value</span><strong id="marketing-recoverable-value">$0.00</strong><small id="marketing-captured-value">$0.00 currently in carts</small></article>
+              <article><span>Search gaps</span><strong id="marketing-zero-searches">0</strong><small>Searches with no results</small></article>
+            </section>
+
+            <div class="marketing-workspace">
+              <article class="surface marketing-carts-panel">
+                <div class="surface-head marketing-panel-head"><div><p class="section-kicker">Revenue recovery</p><h2>Customer carts</h2><p>Products, value and customer identity when available.</p></div><div class="marketing-filter" role="group" aria-label="Filter carts"><button class="is-active" type="button" data-marketing-cart-filter="open">Open</button><button type="button" data-marketing-cart-filter="abandoned">Abandoned</button><button type="button" data-marketing-cart-filter="all">All</button></div></div>
+                <div class="marketing-cart-list" id="marketing-cart-list"><div class="marketing-empty"><i>◇</i><strong>No cart activity yet</strong><p>As customers add products, their carts will appear here automatically.</p></div></div>
+              </article>
+
+              <article class="surface marketing-search-panel">
+                <div class="surface-head marketing-panel-head"><div><p class="section-kicker">Demand signals</p><h2>What customers search</h2><p>Use zero-result searches to prioritize inventory and content.</p></div><span id="marketing-search-total">0 searches</span></div>
+                <div class="marketing-search-list" id="marketing-search-list"><div class="marketing-empty marketing-empty--compact"><strong>No searches recorded</strong><p>Customer queries will rank here.</p></div></div>
+                <div class="marketing-recent-head"><strong>Latest searches</strong><span>Recent storefront activity</span></div>
+                <div class="marketing-recent-searches" id="marketing-recent-searches"></div>
+              </article>
+            </div>
+
+            <section class="marketing-automation-section" aria-labelledby="marketing-automation-title">
+              <div class="marketing-section-heading"><div><p class="section-kicker">Lifecycle automation</p><h2 id="marketing-automation-title">Customer follow-up</h2></div><p>Signals are captured here; delivery rules remain controlled and auditable.</p></div>
+              <div class="marketing-automation-grid">
+                <article class="marketing-automation-card is-connected"><div class="marketing-automation-top"><span>01</span><b>Store signal active</b></div><h3>Abandoned cart recovery</h3><p>The storefront sends cart value, products, customer email when known and a secure checkout recovery link.</p><div class="marketing-automation-foot"><small>Email sequence must be enabled in the delivery platform.</small><button type="button" data-go-view="integrations">Review connection →</button></div></article>
+                <article class="marketing-automation-card"><div class="marketing-automation-top"><span>02</span><b>Audience ready</b></div><h3>Back-in-stock notices</h3><p>Restock records and waiting customers stay inside Products so the team can notify the right audience.</p><div class="marketing-automation-foot"><small>Review the waitlist before sending.</small><button type="button" data-go-view="products">Open inventory →</button></div></article>
+                <article class="marketing-automation-card"><div class="marketing-automation-top"><span>03</span><b>Approval required</b></div><h3>New product launches</h3><p>Publish the product first, then coordinate the announcement and storefront promotion from one workflow.</p><div class="marketing-automation-foot"><small>No message is sent without team approval.</small><button type="button" data-go-view="site-controls">Prepare launch →</button></div></article>
+              </div>
+            </section>
+          </section>
+
+          <section class="view-panel" data-view-panel="coa" aria-labelledby="coa-title">
+            <div class="page-header lab-page-header"><div><p class="eyebrow">Phase One · Certificate control</p><h1 id="coa-title">COA Manager</h1><p class="page-description">Intelligent document intake, family organization, lot assignment and certificate history in one governed workspace.</p></div><div class="module-live"><i></i><span><b>Connected</b><small id="coa-sync-label">Loading certificates</small></span></div></div>
+            <nav class="module-tabs" aria-label="COA Manager sections"><button type="button" data-coa-tab="intake">Smart Intake</button><button class="is-active" type="button" data-coa-tab="families">Family Library</button><button type="button" data-coa-tab="all">All COAs</button><button type="button" data-coa-tab="import">Import / Export</button><button type="button" data-coa-tab="settings">Settings</button></nav>
+            <div class="coa-panel" data-coa-panel="intake" hidden>
+              <section class="intake-hero"><div><p>PHASE ONE · CONTROLLED CERTIFICATE INTAKE</p><h2>Add COAs safely</h2><span>Upload PDFs or paste laboratory links. Every item is saved as a private draft so you can confirm the product, lot and store match before publishing.</span></div><b><i>✓</i> Review first<small>Drafts never appear on the storefront</small></b></section>
+              <div class="intake-steps"><article><b>01</b><span><strong>Add</strong><small>PDFs + links</small></span></article><article><b>02</b><span><strong>Secure</strong><small>Save + deduplicate</small></span></article><article><b>03</b><span><strong>Review</strong><small>Product + lot</small></span></article><article><b>04</b><span><strong>Publish</strong><small>Storefront API</small></span></article></div>
+              <div class="intake-grid"><article class="surface intake-workbench"><div><p class="section-kicker">Certificate intake</p><h3>Create a private review batch</h3></div><label class="coa-dropzone" for="coa-files"><input id="coa-files" type="file" accept="application/pdf" multiple hidden /><span>⇧</span><strong>Choose certificate PDFs</strong><small>Up to 40 PDF documents · 12 MB each</small></label><label class="coa-link-field"><span>Laboratory or direct PDF links</span><textarea id="coa-links" placeholder="Paste one secure URL per line"></textarea></label><label class="coa-current-toggle"><input id="coa-current-lot" type="checkbox" /><span>Mark for current-lot review</span></label><button class="button button--primary" id="coa-stage-batch" type="button">Save review batch</button></article><aside class="surface intake-pipeline"><p class="section-kicker">Protected workflow</p><h3>What happens after saving</h3><div><span>01</span><p><strong>Stored safely</strong><small>PDFs and links are persisted in PostgreSQL.</small></p></div><div><span>02</span><p><strong>Duplicates stopped</strong><small>Matching documents and URLs are not added twice.</small></p></div><div><span>03</span><p><strong>Private review</strong><small>Confirm product, lot, laboratory and quality details.</small></p></div><div><span>04</span><p><strong>One controlled publish</strong><small>Available records become visible through the new API.</small></p></div></aside></div>
+              <section class="coa-review-workspace" id="coa-review-workspace" aria-live="polite"><header><div><p class="section-kicker">Approval queue</p><h2>Review what the certificate contains</h2><span>Detected information is a suggestion. Confirm it, connect the store product and publish only when everything is correct.</span></div><b id="coa-review-count">0 pending</b></header><div class="coa-review-list" id="coa-review-list"><div class="module-empty"><span>✓</span><strong>No certificates are waiting for review.</strong><small>Upload a PDF or paste a laboratory link above.</small></div></div></section>
+            </div>
+            <div class="coa-panel" data-coa-panel="families">
+              <div class="coa-metrics"><article><span>Families</span><strong id="coa-family-count">—</strong><small>Organized product groups</small></article><article><span>COA records</span><strong id="coa-record-count">—</strong><small>Certificate history</small></article><article><span>Current lots</span><strong id="coa-current-count">—</strong><small>Shipping now</small></article><article><span>Archived reports</span><strong id="coa-archive-count">—</strong><small>Historical records</small></article></div>
+              <article class="surface coa-library"><div class="coa-library-toolbar"><div class="table-tabs"><button class="is-active" type="button" data-coa-filter="all">All families</button><button type="button" data-coa-filter="current">Current lots</button><button type="button" data-coa-filter="history">With history</button><button type="button" data-coa-filter="missing">Missing document</button></div><label class="table-search"><span>⌕</span><input id="coa-search" type="search" placeholder="Family, product, batch or SKU" /></label></div><div class="coa-family-grid" id="coa-family-grid"><div class="table-loading">Loading live certificate library…</div></div></article>
+            </div>
+            <div class="coa-panel" data-coa-panel="all" hidden><article class="surface table-surface"><div class="surface-head"><div><p class="section-kicker">Certificate register</p><h2>All COAs</h2></div><span id="coa-table-count">0 records</span></div><div class="table-scroll"><table><thead><tr><th>Product / family</th><th>Certificate</th><th>Batch / lot</th><th>Quality</th><th>Date</th><th>Status</th><th>Document</th><th aria-label="Actions"></th></tr></thead><tbody id="coa-table-body"><tr><td colspan="8"><div class="table-loading">Loading certificates…</div></td></tr></tbody></table></div></article></div>
+            <div class="coa-panel" data-coa-panel="import" hidden><article class="surface module-placeholder"><span>⇄</span><div><p class="section-kicker">Portability</p><h2>Import / Export</h2><p>The live certificate library is connected. Batch import and structured export remain review-gated to protect active shipping lots.</p></div><button class="button button--secondary" type="button" data-coa-tab-target="intake">Open Smart Intake</button></article></div>
+            <div class="coa-panel" data-coa-panel="settings" hidden><article class="surface module-placeholder"><span>⚙</span><div><p class="section-kicker">Governance</p><h2>COA settings</h2><p>Product matching, publication rules and current-lot assignments are managed through the protected certificate service.</p></div><span class="module-version" id="coa-module-version">Live service</span></article></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="site-controls" aria-labelledby="site-controls-title">
+            <div class="page-header lab-page-header"><div><p class="eyebrow">Independent storefront administration</p><h1 id="site-controls-title">Site Controls</h1><p class="page-description">Keep the website online, publish campaigns or close the storefront without depending on WordPress.</p></div><div class="module-live"><i></i><span><b>Independent control plane</b><small id="site-controls-version">Loading configuration</small></span></div></div>
+            <div class="site-control-command"><div><span class="site-control-command-mark">P1</span><div><strong>Emergency-ready storefront control</strong><p id="site-controls-write-status">Checking operations access…</p></div></div><div class="site-control-command-actions"><button class="button button--secondary" id="site-controls-refresh" type="button">Reload control state</button><button class="button button--primary" id="site-controls-save" type="button">Save storefront controls</button></div></div>
+            <div class="site-control-stack">
+              <article class="surface site-control-card site-control-card--editor">
+                <header><span>01</span><div><p>PROMOTION</p><h2>Storefront campaign</h2></div><label class="switch-control site-control-switch"><input id="promo-enabled" type="checkbox" /><span aria-hidden="true"></span><b id="promo-state">CHECKING</b></label></header>
+                <div class="site-control-body">
+                  <div class="control-option-grid" role="radiogroup" aria-label="Promotion type"><button type="button" role="radio" aria-checked="false" data-promo-option="general"><span>⌁</span><strong>General announcement</strong><small>Message and call to action</small></button><button type="button" role="radio" aria-checked="true" data-promo-option="product"><span>◇</span><strong>Product sale</strong><small>Real temporary sale price</small></button><button type="button" role="radio" aria-checked="false" data-promo-option="simple_gifts"><span>%</span><strong>Sitewide + gifts</strong><small>Promotion and gift catalog</small></button></div>
+                  <section class="site-control-mode" data-promo-panel="product"><div class="site-control-section-title"><div><small>FEATURED PRODUCT</small><strong>Product sale configuration</strong></div><span>Live catalog</span></div><div class="promotion-copy promotion-copy--product"><label class="is-wide"><span>Product</span><select id="promo-product-select"><option value="">Select a product…</option></select></label><label><span>Current price</span><input id="promo-current-price" type="text" value="—" readonly /></label><label><span>Sale price</span><input id="promo-sale-price-input" type="number" min="0" step="0.01" /></label></div><div class="featured-promo" id="featured-promo"><div class="featured-promo-media" id="featured-promo-media"><span>P1</span></div><div><small>FEATURED PRODUCT</small><h3 id="promo-product-name">Select a product</h3><code id="promo-product-sku">—</code></div><div class="promo-price"><span>Live price</span><strong><del id="promo-original-price">—</del> <b id="promo-sale-price">—</b></strong><small id="promo-price-state">Not scheduled</small></div></div></section>
+                  <section class="site-control-mode" data-promo-panel="simple_gifts" hidden><div class="site-control-section-title"><div><small>SITEWIDE CAMPAIGN</small><strong>Promotion and gift catalog</strong></div><span>Existing gift rules stay protected</span></div><label class="sitewide-label-field"><span>Sitewide promotion text</span><input id="promo-sitewide-label" type="text" maxlength="80" placeholder="10% SITEWIDE" /></label><p class="site-control-guidance">Configured spend levels and gift products remain protected. The storefront campaign is published from this independent control service.</p></section>
+                  <div class="promotion-copy"><label><span>Eyebrow</span><input id="promo-eyebrow" type="text" maxlength="80" /></label><label><span>Button text</span><input id="promo-cta" type="text" maxlength="60" /></label><label class="is-wide"><span>Main title</span><input id="promo-title" type="text" maxlength="120" /></label><label class="is-wide"><span>Short information</span><textarea id="promo-info" maxlength="220"></textarea></label><label class="is-wide" data-general-url><span>Button link</span><input id="promo-cta-url" type="text" maxlength="500" placeholder="/shop" /></label></div>
+                  <div class="countdown-editor"><div><small>CAMPAIGN COUNTDOWN</small><strong id="promo-ends-at">No end date</strong></div><label><span>Days</span><input id="promo-duration-days" type="number" min="0" max="30" value="1" /></label><label><span>Hours</span><input id="promo-duration-hours" type="number" min="0" max="23" value="0" /></label><label><span>Minutes</span><input id="promo-duration-minutes" type="number" min="0" max="59" value="0" /></label><label class="site-control-restart"><input id="promo-restart" type="checkbox" /><span>Restart timer on save</span></label><div id="promo-countdown"><b>00<small>days</small></b><b>00<small>hours</small></b><b>00<small>minutes</small></b></div></div>
+                </div>
+              </article>
+              <article class="surface site-control-card"><header><span>02</span><div><p>WEBSITE</p><h2>Maintenance mode</h2></div><label class="switch-control site-control-switch"><input id="maintenance-enabled" type="checkbox" /><span aria-hidden="true"></span><b id="maintenance-state">CHECKING</b></label></header><div class="site-control-body maintenance-layout"><div class="maintenance-copy"><label><span>Title</span><input id="maintenance-title" type="text" maxlength="120" /></label><label><span>Message</span><textarea id="maintenance-message" maxlength="320"></textarea></label><label><span>Support email</span><input id="maintenance-email" type="email" /></label></div><div class="maintenance-preview"><span class="maintenance-preview-mark">P1</span><small>SECURE STOREFRONT STATUS</small><h3 id="maintenance-preview-title">Precision work in progress.</h3><p id="maintenance-preview-message">Loading live status configuration.</p><div><i></i><span><strong id="maintenance-preview-status">Website online</strong><small>Protected control channel</small></span></div></div></div></article>
+            </div>
+            <p class="module-readonly-note" id="site-controls-security-note"><span>✓</span><b>Independent emergency control.</b> Every change is stored here first. WordPress receives a compatibility copy when available, but it cannot block a storefront closure.</p>
+          </section>
+
+          <section class="view-panel monitor-classic" data-view-panel="monitor" aria-labelledby="monitor-title">
+            <div class="monitor-classic-header">
+              <div><p class="eyebrow">At-a-glance overview</p><h1 id="monitor-title">Visitors and sales</h1><p>Unique visitors, repeat visits, completed orders and every active storefront journey.</p></div>
+              <div class="monitor-header-tools"><button class="button button--secondary" id="download-monitor-report" type="button">Export activity report</button><div class="monitor-classic-range"><span id="monitor-active-range-label">Last 30 days</span><div><div class="range-filter" aria-label="Live monitor date range"><button type="button" data-range="today">Today</button><button type="button" data-range="7">7 days</button><button type="button" data-range="30" class="is-active">30 days</button><button type="button" data-range="all">All time</button></div><label class="monitor-date-picker" id="monitor-date-picker-control" for="monitor-specific-date"><span>▦</span><b id="monitor-specific-date-label">Specific day</b><input id="monitor-specific-date" type="date" lang="en-US" /></label></div></div></div>
+            </div>
+
+            <section class="monitor-classic-metrics" aria-label="Visitor monitor metrics">
+              <article class="is-primary"><div><span>Unique visitors</span><i>01</i></div><strong id="monitor-unique-visitors">—</strong><small>Unique browsers during this period</small></article>
+              <article><div><span>Repeat visits</span><i>02</i></div><strong id="monitor-returning-visits">—</strong><small>Visits from returning people</small></article>
+              <article class="is-orders"><div><span>Completed orders</span><i>03</i></div><strong id="monitor-total-orders">—</strong><small>Confirmed payments during this period</small></article>
+              <article><div><span>Total visits</span><i>04</i></div><strong id="monitor-total-sessions">—</strong><small>All sessions recorded</small></article>
+            </section>
+
+            <section class="monitor-classic-today" aria-label="Today's activity"><div class="monitor-today-intro"><span></span><div><strong>Today</strong><small>Activity since 12:00 AM · Bogotá</small></div></div><div><span>People</span><strong id="monitor-today-visitors">—</strong></div><div><span>Visits</span><strong id="monitor-today-visits">—</strong></div><div><span>Orders</span><strong id="monitor-today-orders">—</strong></div><div><span>Online now</span><strong id="total">—</strong></div></section>
+
+            <div class="monitor-classic-main">
+              <article class="surface monitor-chart-panel"><div class="surface-head"><div><p class="section-kicker">Daily count</p><h2>Visitors by day</h2></div><strong id="monitor-trend-total">Peak 0 per day</strong></div><p>Each point represents unique visitors who entered that day.</p><div class="trend-chart" id="monitor-trend-chart"></div></article>
+              <article class="surface recent-panel monitor-recent"><div class="surface-head"><div><p class="section-kicker">Who visited</p><h2>Recent visits</h2></div><span>Newest first</span></div><p class="monitor-panel-copy">Open any visit to review the complete customer journey.</p><div class="session-list" id="session-list"></div><div class="session-pagination" id="session-pagination" hidden><button type="button" id="sessions-previous" aria-label="Previous visits">←</button><span id="sessions-page">Page 1 of 1</span><button type="button" id="sessions-next" aria-label="Next visits">→</button></div></article>
+            </div>
+
+            <article class="surface monitor-live-panel">
+              <div class="surface-head"><div><p class="section-kicker">Right now</p><h2>Live activity</h2></div><div class="monitor-status"><span></span><strong id="monitor-connection-label">Connecting to live stream</strong><small id="updated">Waiting for data</small></div></div>
+              <div class="monitor-live-summary"><div class="is-online"><span><i></i> Online now</span><strong id="monitor-online-mirror">—</strong></div><div><span>Last 30 minutes</span><strong id="monitor-visitors-30">—</strong></div><div><span>Page views</span><strong id="monitor-total-views">—</strong></div><div><span>Conversion</span><strong id="monitor-conversion">—</strong></div></div>
+              <div class="monitor-section-heading"><h3>Where they are now</h3><span>Active visitors by store section</span></div><div class="section-grid" id="section-grid"></div>
             </article>
 
-            <article class="panel compact-panel">
-              <div class="panel-heading"><div><p class="eyebrow">Acquisition</p><h2>Traffic sources</h2></div></div>
-              <div class="insight-list" id="source-list"></div>
-            </article>
+            <section class="monitor-intent-section" aria-labelledby="monitor-intent-title">
+              <div class="monitor-section-title"><div><p class="section-kicker">Customer intent</p><h2 id="monitor-intent-title">What people want right now</h2><p>Actual storefront searches and cart contents, connected to the same anonymous visit whenever possible.</p></div><button class="text-button" type="button" data-go-view="marketing">Open recovery tools →</button></div>
+              <div class="monitor-intent-kpis" id="monitor-intent-kpis"><article><span>Active carts</span><strong>0</strong><small>Waiting for storefront data</small></article></div>
+              <div class="monitor-intent-grid"><article class="surface monitor-cart-panel"><div class="surface-head"><div><p class="section-kicker">Cart stream</p><h3>Products added by visitor</h3><p>Product, SKU, quantity and cart value.</p></div><span id="monitor-cart-count">0 carts</span></div><div class="monitor-cart-stream" id="monitor-cart-stream"><p class="empty-state">No cart activity yet.</p></div></article><article class="surface monitor-search-panel"><div class="surface-head"><div><p class="section-kicker">Search stream</p><h3>What visitors search</h3><p>Zero-result searches are marked as opportunities.</p></div><span id="monitor-search-count">0 searches</span></div><div class="monitor-search-stream" id="monitor-search-stream"><p class="empty-state">No searches recorded yet.</p></div></article></div>
+            </section>
 
-            <article class="panel compact-panel">
-              <div class="panel-heading"><div><p class="eyebrow">Technology</p><h2>Devices</h2></div></div>
-              <div class="device-layout">
-                <div class="device-donut" id="device-donut"><span id="device-total">0</span></div>
-                <div class="insight-list" id="device-list"></div>
+            <div class="monitor-classic-details">
+              <article class="surface pages-panel"><div class="surface-head"><div><p class="section-kicker">Content</p><h2>Most viewed pages</h2></div><span>Selected period</span></div><div class="page-ranking" id="monitor-page-ranking"><p class="empty-state">Waiting for activity.</p></div></article>
+              <article class="surface compact-panel traffic-source-panel"><div class="surface-head"><div><p class="section-kicker">Acquisition</p><h2>Traffic sources</h2><p>How each visit reached the storefront.</p></div></div><div class="traffic-source-legend"><span><b>Direct</b> typed URL or unknown referrer</span><span><b>Organic</b> unpaid search result</span><span><b>Referral</b> link from another site</span></div><div class="insight-list" id="monitor-source-list"></div></article>
+              <article class="surface compact-panel"><div class="surface-head"><div><p class="section-kicker">Technology</p><h2>Devices</h2></div></div><div class="device-layout"><div class="device-donut" id="monitor-device-donut"><span id="monitor-device-total">0</span></div><div class="insight-list" id="monitor-device-list"></div></div></article>
+            </div>
+
+            <div class="stream-status-grid"><article><i class="is-live"></i><span><small>ORDER STREAM</small><strong id="monitor-order-stream">Connecting</strong></span><b>15 sec</b></article><article><i></i><span><small>VISITOR STREAM</small><strong id="monitor-visitor-stream">Connecting</strong></span><b>WS</b></article></div>
+            <article class="surface monitor-order-feed"><div class="surface-head"><div><p class="section-kicker">Commerce pulse</p><h2>Latest order activity</h2></div><button class="text-button" type="button" data-go-view="orders">Open order command center →</button></div><div class="monitor-order-list" id="monitor-order-list"><div class="table-loading">Connecting to the order stream…</div></div></article>
+          </section>
+
+          <section class="view-panel" data-view-panel="integrations" aria-labelledby="integrations-title">
+            <div class="page-header"><div><p class="eyebrow">Connected ecosystem</p><h1 id="integrations-title">Integrations</h1><p class="page-description">The technical layer stays in the background while this console centralizes daily operations.</p></div><button class="button button--primary" type="button" disabled>Managed connection</button></div>
+            <article class="bridge-overview"><div class="bridge-copy"><span class="bridge-badge">CONNECTED OPERATIONS ARCHITECTURE</span><h2>Your store keeps running.<br />The complexity stays behind the scenes.</h2><p>Live business services power transactions while Phase One Operations Suite gives your team one clean, governed workspace.</p></div><div class="bridge-flow"><div><span class="flow-logo">S</span><strong>Storefront</strong><small>Sales engine</small></div><i>→</i><div class="is-core"><span class="flow-logo">P1</span><strong>Operations Suite</strong><small>Control layer</small></div><i>→</i><div><span class="flow-logo">⌁</span><strong>Your team</strong><small>Simple operations</small></div></div></article>
+            <div class="integration-grid"><article class="integration-card"><div class="integration-logo integration-logo--catalog">CO</div><div><strong>Catalog & orders</strong><p>Products, inventory and sales flow.</p></div><span class="integration-state" id="catalog-integration-state">Checking</span><button type="button" data-go-view="products">Manage catalog →</button></article><article class="integration-card"><div class="integration-logo integration-logo--content">CX</div><div><strong>Business modules</strong><p>Certificates and storefront controls.</p></div><span class="integration-state integration-state--planned">Connected modules</span><button type="button" data-go-view="coa">Open modules →</button></article><article class="integration-card"><div class="integration-logo integration-logo--data">RT</div><div><strong>Realtime data</strong><p>Analytics and live visitor presence.</p></div><span class="integration-state" id="realtime-integration-state">Checking</span><button type="button" data-go-view="monitor">View status →</button></article><article class="integration-card"><div class="integration-logo">+</div><div><strong>New integration</strong><p>Payments, logistics, CRM or marketing.</p></div><span class="integration-state integration-state--planned">Not configured</span><button type="button" disabled>Not available</button></article></div>
+            <article class="surface extension-inventory"><div class="surface-head"><div><p class="section-kicker">Migration control</p><h2>Extension inventory</h2></div><span class="integration-state integration-state--planned">Governed centrally</span></div><div class="extension-empty"><span>⌘</span><strong>Your extension inventory is mapped through protected services</strong><p>Only connected and verified modules appear as active controls inside the Operations Suite.</p></div></article>
+          </section>
+
+          <section class="view-panel" data-view-panel="settings" aria-labelledby="settings-title">
+            <div class="page-header settings-page-header"><div><p class="eyebrow">Administration</p><h1 id="settings-title">Settings</h1><p class="page-description">Preferences, people and account security in one organized workspace.</p></div></div>
+            <div class="settings-shell">
+              <nav class="settings-navigation" aria-label="Settings sections">
+                <button class="is-active" type="button" data-settings-view="general" aria-selected="true"><span>01</span><div><strong>General</strong><small>Store and appearance</small></div></button>
+                <button type="button" data-settings-view="team" aria-selected="false"><span>02</span><div><strong>Team & access</strong><small>People and roles</small></div></button>
+                <button type="button" data-settings-view="security" aria-selected="false"><span>03</span><div><strong>Security</strong><small>Password and sessions</small></div></button>
+              </nav>
+              <div class="settings-content">
+                <section class="settings-panel" data-settings-panel="general">
+                  <div class="settings-pane-head"><div><p class="section-kicker">General</p><h2>Workspace preferences</h2><p>Identity, local defaults and interface appearance.</p></div><button class="button button--primary" id="save-settings" type="button">Save changes</button></div>
+                  <article class="surface settings-form"><div><h3>Store profile</h3><p>This information identifies the business inside the operating console.</p></div><div class="form-grid"><label><span>Business name</span><input id="settings-business-name" type="text" value="Phase One Labz" /></label><label><span>Time zone</span><select id="settings-timezone"><option value="America/Bogota">America/Bogota (GMT-5)</option></select></label><label><span>Currency</span><select id="settings-currency"><option value="USD">USD — US Dollar</option><option value="COP">COP — Colombian Peso</option></select></label><label><span>Language</span><select id="settings-language"><option value="en" selected>English</option></select></label></div><hr /><div><h3>Appearance</h3><p>Choose the interface that works best for your environment.</p></div><div class="appearance-options" role="group" aria-label="Color mode"><button type="button" data-set-theme="light"><span>☀</span><strong>Light mode</strong><small>Bright and focused</small></button><button type="button" data-set-theme="dark"><span>☾</span><strong>Dark mode</strong><small>Reduced glare</small></button></div><hr /><div><h3>Financial assumptions</h3><p>Used only when a product does not have a specific cost configuration.</p></div><div class="form-grid"><label><span>Default transaction fee</span><div class="input-affix"><input id="settings-default-fee" type="number" value="3.5" step="0.1" /><b>%</b></div></label><label><span>Default packaging cost</span><div class="input-affix"><b>$</b><input id="settings-packaging-cost" type="number" value="0" step="0.01" /></div></label></div></article>
+                </section>
+                <section class="settings-panel" data-settings-panel="team" hidden>
+                  <div class="settings-pane-head"><div><p class="section-kicker">Team & access</p><h2>People and permissions</h2><p>Give every person an individual account and only the access they need.</p></div><button class="button button--primary" id="open-user-create" type="button">+ Add person</button></div>
+                  <div class="access-summary"><div><span class="access-summary-mark">P1</span><div><strong id="access-command-title">Role-based administration</strong><p>Password and role changes are recorded, and previous sessions close automatically.</p></div></div><span class="access-health"><i></i><b id="access-health-label">Protected</b></span></div>
+                  <article class="surface team-directory"><div class="team-directory-head"><div><p class="section-kicker">Directory</p><h2>Workspace members</h2><span id="team-count">Loading team…</span></div><label class="table-search"><span>⌕</span><input id="team-search" type="search" placeholder="Search person, username or email" /></label></div><div class="team-list" id="team-list"><div class="table-loading">Loading secure directory…</div></div></article>
+                  <details class="surface role-guide"><summary><span><strong>Role guide</strong><small>See what each access level can do</small></span><b>View permissions</b></summary><section class="role-grid" aria-label="Access roles"><article><span>01</span><strong>Owner</strong><p>Complete access, user governance and security.</p></article><article><span>02</span><strong>Administrator</strong><p>Manage the platform, connections and team.</p></article><article><span>03</span><strong>Operations</strong><p>Orders, catalog, customers and daily controls.</p></article><article><span>04</span><strong>Analyst</strong><p>Read-only access to performance and reports.</p></article></section></details>
+                </section>
+                <section class="settings-panel" data-settings-panel="security" hidden>
+                  <div class="settings-pane-head"><div><p class="section-kicker">Account security</p><h2>Password and active sessions</h2><p>Update your password without mixing security controls into team administration.</p></div></div>
+                  <article class="surface password-center"><div><h3>Change your password</h3><p>Use at least 12 characters. Updating it immediately invalidates every older session.</p></div><form id="password-form"><label><span>Current password</span><input id="current-password" type="password" autocomplete="current-password" required /></label><label><span>New password</span><input id="new-password" type="password" autocomplete="new-password" minlength="12" required /></label><label><span>Confirm password</span><input id="confirm-password" type="password" autocomplete="new-password" minlength="12" required /></label><button class="button button--primary" type="submit">Update password</button></form></article>
+                </section>
               </div>
-            </article>
-          </div>
-        </details>
+            </div>
+          </section>
 
-        <aside class="session-detail" id="session-detail" role="dialog" aria-modal="true" aria-labelledby="session-detail-title" hidden>
-          <div class="session-detail-head">
-            <div><p class="eyebrow">Visitor journey</p><h2 id="session-detail-title">Visit details</h2></div>
-            <button type="button" id="close-session-detail" aria-label="Close visit details">×</button>
-          </div>
-          <div id="session-detail-content"></div>
-        </aside>
-
-        <button class="session-backdrop" id="session-backdrop" type="button" aria-label="Close visit details" aria-hidden="true" tabindex="-1" hidden></button>
-
-        <footer class="system-footer">
-          <div><span>Connection</span><strong id="footer-connection">Connecting</strong></div>
-          <div><span>Updated</span><strong id="footer-updated">Waiting</strong></div>
-        </footer>
-      </main>
+          <aside class="session-detail" id="session-detail" role="dialog" aria-modal="true" aria-labelledby="session-detail-title" hidden><div class="session-detail-head"><div><p class="section-kicker">Customer journey</p><h2 id="session-detail-title">Session details</h2></div><button type="button" id="close-session-detail" aria-label="Close">×</button></div><div id="session-detail-content"></div></aside>
+          <button class="session-backdrop" id="session-backdrop" type="button" aria-label="Close details" tabindex="-1" hidden></button>
+        </main>
+        <footer class="app-footer"><span>Phase One Labz · Operations Suite</span><span>Updated <b id="footer-updated">starting…</b></span><span>v3.0</span></footer>
+      </div>
     </div>
 
+    <aside class="notification-center" id="notification-center" role="dialog" aria-modal="true" aria-labelledby="notification-title" hidden>
+      <header><div><p class="eyebrow">Operations inbox</p><h2 id="notification-title">Notification center</h2><p><span id="notification-unread">0 unread</span> · Orders, SEO, security and system activity</p></div><button id="close-notifications" type="button" aria-label="Close notification center">×</button></header>
+      <div class="notification-toolbar"><div class="table-tabs"><button class="is-active" type="button" data-notification-filter="all">All</button><button type="button" data-notification-filter="order">Orders</button><button type="button" data-notification-filter="seo">SEO</button><button type="button" data-notification-filter="security">Security</button></div><button class="text-button" id="mark-all-notifications" type="button">Mark all read</button></div>
+      <div class="notification-list" id="notification-list"><div class="table-loading">Loading notifications…</div></div>
+      <footer><span><i></i>Operational updates</span><button class="button button--secondary" type="button" data-go-view="settings">Notification settings</button></footer>
+    </aside>
+    <button class="action-dialog-backdrop" id="notification-backdrop" type="button" aria-label="Close notification center" hidden></button>
+
+    <div class="action-dialog user-dialog" id="user-dialog" role="dialog" aria-modal="true" aria-labelledby="user-dialog-title" hidden>
+      <div class="action-dialog-icon">+</div><div><p class="eyebrow">Team access</p><h2 id="user-dialog-title">Add a person</h2><p>Create an individual account with the exact level of access they need.</p></div>
+      <form id="user-form"><div class="form-grid"><label><span>Full name</span><input id="user-display-name" type="text" required /></label><label><span>Username</span><input id="user-username" type="text" minlength="3" required /></label><label><span>Email</span><input id="user-email" type="email" required /></label><label><span>Role</span><select id="user-role"><option value="operations">Operations</option><option value="analyst">Analyst</option><option value="administrator">Administrator</option><option value="owner">Owner</option></select></label><label class="is-wide"><span>Temporary password</span><input id="user-password" type="password" minlength="12" autocomplete="new-password" required /><small>At least 12 characters. Share it privately and change it after first login.</small></label></div><div class="action-dialog-actions"><button class="button button--secondary" id="user-dialog-cancel" type="button">Cancel</button><button class="button button--primary" type="submit">Create account</button></div></form>
+    </div>
+    <button class="action-dialog-backdrop" id="user-dialog-backdrop" type="button" aria-label="Close new user form" hidden></button>
+
+    <div class="action-dialog user-dialog" id="password-reset-dialog" role="dialog" aria-modal="true" aria-labelledby="password-reset-title" hidden>
+      <div class="action-dialog-icon">↻</div><div><p class="eyebrow">Security control</p><h2 id="password-reset-title">Reset password</h2><p id="password-reset-copy">Set a temporary password and close the person's previous sessions.</p></div><form id="password-reset-form"><label><span>Temporary password</span><input id="password-reset-value" type="password" minlength="12" autocomplete="new-password" required /></label><div class="action-dialog-actions"><button class="button button--secondary" id="password-reset-cancel" type="button">Cancel</button><button class="button button--primary" type="submit">Reset password</button></div></form>
+    </div>
+    <button class="action-dialog-backdrop" id="password-reset-backdrop" type="button" aria-label="Close password reset" hidden></button>
+
+    <aside class="customer-drawer" id="customer-drawer" role="dialog" aria-modal="true" aria-labelledby="customer-drawer-title" hidden>
+      <div class="drawer-head customer-drawer-head"><div><p class="eyebrow">Customer 360</p><div class="customer-title-line"><span class="customer-drawer-avatar" id="customer-drawer-avatar">P1</span><div><h2 id="customer-drawer-title">Customer profile</h2><span id="customer-drawer-subtitle">Identity, value, orders and rewards</span></div><span class="customer-account-badge" id="customer-drawer-account">Registered</span></div></div><button type="button" id="close-customer-drawer" aria-label="Close">×</button></div>
+      <div class="customer-drawer-loading" id="customer-drawer-loading" hidden><span></span><strong>Loading customer record…</strong></div>
+      <div id="customer-detail-content"></div>
+    </aside>
+    <button class="customer-backdrop" id="customer-backdrop" type="button" aria-label="Close customer profile" hidden></button>
+
+    <aside class="order-drawer" id="order-drawer" role="dialog" aria-modal="true" aria-labelledby="order-drawer-title" hidden>
+      <div class="drawer-head order-drawer-head"><div><p class="eyebrow">Order workspace</p><div class="order-title-line"><h2 id="order-drawer-title">Order details</h2><span id="order-drawer-status" class="status-pill status-pill--pending">Loading</span></div><span class="drawer-subtitle" id="order-drawer-subtitle">Financials, customer details and fulfillment controls.</span></div><button type="button" id="close-order-drawer" aria-label="Close">×</button></div>
+      <div class="order-detail-loading" id="order-detail-loading"><span></span><strong>Loading complete order record…</strong></div>
+      <div id="order-detail-content" hidden></div>
+      <div class="order-drawer-actions" id="order-drawer-actions" hidden>
+        <div><small>Operational controls</small><span id="order-action-hint">Actions update the live order immediately.</span></div>
+        <div><button class="button button--secondary" id="order-pdf-button" type="button">Download PDF</button><button class="button button--secondary" id="order-confirm-button" type="button" data-order-action="confirm">Confirm order</button><button class="button button--secondary" id="order-complete-button" type="button" data-order-action="complete">Mark completed</button><button class="button button--danger" id="order-cancel-button" type="button" data-order-action="cancel">Cancel order</button><button class="button button--primary" id="order-refund-button" type="button">Issue refund</button></div>
+      </div>
+    </aside>
+    <button class="order-backdrop" id="order-backdrop" type="button" aria-label="Close order details" hidden></button>
+
+    <div class="action-dialog" id="order-action-dialog" role="dialog" aria-modal="true" aria-labelledby="order-action-dialog-title" hidden>
+      <div class="action-dialog-icon" id="order-action-dialog-icon">!</div>
+      <p class="eyebrow">Confirm operation</p>
+      <h2 id="order-action-dialog-title">Update order</h2>
+      <p id="order-action-dialog-message">Review this action before continuing.</p>
+      <div class="action-dialog-actions"><button class="button button--secondary" id="order-action-dismiss" type="button">Go back</button><button class="button button--primary" id="order-action-confirm" type="button">Confirm</button></div>
+    </div>
+    <button class="action-dialog-backdrop" id="order-action-backdrop" type="button" aria-label="Close confirmation" hidden></button>
+
+    <div class="action-dialog refund-dialog" id="refund-dialog" role="dialog" aria-modal="true" aria-labelledby="refund-dialog-title" hidden>
+      <p class="eyebrow">Payment operation</p>
+      <h2 id="refund-dialog-title">Issue refund</h2>
+      <p>Enter the amount to return. The payment provider will be asked to process it immediately.</p>
+      <form id="refund-form"><label><span>Refund amount</span><div class="input-affix"><b id="refund-currency">$</b><input id="refund-amount" type="number" min="0.01" step="0.01" required /></div><small id="refund-balance">Available balance —</small></label><label><span>Internal reason</span><textarea id="refund-reason" maxlength="160" placeholder="Reason for this refund"></textarea></label><div class="action-dialog-actions"><button class="button button--secondary" id="refund-dismiss" type="button">Go back</button><button class="button button--danger" type="submit">Issue refund</button></div></form>
+    </div>
+    <button class="action-dialog-backdrop" id="refund-backdrop" type="button" aria-label="Close refund" hidden></button>
+
+    <div class="report-dialog" id="orders-report-dialog" role="dialog" aria-modal="true" aria-labelledby="orders-report-title" hidden>
+      <div class="report-dialog-head"><div><p class="eyebrow">Financial exports</p><h2 id="orders-report-title">Generate order report</h2><p>Choose a period. Every order will include products, product net, shipping, taxes, fees, refunds and retained net.</p></div><button type="button" id="orders-report-close" aria-label="Close">×</button></div>
+      <form id="orders-report-form"><div class="report-period-grid" role="radiogroup" aria-label="Report period"><label><input type="radio" name="reportPeriod" value="today" checked /><span><b>Today</b><small>Current business day</small></span></label><label><input type="radio" name="reportPeriod" value="month" /><span><b>This month</b><small>Month to date</small></span></label><label><input type="radio" name="reportPeriod" value="year" /><span><b>This year</b><small>Year to date</small></span></label><label><input type="radio" name="reportPeriod" value="custom" /><span><b>Custom</b><small>Choose exact dates</small></span></label></div><div class="report-custom-range" id="orders-report-custom" hidden><label><span>From</span><input id="orders-report-from" type="date" /></label><label><span>To</span><input id="orders-report-to" type="date" /></label></div><div class="report-includes"><span>PDF includes</span><div><b>Executive summary</b><b>Every order</b><b>Product lines</b><b>Financial breakdown</b></div></div><div class="action-dialog-actions"><button class="button button--secondary" id="orders-report-cancel" type="button">Cancel</button><button class="button button--primary" id="orders-report-download" type="submit">Download PDF</button></div></form>
+    </div>
+    <button class="action-dialog-backdrop" id="orders-report-backdrop" type="button" aria-label="Close report generator" hidden></button>
+
+    <aside class="waitlist-drawer" id="waitlist-drawer" role="dialog" aria-modal="true" aria-labelledby="waitlist-drawer-title" hidden>
+      <div class="drawer-head"><div><p class="eyebrow">Back-in-stock demand</p><h2 id="waitlist-drawer-title">Product subscribers</h2><span class="drawer-subtitle" id="waitlist-drawer-subtitle">People waiting for this product.</span></div><button type="button" id="waitlist-drawer-close" aria-label="Close">×</button></div>
+      <div class="waitlist-drawer-status" id="waitlist-drawer-status"><span></span><strong>Loading subscribers…</strong></div><div class="waitlist-subscriber-list" id="waitlist-subscriber-list"></div><div class="waitlist-drawer-footer" id="waitlist-drawer-footer" hidden><div><strong>Store automation stays in control</strong><small>Normal back-in-stock emails continue through WordPress. Use manual send only when you need to retry.</small></div><button class="button button--primary" id="waitlist-notify-button" type="button">Review manual send</button></div>
+    </aside>
+    <button class="drawer-backdrop" id="waitlist-backdrop" type="button" aria-label="Close subscriber list" hidden></button>
+
+    <aside class="coa-editor-drawer" id="coa-editor-drawer" role="dialog" aria-modal="true" aria-labelledby="coa-editor-title" hidden>
+      <div class="drawer-head coa-editor-head"><div><p class="eyebrow">Certificate workspace</p><div class="product-title-line"><h2 id="coa-editor-title">Edit COA</h2><span id="coa-editor-badge" class="record-badge">COA</span></div><span class="drawer-subtitle" id="coa-editor-subtitle">Edit the live certificate record with the same governed fields used by the store.</span></div><button type="button" id="close-coa-editor" aria-label="Close">×</button></div>
+      <form id="coa-editor-form">
+        <div class="coa-editor-status" id="coa-editor-status"><span>●</span><div><strong>Live business record</strong><small id="coa-editor-connection">Checking write access…</small></div></div>
+        <nav class="coa-editor-tabs" aria-label="COA editor sections"><button class="is-active" type="button" data-coa-editor-tab="basics"><b>01</b> Basic info</button><button type="button" data-coa-editor-tab="testing"><b>02</b> Testing</button><button type="button" data-coa-editor-tab="documents"><b>03</b> PDF & product</button><button type="button" data-coa-editor-tab="advanced"><b>04</b> Advanced</button></nav>
+        <section class="coa-editor-panel" data-coa-editor-panel="basics">
+          <div class="drawer-section"><div class="drawer-section-title"><div><h3>Product identity</h3><p>The detected product is kept automatically. Open the catalog only if the match is wrong.</p></div><span class="required-note">Live fields</span></div><div class="form-grid"><label><span>Public family name</span><input id="coa-family-name" type="text" required /></label><label><span>Product / presentation name</span><input id="coa-product-name" type="text" required /></label><label><span>Compound</span><input id="coa-compound" type="text" /></label><label><span>Strength</span><input id="coa-strength" type="text" placeholder="10 mg" /></label></div><div class="coa-product-match"><div><small>Detected product</small><strong id="coa-product-match-name">Not identified</strong><span id="coa-product-match-meta">No store product connected yet</span></div><button class="button button--secondary" id="coa-change-product" type="button">Product incorrect? Change</button></div><div class="coa-product-correction" id="coa-product-correction" hidden><label><span>Choose the correct store product</span><select id="coa-product-picker"><option value="">Select a product…</option></select></label><div class="form-grid"><label hidden><span>Product ID</span><input id="coa-product-id" type="number" min="0" /></label><label><span>Presentation / variation</span><select id="coa-variation-id"><option value="0">Parent product / all presentations</option></select><small>Choose the exact strength whenever this product has multiple presentations.</small></label></div></div></div>
+          <div class="drawer-section"><div class="drawer-section-title"><div><h3>Certificate essentials</h3><p>Information shown beside the PDF in the customer experience.</p></div></div><div class="form-grid"><label><span>COA number</span><input id="coa-number" type="text" required /></label><label><span>Batch / lot</span><input id="coa-batch" type="text" required /></label><label><span>Test / analysis date</span><input id="coa-date" type="date" required /><small class="coa-date-guidance" id="coa-date-guidance">Use the date the laboratory performed the test.</small></label><label><span>Purity</span><input id="coa-purity" type="text" placeholder="99%" /></label><label><span>Testing laboratory</span><input id="coa-laboratory" type="text" list="coa-laboratories" /></label><label><span>Record status</span><select id="coa-status"><option>Available</option><option>Archived</option><option>Review</option></select></label><label><span>Testing method</span><input id="coa-method" type="text" placeholder="HPLC / LC-MS" /></label><label class="is-wide"><span>Detected test results</span><textarea id="coa-tested" rows="4" placeholder="Fentanyl: Not detected · Purity: 99.8%"></textarea></label></div><datalist id="coa-laboratories"><option value="ILS Labs"></option><option value="Freedom Diagnostics"></option><option value="Kovera Labs"></option></datalist></div>
+        </section>
+        <section class="coa-editor-panel" data-coa-editor-panel="testing" hidden>
+          <div class="drawer-section"><div class="drawer-section-title"><div><h3>Detected laboratory results</h3><p>Results read from the PDF. Review them before making the certificate available.</p></div><span class="required-note">Human approval</span></div><div class="coa-detected-assays" id="coa-detected-assays"><div class="module-empty"><span>—</span><strong>No structured tests were detected.</strong></div></div></div>
+          <div class="drawer-section"><div class="drawer-section-title"><div><h3>Testing coverage</h3><p>Select every testing panel included in this certificate.</p></div></div><div class="coa-panel-options"><label><input type="checkbox" name="coa-panel-type" value="3x" /><span><b>3× tested</b><small>Core analytical panel</small></span></label><label><input type="checkbox" name="coa-panel-type" value="standard" /><span><b>Standard</b><small>Standard laboratory panel</small></span></label><label><input type="checkbox" name="coa-panel-type" value="full" /><span><b>Full panel</b><small>Expanded laboratory report</small></span></label><label><input type="checkbox" name="coa-panel-type" value="8x" /><span><b>8× tested</b><small>Complete quality coverage</small></span></label></div></div>
+          <div class="drawer-section"><div class="variant-heading"><div><h3>Distribution status</h3><p>Turn this on only for the lot customers are currently receiving.</p></div><label class="switch-control"><input id="coa-current-lot-input" type="checkbox" /><span aria-hidden="true"></span><b>Current shipping lot</b></label></div><div class="drawer-sync-note"><span>i</span><p>When enabled, other current lots in the same family and strength are automatically retired.</p></div></div>
+        </section>
+        <section class="coa-editor-panel" data-coa-editor-panel="documents" hidden>
+          <div class="drawer-section"><div class="drawer-section-title"><div><h3>PDF and full report</h3><p>Keep the customer-facing PDF and laboratory verification source synchronized.</p></div></div><label><span>PDF shown in the certificate viewer</span><input id="coa-file-url" type="url" placeholder="https://.../certificate.pdf" /></label><label><span>Laboratory verification link</span><input id="coa-verify-url" type="url" placeholder="https://laboratory.example/report/..." /></label><div class="coa-document-preview" id="coa-document-preview"><span>PDF</span><div><strong>No document linked</strong><small>Add an HTTPS PDF address above.</small></div><a id="coa-document-open" href="#" target="_blank" rel="noopener noreferrer" hidden>Open current PDF ↗</a></div></div>
+        </section>
+        <section class="coa-editor-panel" data-coa-editor-panel="advanced" hidden>
+          <div class="drawer-section"><div class="drawer-section-title"><div><h3>Search and matching</h3><p>Advanced values used by family organization and catalog matching.</p></div><span class="required-note">Preserved safely</span></div><div class="form-grid"><label><span>Family key</span><input id="coa-family-key" type="text" /></label><label><span>SKU mapping</span><textarea id="coa-skus" rows="4" placeholder="One SKU per line"></textarea></label><label><span>Aliases</span><textarea id="coa-aliases" rows="4" placeholder="One alias per line"></textarea></label><label><span>Search keywords</span><textarea id="coa-keywords" rows="4" placeholder="One keyword per line"></textarea></label></div></div>
+        </section>
+        <div class="drawer-section drawer-sync-note"><span>✓</span><p><strong>Controlled save:</strong> changes update the existing certificate and preserve its record identity and document history.</p></div>
+        <div class="drawer-actions"><button class="button button--secondary" id="cancel-coa-editor" type="button">Cancel</button><button class="button button--primary" id="save-coa-editor" type="submit">Save COA changes</button></div>
+      </form>
+    </aside>
+    <button class="drawer-backdrop" id="coa-editor-backdrop" type="button" aria-label="Close COA editor" hidden></button>
+
+    <aside class="product-drawer" id="product-drawer" role="dialog" aria-modal="true" aria-labelledby="product-drawer-title" hidden>
+      <div class="drawer-head product-drawer-head"><div><p class="eyebrow">Catalog workspace</p><div class="product-title-line"><h2 id="product-drawer-title">Add product</h2><span id="product-record-badge" class="record-badge">NEW</span></div><span class="drawer-subtitle" id="product-drawer-subtitle">Create a complete, profitable and sales-ready catalog item.</span></div><button type="button" id="close-product-drawer" aria-label="Close">×</button></div>
+      <form id="product-form">
+        <div class="product-detail-loading" id="product-detail-loading" hidden><span></span><strong>Loading product workspace…</strong></div>
+        <div class="product-form-steps" aria-label="Product setup steps"><span class="is-active"><b>1</b> Identity</span><span><b>2</b> Media</span><span><b>3</b> Economics</span><span><b>4</b> Variants</span></div>
+        <div class="drawer-section">
+          <div class="drawer-section-title"><div><h3>Product identity & access</h3><p>Define how the item appears to customers and your internal team.</p></div><span class="required-note">Catalog controls</span></div>
+          <label><span>Product name</span><input id="product-name-input" type="text" placeholder="e.g. BPC-157 Research Vial" autocomplete="off" required /></label>
+          <div class="form-grid"><label><span>SKU</span><input id="product-sku-input" type="text" placeholder="P1-BPC157-5" autocomplete="off" /></label><label><span>Inventory</span><input id="product-stock-input" type="number" min="0" value="0" /></label><label><span>Category</span><input id="product-category-input" type="text" placeholder="Research Peptides" autocomplete="off" /></label><label><span>Catalog visibility</span><select id="product-status-input"><option value="public">Public — listed for customers</option><option value="hidden">Hidden — direct access only</option><option value="private">Admin only — internal</option><option value="draft">Draft — not published</option></select></label></div>
+          <div class="visibility-guide"><span><i class="visibility-dot visibility-dot--public"></i><b>Public</b> appears in the store</span><span><i class="visibility-dot visibility-dot--hidden"></i><b>Hidden</b> stays off listings</span><span><i class="visibility-dot visibility-dot--private"></i><b>Admin only</b> is internal</span></div>
+        </div>
+        <div class="drawer-section">
+          <div class="drawer-section-title"><div><h3>Product media</h3><p>Choose reusable catalog assets. The first image becomes the cover.</p></div><span class="media-count" id="product-image-count">0 / 12</span></div>
+          <div class="media-actions"><button class="button button--secondary" id="choose-product-media" type="button">Choose from library</button><label class="inline-upload" id="product-dropzone" for="product-images-input"><input id="product-images-input" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden />Stage local images</label><small>Library assets save to the live catalog. Local files remain staged for review.</small></div>
+          <div class="product-image-preview" id="product-image-preview"></div>
+        </div>
+        <div class="drawer-section drawer-section--profit">
+          <div class="drawer-section-title"><div><h3>Pricing & unit economics</h3><p>See real contribution profit before the product goes live.</p></div><span class="calculation-badge">Live calculation</span></div>
+          <div class="form-grid"><label><span>Unit cost</span><div class="input-affix"><b>$</b><input id="product-cost-input" type="number" min="0" step="0.01" value="0" required /></div></label><label><span>Selling price</span><div class="input-affix"><b>$</b><input id="product-price-input" type="number" min="0" step="0.01" value="0" required /></div></label><label><span>Packaging / operations</span><div class="input-affix"><b>$</b><input id="product-packaging-input" type="number" min="0" step="0.01" value="0" /></div></label><label><span>Estimated transaction fee</span><div class="input-affix"><input id="product-fee-input" type="number" min="0" max="100" step="0.1" value="3.5" /><b>%</b></div></label></div>
+          <div class="profit-result"><div><span>Estimated net profit</span><strong id="calculator-profit">$0.00</strong><small id="calculator-equation">Price − cost − packaging − fee</small></div><div class="profit-result-margin"><span>Margin</span><strong id="calculator-margin">0%</strong></div></div>
+        </div>
+        <div class="drawer-section">
+          <div class="variant-heading"><div><h3>Variants</h3><p>Create options only when this product has different strengths, sizes or presentations.</p></div><label class="switch-control"><input id="product-variants-toggle" type="checkbox" /><span aria-hidden="true"></span><b>Has variants</b></label></div>
+          <div class="variant-builder" id="variant-builder" hidden><div class="variant-setup"><label><span>Option name</span><input id="variant-attribute-input" type="text" placeholder="e.g. Strength" /></label><label><span>Option values</span><input id="variant-options-input" type="text" placeholder="5 mg, 10 mg, 20 mg" /></label><button class="button button--secondary" id="generate-variants" type="button">Generate variants</button></div><div class="variant-table" id="variant-table" hidden><div class="variant-table-head"><span>Image</span><span>Variant</span><span>SKU</span><span>Price</span><span>Stock</span></div><div id="variant-rows"></div></div></div>
+        </div>
+        <div class="drawer-section drawer-sync-note"><span>i</span><p><strong>Controlled workflow:</strong> the selected visibility is applied only after you press Save changes. Admin-only products never appear in customer listings.</p></div>
+        <div class="drawer-actions"><button class="button button--secondary" id="cancel-product" type="button">Cancel</button><button class="button button--primary" type="submit">Save product</button></div>
+      </form>
+    </aside>
+    <button class="drawer-backdrop" id="drawer-backdrop" type="button" aria-label="Close product form" hidden></button>
+
+    <div class="media-picker" id="media-picker" role="dialog" aria-modal="true" aria-labelledby="media-picker-title" hidden>
+      <div class="media-picker-head"><div><p class="eyebrow">Media library</p><h2 id="media-picker-title">Choose an image</h2><p id="media-picker-subtitle">Select an existing catalog asset.</p></div><button type="button" id="close-media-picker" aria-label="Close">×</button></div>
+      <label class="media-search"><span>⌕</span><input id="media-picker-search" type="search" placeholder="Search media" /></label>
+      <div class="media-picker-grid" id="media-picker-grid"></div>
+    </div>
+    <button class="action-dialog-backdrop" id="media-picker-backdrop" type="button" aria-label="Close media library" hidden></button>
+
+    <div class="picking-camera-dialog" id="picking-camera-dialog" role="dialog" aria-modal="true" aria-labelledby="picking-camera-title" aria-describedby="picking-camera-description" hidden>
+      <header class="picking-camera-head">
+        <div><p class="eyebrow">Vial QR scanner</p><h2 id="picking-camera-title">Scan vial with camera</h2><p id="picking-camera-description">Center the complete square QR already printed on the vial.</p></div>
+        <button type="button" data-close-picking-camera aria-label="Close camera scanner">×</button>
+      </header>
+      <div class="picking-camera-stage" data-camera-state="idle">
+        <video id="picking-camera-video" autoplay playsinline muted aria-label="Live rear camera preview"></video>
+        <div class="picking-camera-guide" aria-hidden="true"><span></span></div>
+        <div class="picking-camera-loading" id="picking-camera-loading"><i></i><strong>Starting camera…</strong></div>
+      </div>
+      <div class="picking-camera-status" id="picking-camera-status" role="status" aria-live="polite">
+        <span aria-hidden="true">⌁</span><div><strong>Preparing scanner</strong><p>Camera access stays on this device and no image is uploaded.</p></div>
+      </div>
+      <footer class="picking-camera-actions">
+        <button class="button button--secondary" type="button" data-close-picking-camera>Cancel</button>
+        <button class="button button--primary" id="picking-camera-retry" type="button" hidden>Try again</button>
+      </footer>
+    </div>
+    <button class="picking-camera-backdrop" id="picking-camera-backdrop" type="button" aria-label="Close camera scanner" hidden></button>
+
+    <div class="packing-confirm-dialog" id="packing-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="packing-confirm-title" aria-describedby="packing-confirm-description" hidden>
+      <div class="packing-confirm-icon" aria-hidden="true">✓</div>
+      <p class="eyebrow">Final packing check</p>
+      <h2 id="packing-confirm-title">Confirm order packed</h2>
+      <p id="packing-confirm-description">The verified quantities and batches will be sealed into a read-only fulfillment record.</p>
+      <div class="packing-confirm-summary" id="packing-confirm-summary"></div>
+      <div class="packing-confirm-safety"><span>i</span><p>This saves a local Packed status only. It will not change the live store order, deduct stock or create a shipping label.</p></div>
+      <p class="packing-confirm-error" id="packing-confirm-error" role="alert" hidden></p>
+      <footer><button class="button button--secondary" id="packing-confirm-cancel" type="button">Go back</button><button class="button button--primary" id="packing-confirm-submit" type="button">Confirm packed</button></footer>
+    </div>
+    <button class="packing-confirm-backdrop" id="packing-confirm-backdrop" type="button" aria-label="Close packing confirmation" hidden></button>
+
+    <div class="shipping-confirm-dialog" id="shipping-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="shipping-confirm-title" aria-describedby="shipping-confirm-description" hidden>
+      <div class="shipping-confirm-icon" id="shipping-confirm-icon" aria-hidden="true">$</div>
+      <p class="eyebrow" id="shipping-confirm-eyebrow">Live postage</p>
+      <h2 id="shipping-confirm-title">Confirm label purchase</h2>
+      <p id="shipping-confirm-description">Review the final carrier and amount before creating one real shipping label.</p>
+      <div class="shipping-confirm-summary" id="shipping-confirm-summary"></div>
+      <div class="shipping-confirm-safety" id="shipping-confirm-safety"><span>!</span><p>This action can charge the connected shipping account. Network retries are protected by one durable request ID.</p></div>
+      <p class="shipping-confirm-error" id="shipping-confirm-error" role="alert" hidden></p>
+      <footer><button class="button button--secondary" id="shipping-confirm-cancel" type="button">Go back</button><button class="button button--primary" id="shipping-confirm-submit" type="button">Purchase one label</button></footer>
+    </div>
+    <button class="shipping-confirm-backdrop" id="shipping-confirm-backdrop" type="button" aria-label="Close shipping confirmation" hidden></button>
+
+    <div class="command-palette" id="command-palette" role="dialog" aria-modal="true" aria-label="Search workspace" hidden><div class="command-search"><span>⌕</span><input id="command-input" type="search" placeholder="Search orders, products or sections…" /><kbd>ESC</kbd></div><div class="command-results"><p>GO TO</p><button type="button" data-go-view="orders"><span>▤</span><div><strong>Orders</strong><small>Review sales and fulfillment</small></div></button><button type="button" data-go-view="fulfillment"><span>✓</span><div><strong>Fulfillment</strong><small>Pick and verify orders by vial QR</small></div></button><button type="button" data-go-view="products"><span>◇</span><div><strong>Products</strong><small>Inventory and profitability</small></div></button><button type="button" data-go-view="labels"><span>⌖</span><div><strong>Storage locations</strong><small>Shelf assignments for products and variations</small></div></button><button type="button" data-go-view="media"><span>▧</span><div><strong>Media library</strong><small>Reusable product imagery</small></div></button><button type="button" data-go-view="loyalty"><span>◌</span><div><strong>Loyalty control</strong><small>Point economics and balances</small></div></button><button type="button" data-go-view="seo"><span>⌁</span><div><strong>SEO intelligence</strong><small>Organic search and opportunities</small></div></button><button type="button" data-go-view="coa"><span>▣</span><div><strong>COA Manager</strong><small>Certificates, families and current lots</small></div></button><button type="button" data-go-view="site-controls"><span>◉</span><div><strong>Site Controls</strong><small>Promotion and maintenance status</small></div></button><button type="button" data-go-view="monitor"><span>●</span><div><strong>Live monitor</strong><small>Real-time store activity</small></div></button><button type="button" data-go-view="team"><span>⚙</span><div><strong>Settings · Team & access</strong><small>People, roles and security</small></div></button></div></div>
+    <button class="command-backdrop" id="command-backdrop" type="button" aria-label="Close search" hidden></button>
+    <section class="order-catchup-stack" id="order-catchup-stack" aria-labelledby="order-catchup-title" hidden>
+      <header><div><span aria-hidden="true">P1</span><div><small>WHILE YOU WERE AWAY</small><strong id="order-catchup-title">New orders received</strong></div></div><button id="order-catchup-dismiss-all" type="button">Clear all</button></header>
+      <div id="order-catchup-list"></div>
+      <button class="order-catchup-more" id="order-catchup-more" type="button" hidden></button>
+    </section>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden><span>✓</span><div><strong id="toast-title">Saved</strong><p id="toast-message">Your changes were saved successfully.</p></div></div>
     <div class="sr-only" id="announcement" aria-live="polite"></div>
     <script type="module" src="/main.ts"></script>
   </body>

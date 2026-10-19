@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Phase One Labz · ShipStation Production Flow</title>
+  <style>
+    :root{color-scheme:dark;--bg:#08090a;--panel:#111315;--panel2:#171a1d;--line:#2b3034;--text:#f3f4f2;--muted:#969da3;--cyan:#91d0df;--green:#82d2a0;--amber:#e8c26f;--red:#ee8f86}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% -10%,rgba(77,116,128,.18),transparent 34rem),var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.shell{width:min(1360px,calc(100% - 40px));margin:auto;padding:32px 0 60px}.top{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:48px}.brand{display:flex;align-items:center;gap:12px}.mark{width:42px;height:42px;display:grid;place-items:center;border-radius:13px;background:#f3f4f0;color:#090a0a;font-weight:900;letter-spacing:-.08em}.brand strong{display:block;font-size:14px;letter-spacing:.04em}.brand small{display:block;color:var(--muted);margin-top:3px}.lock{border:1px solid #385746;border-radius:999px;padding:9px 13px;color:var(--green);background:#102319;font-size:11px;font-weight:800}.hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,.42fr);gap:36px;align-items:end;margin-bottom:28px}.eyebrow{font-size:10px;font-weight:900;letter-spacing:.17em;text-transform:uppercase;color:var(--cyan)}h1{font-size:clamp(40px,5vw,66px);line-height:.98;letter-spacing:-.055em;margin:12px 0 14px}.hero p{margin:0;color:#c7cccf;line-height:1.65;max-width:760px}.decision{border:1px solid var(--line);border-radius:18px;padding:19px;background:rgba(17,19,21,.88)}.decision span{font-size:9px;font-weight:900;letter-spacing:.14em;color:var(--amber)}.decision strong{display:block;margin:10px 0 7px;font-size:17px}.decision small{color:var(--muted);line-height:1.5}.rail{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin:34px 0}.step{position:relative;min-height:136px;padding:17px;border:1px solid var(--line);border-radius:16px;background:var(--panel)}.step b{display:grid;place-items:center;width:25px;height:25px;border-radius:8px;background:var(--panel2);color:var(--cyan);font-size:10px}.step strong{display:block;margin:18px 0 7px;font-size:12px}.step small{display:block;color:var(--muted);font-size:10px;line-height:1.45}.step.money{border-color:#594b28;background:#17140d}.step.money b{background:#2c2514;color:var(--amber)}.tabs{display:flex;gap:5px;padding:5px;width:max-content;max-width:100%;overflow:auto;border:1px solid var(--line);border-radius:13px;background:var(--panel);margin-bottom:16px}.tab{border:0;border-radius:9px;padding:10px 14px;background:transparent;color:var(--muted);font:inherit;font-size:11px;font-weight:800;white-space:nowrap;cursor:pointer}.tab.active{background:#f0f1ee;color:#0a0b0b}.panel{display:none}.panel.active{display:block}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{border:1px solid var(--line);border-radius:20px;background:rgba(17,19,21,.9);padding:22px}.card.wide{grid-column:1/-1}.card-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}.card h2,.card h3{margin:0;letter-spacing:-.025em}.card h2{font-size:19px}.card h3{font-size:15px}.card-head p,.card>p{margin:7px 0 0;color:var(--muted);font-size:11px;line-height:1.55}.pill{border:1px solid currentColor;border-radius:999px;padding:6px 9px;font-size:8px;font-weight:900;letter-spacing:.11em;text-transform:uppercase}.pill.red{color:var(--red);background:#291514}.pill.amber{color:var(--amber);background:#29210f}.pill.green{color:var(--green);background:#102319}.rows{display:grid}.row{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:12px;padding:14px 0;border-top:1px solid var(--line)}.row:first-child{border-top:0}.row i{width:25px;height:25px;display:grid;place-items:center;border-radius:8px;background:var(--panel2);color:var(--cyan);font-size:10px;font-style:normal;font-weight:900}.row strong{display:block;font-size:12px}.row small{display:block;color:var(--muted);font-size:10px;line-height:1.5;margin-top:4px}.row code{align-self:start;border:1px solid var(--line);border-radius:7px;padding:5px 7px;color:#c9ced1;background:#0c0e0f;font-size:9px}.state{display:grid;grid-template-columns:160px minmax(0,1fr);gap:14px;padding:13px 0;border-top:1px solid var(--line)}.state:first-of-type{border-top:0}.state b{font-size:11px}.state p{margin:0;color:var(--muted);font-size:10px;line-height:1.5}.state.good b{color:var(--green)}.state.warn b{color:var(--amber)}.state.bad b{color:var(--red)}.callout{margin-top:16px;padding:15px;border:1px solid #594b28;border-radius:13px;background:#19160e;color:#d8c899;font-size:11px;line-height:1.55}.config{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;line-height:1.8;border:1px solid var(--line);border-radius:14px;background:#0a0c0d;padding:15px;overflow:auto}.config .secret{color:var(--red)}.config .safe{color:var(--green)}.footer{margin-top:18px;padding:19px;border:1px solid var(--line);border-radius:17px;background:var(--panel);display:flex;justify-content:space-between;gap:20px;color:var(--muted);font-size:11px;line-height:1.55}.footer strong{color:var(--text)}
+    @media(max-width:1000px){.rail{grid-template-columns:repeat(4,1fr)}.hero{grid-template-columns:1fr}.grid{grid-template-columns:1fr}.card.wide{grid-column:auto}}@media(max-width:640px){.shell{width:calc(100% - 24px);padding-top:20px}.top,.footer{align-items:flex-start;flex-direction:column}.rail{grid-template-columns:1fr 1fr}.state{grid-template-columns:1fr}.row{grid-template-columns:28px 1fr}.row code{grid-column:2;justify-self:start}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="top"><div class="brand"><div class="mark">P1</div><div><strong>PHASE ONE LABZ</strong><small>Native shipping control</small></div></div><div class="lock">● Real purchases remain locked</div></header>
+    <section class="hero"><div><div class="eyebrow">ShipStation · production design</div><h1>Packed to printed.<br />One protected flow.</h1><p>El empleado compara tarifas reales y compra una sola etiqueta sin salir del dashboard. Cada paso vuelve a validar el pedido y una respuesta incierta jamás dispara una segunda compra.</p></div><aside class="decision"><span>DECISIÓN TÉCNICA</span><strong>Flujo listo; compra todavía bloqueada</strong><small>Tarifas persistidas, PDF real, reimpresión, anulación y sincronización ya están implementados. Falta la clave y un piloto controlado.</small></aside></section>
+
+    <section class="rail" aria-label="Flujo del empleado">
+      <article class="step"><b>01</b><strong>Packed</strong><small>Productos, cantidades y lotes ya verificados.</small></article>
+      <article class="step"><b>02</b><strong>Package</strong><small>Peso y dimensiones; dirección tomada de la orden.</small></article>
+      <article class="step"><b>03</b><strong>Compare</strong><small>UPS, USPS, FedEx y carriers conectados.</small></article>
+      <article class="step"><b>04</b><strong>Select</strong><small>Precio final, servicio y entrega estimada.</small></article>
+      <article class="step money"><b>05</b><strong>Confirm purchase</strong><small>Resumen final y confirmación humana explícita.</small></article>
+      <article class="step"><b>06</b><strong>Label</strong><small>Tracking y PDF térmico 4×6 guardados.</small></article>
+      <article class="step"><b>07</b><strong>Print</strong><small>Reimprimir nunca vuelve a comprar.</small></article>
+    </section>
+
+    <nav class="tabs" role="tablist"><button class="tab active" data-tab="flow">Flujo real</button><button class="tab" data-tab="gates">Activación segura</button><button class="tab" data-tab="exceptions">Excepciones</button><button class="tab" data-tab="config">Configuración</button></nav>
+
+    <section class="panel active" data-panel="flow"><div class="grid">
+      <article class="card"><div class="card-head"><div><h2>Lo que verá el empleado</h2><p>Una sola acción principal en cada momento.</p></div><span class="pill green">Simple</span></div><div class="rows">
+        <div class="row"><i>1</i><div><strong>Abrir una orden Packed</strong><small>El sistema bloquea pedidos con tracking, shipment o exportación previa.</small></div><code>READ</code></div>
+        <div class="row"><i>2</i><div><strong>Confirmar paquete</strong><small>Dirección de la orden, peso en oz y dimensiones en pulgadas.</small></div><code>LOCAL</code></div>
+        <div class="row"><i>3</i><div><strong>Comparar tarifas exactas</strong><small>Se crea un shipment calificable y se muestran servicios comprables, no estimates.</small></div><code>/v2/rates</code></div>
+        <div class="row"><i>4</i><div><strong>Revisar el cargo</strong><small>Carrier, servicio, costo final, fecha estimada y paquete permanecen visibles.</small></div><code>HUMAN</code></div>
+        <div class="row"><i>5</i><div><strong>Comprar una sola vez</strong><small>El servidor bloquea la orden, registra el intento y recién entonces compra.</small></div><code>POST LABEL</code></div>
+      </div></article>
+      <article class="card"><div class="card-head"><div><h2>Lo que se guarda</h2><p>Auditoría suficiente para recuperar o investigar.</p></div><span class="pill green">Durable</span></div><div class="rows">
+        <div class="row"><i>✓</i><div><strong>Identidad</strong><small>Order ID, fulfillment ID y external shipment key estable.</small></div><code>POSTGRES</code></div>
+        <div class="row"><i>✓</i><div><strong>Compra</strong><small>Rate ID, carrier, servicio, precio, moneda, dimensiones y dirección.</small></div><code>SNAPSHOT</code></div>
+        <div class="row"><i>✓</i><div><strong>Resultado</strong><small>Shipment ID, label ID, tracking number y URL del PDF.</small></div><code>AUDIT</code></div>
+        <div class="row"><i>✓</i><div><strong>Impresiones</strong><small>Cantidad y fecha; reprint usa el mismo label ID.</small></div><code>NO CHARGE</code></div>
+        <div class="row"><i>✓</i><div><strong>WordPress</strong><small>Nota privada y tracking; no completa la orden ni descuenta stock nuevamente.</small></div><code>BRIDGE</code></div>
+      </div></article>
+    </div></section>
+
+    <section class="panel" data-panel="gates"><div class="grid">
+      <article class="card"><div class="card-head"><div><h2>Gate 1 · Solo lectura</h2><p>Sin posibilidad de generar cargos.</p></div><span class="pill green">Primero</span></div><div class="rows"><div class="row"><i>1</i><div><strong>Guardar la V2 API key en Coolify</strong><small>Nunca en frontend, Git, documentación o chat.</small></div></div><div class="row"><i>2</i><div><strong>Descubrir carriers y warehouses</strong><small>Confirmar carrier IDs, servicios y origen correcto.</small></div></div><div class="row"><i>3</i><div><strong>Consultar una tarifa persistida</strong><small>Validar acceso de cuenta sin comprar.</small></div></div></div></article>
+      <article class="card"><div class="card-head"><div><h2>Gate 2 · Piloto financiero</h2><p>Una orden controlada y un costo pequeño.</p></div><span class="pill amber">Aprobación</span></div><div class="rows"><div class="row"><i>1</i><div><strong>Elegir orden interna</strong><small>Dirección controlada, paquete real y carrier económico.</small></div></div><div class="row"><i>2</i><div><strong>Activar el flag temporalmente</strong><small>Solo después de ver el costo final.</small></div></div><div class="row"><i>3</i><div><strong>Comprar, imprimir y anular</strong><small>Verificar PDF, tracking, refund/void y cero duplicados.</small></div></div></div></article>
+      <article class="card wide"><div class="card-head"><div><h2>Gate 3 · Operación</h2><p>Se habilita únicamente después del piloto y la conciliación con WooCommerce.</p></div><span class="pill red">Financiero</span></div><div class="callout"><strong>Importante:</strong> una API key de ShipStation Platform trabaja en producción y una llamada a crear etiqueta puede cobrar. Los clientes ShipStation API/ShipEngine sí pueden disponer de claves <code>TEST_</code>; primero debemos identificar qué tipo de cuenta tiene Phase One Labz.</div></article>
+    </div></section>
+
+    <section class="panel" data-panel="exceptions"><div class="grid">
+      <article class="card"><div class="card-head"><div><h2>Estados protegidos</h2><p>Qué ocurre cuando algo no sale perfecto.</p></div><span class="pill amber">No duplicar</span></div>
+        <div class="state good"><b>label_ready</b><p>Etiqueta comprada y guardada. Imprimir o reimprimir no llama a purchase.</p></div>
+        <div class="state warn"><b>purchase_unknown</b><p>Hubo timeout o 5xx después de enviar. Se bloquea toda nueva compra y se busca por external shipment ID/rate ID.</p></div>
+        <div class="state bad"><b>failed</b><p>Rechazo definitivo 4xx. Se corrige dirección, saldo o carrier y se crea un nuevo intento explícito.</p></div>
+        <div class="state warn"><b>voided</b><p>Se pidió anulación; el reembolso depende de las reglas y tiempos del carrier.</p></div>
+      </article>
+      <article class="card"><div class="card-head"><div><h2>Bloqueos automáticos</h2><p>Situaciones donde el botón de compra no aparece.</p></div><span class="pill red">Fail closed</span></div><div class="rows">
+        <div class="row"><i>!</i><div><strong>Ya existe tracking</strong><small>Nunca crear una segunda etiqueta.</small></div></div>
+        <div class="row"><i>!</i><div><strong>El plugin ya exportó el pedido</strong><small>Primero enlazar/reconciliar el shipment existente.</small></div></div>
+        <div class="row"><i>!</i><div><strong>Cambió la dirección o el paquete</strong><small>La cotización firmada se invalida y hay que cotizar otra vez.</small></div></div>
+        <div class="row"><i>!</i><div><strong>Saldo, carrier o API no disponibles</strong><small>Mostrar explicación útil y conservar el pedido Packed.</small></div></div>
+      </div></article>
+    </div></section>
+
+    <section class="panel" data-panel="config"><div class="grid">
+      <article class="card"><div class="card-head"><div><h2>Primera conexión</h2><p>Lectura y tarifas reales; compras todavía apagadas.</p></div><span class="pill green">Seguro</span></div><pre class="config"><span class="secret">SHIPSTATION_API_KEY=••••••••</span>
+SHIPSTATION_RATE_MODE=live
+SHIPSTATION_WAREHOUSE_ID=se-warehouse-id
+<span class="safe">SHIPSTATION_LABEL_PURCHASE_ENABLED=false</span></pre></article>
+      <article class="card"><div class="card-head"><div><h2>Después del piloto</h2><p>La única diferencia que abre el gasto real.</p></div><span class="pill red">Compra</span></div><pre class="config">SHIPSTATION_RATE_MODE=live
+<span class="secret">SHIPSTATION_LABEL_PURCHASE_ENABLED=true</span></pre><div class="callout">El flag vive únicamente en el servidor. Aunque esté activo, el backend vuelve a comprobar Packed, tracking existente, quote firmado, permisos e idempotencia.</div></article>
+    </div></section>
+
+    <footer class="footer"><div><strong>Estado actual</strong><br />Flujo local completo: rates persistidos, compra protegida, PDF, reimpresión, void y writeback idempotente.</div><div><strong>Pendiente antes de activar</strong><br />Clave V2, Bridge 1.7.0 en staging, carriers/origen confirmados y un piloto financiero observado.</div></footer>
+  </main>
+  <script>
+    const tabs=[...document.querySelectorAll('.tab')];
+    tabs.forEach(tab=>tab.addEventListener('click',()=>{tabs.forEach(x=>x.classList.remove('active'));tab.classList.add('active');document.querySelectorAll('.panel').forEach(panel=>panel.classList.toggle('active',panel.dataset.panel===tab.dataset.tab));}));
+  </script>
+</body>
+</html>

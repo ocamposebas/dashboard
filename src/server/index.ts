@@ -3,16 +3,47 @@ import { createMonitorServer } from "./httpServer.js";
 import { PresenceStore } from "./presenceStore.js";
 import { SocketHub } from "./socketHub.js";
 import { WooOrderSync } from "./wooOrderSync.js";
+import { UpstreamMonitorClient } from "./upstreamMonitorClient.js";
+import { importCommerceSiteControls } from "./siteControls.js";
+import { WooCommerceGateway } from "./wooCommerceGateway.js";
+import { Database } from "./database.js";
+import { migrateDatabase } from "./databaseMigrations.js";
+import { BarcodeLabelService } from "./barcodeLabels.js";
+import { AffiliateRepository } from "./affiliateRepository.js";
+import { AffiliateShadowSync } from "./affiliateShadowSync.js";
 
 const config = loadConfig();
+const fulfillmentDatabase = config.fulfillmentDatabase
+  ? new Database(config.fulfillmentDatabase)
+  : undefined;
+if (fulfillmentDatabase) {
+  const migrationsApplied = await migrateDatabase(fulfillmentDatabase);
+  console.log(migrationsApplied
+    ? `Applied ${migrationsApplied} PostgreSQL migration${migrationsApplied === 1 ? "" : "s"}`
+    : "PostgreSQL schema is current");
+}
+const barcodeLabels = config.barcodeSigningSecret
+  ? new BarcodeLabelService(config.barcodeSigningSecret)
+  : undefined;
 const store = new PresenceStore(
   config.redisUrl,
   config.redisKeyPrefix,
   config.presenceTtlMs,
   config.analyticsTimeZone,
 );
-const server = createMonitorServer(config, store);
+const server = createMonitorServer(config, store, {
+  ...(fulfillmentDatabase ? { fulfillmentDatabase } : {}),
+  ...(barcodeLabels ? { barcodeLabels } : {}),
+});
 const hub = new SocketHub(config, store);
+const upstreamMonitor = config.upstreamMonitor
+  ? new UpstreamMonitorClient(config.upstreamMonitor, (snapshot) => {
+      hub.publishUpstreamSnapshot(snapshot);
+      void store.setUpstreamSnapshot(snapshot).catch((error: unknown) => {
+        console.warn("Could not persist the upstream visitor snapshot", error);
+      });
+    })
+  : undefined;
 const orderSync = config.wooCommerce
   ? new WooOrderSync(
       {
@@ -22,15 +53,53 @@ const orderSync = config.wooCommerce
       store,
     )
   : undefined;
+const affiliateShadowSync = config.wooCommerce && fulfillmentDatabase
+  ? new AffiliateShadowSync(
+      config.wooCommerce,
+      new AffiliateRepository(fulfillmentDatabase),
+    )
+  : undefined;
 if (!orderSync) {
   console.warn(
     "Woo order reconciliation is disabled; configure the WOOCOMMERCE_* variables",
   );
 }
 
+if (fulfillmentDatabase) {
+  void fulfillmentDatabase.ping()
+    .then(() => console.log("Barcode Fulfillment database connection is ready"))
+    .catch((error: unknown) => {
+      console.warn("Barcode Fulfillment database is configured but unavailable", error);
+    });
+} else {
+  console.warn(
+    "Barcode Fulfillment persistence is disabled; configure DATABASE_URL after Phase 1 migration approval",
+  );
+}
+
 await store.connect(() => hub.scheduleSnapshot());
+if (config.upstreamMonitor) {
+  const cachedSnapshot = await store.getUpstreamSnapshot().catch(() => null);
+  if (cachedSnapshot) hub.publishUpstreamSnapshot(cachedSnapshot);
+}
+await store.ensureBootstrapAdmin(config.monitorUsername, config.monitorPasswordHash);
+if (config.wooCommerce) {
+  void (async () => {
+    if (await store.getIndependentSiteControls()) return;
+    const imported = await new WooCommerceGateway(config.wooCommerce!).getSiteControls();
+    await store.seedIndependentSiteControls(importCommerceSiteControls(imported));
+    console.log("Independent Site Controls imported from the existing storefront configuration");
+  })().catch((error: unknown) => {
+    console.warn(
+      "Independent Site Controls started with safe defaults; the WordPress bootstrap was unavailable",
+      error,
+    );
+  });
+}
 hub.attach(server);
+upstreamMonitor?.start();
 orderSync?.start();
+affiliateShadowSync?.start();
 
 server.listen(config.port, "0.0.0.0", () => {
   console.log(`Phase One Live Monitor listening on port ${config.port}`);
@@ -42,7 +111,10 @@ async function shutdown(signal: string): Promise<void> {
   shuttingDown = true;
   console.log(`Received ${signal}; shutting down`);
   server.close();
+  await upstreamMonitor?.close();
   await orderSync?.close();
+  await affiliateShadowSync?.close();
+  await fulfillmentDatabase?.close();
   await hub.close();
   await store.disconnect();
   process.exit(0);

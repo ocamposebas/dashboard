@@ -2,7 +2,45 @@ services:
   monitor:
     ports:
       - "127.0.0.1:8080:8080"
+    environment:
+      DASHBOARD_ORIGIN: "http://localhost:8080"
+      COA_PUBLIC_ORIGIN: "http://localhost:8080"
+      COOKIE_SECURE: "false"
+      TRUST_PROXY: "false"
+      DATABASE_URL: "postgresql://phaseone:local-development-only@postgres:5432/phaseone_fulfillment"
+      DATABASE_SSL: "false"
+      BARCODE_SIGNING_SECRET: "local-barcode-signing-secret-change-before-use-2026"
+      AFFILIATE_SERVICE_SECRET: "local-affiliate-service-secret-never-use-in-production-2026"
+      SHIPSTATION_RATE_MODE: ${SHIPSTATION_RATE_MODE:-mock}
+      SHIPSTATION_LABEL_PURCHASE_ENABLED: "false"
+      EVIDENCE_STORAGE_PATH: "/app/data/evidence"
+      EVIDENCE_ENCRYPTION_SECRET: "local-evidence-encryption-secret-never-use-in-production-2026"
+      EVIDENCE_NOTIFICATION_MODE: "disabled"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   redis:
     ports:
       - "127.0.0.1:6379:6379"
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: phaseone_fulfillment
+      POSTGRES_USER: phaseone
+      POSTGRES_PASSWORD: local-development-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U phaseone -d phaseone_fulfillment"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - fulfillment_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  fulfillment_postgres_data:
+    name: phaseone_fulfillment_postgres_data

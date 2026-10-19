@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Phase One Labz — Flujo de picking con QR existente</title>
+  <style>
+    :root{color-scheme:dark;--bg:#07090c;--surface:#11151a;--raised:#171c22;--line:#29313a;--text:#f7f8fa;--muted:#98a3af;--cyan:#75d8ec;--green:#74daa5;--amber:#f0c675;--red:#ef9696;--shadow:0 22px 70px rgba(0,0,0,.3)}
+    [data-theme="light"]{color-scheme:light;--bg:#eef2f4;--surface:#fff;--raised:#f5f7f8;--line:#d9e0e5;--text:#12171d;--muted:#64717e;--cyan:#167d92;--green:#1b8052;--amber:#94630e;--red:#b43e45;--shadow:0 22px 70px rgba(15,31,44,.09)}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif} button{font:inherit}
+    .shell{max-width:1380px;margin:0 auto;padding:26px}.top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px}.brand{display:flex;align-items:center;gap:12px}.mark{width:42px;height:42px;display:grid;place-items:center;border:1px solid var(--line);border-radius:13px;background:var(--surface);font-weight:900}.button{border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);padding:9px 12px;font-weight:750;cursor:pointer}.button:hover{border-color:var(--cyan);color:var(--cyan)}
+    .eyebrow{margin:0 0 5px;color:var(--muted);font-size:10px;font-weight:850;letter-spacing:.16em;text-transform:uppercase}h1,h2,h3,p{margin-top:0}h1{max-width:880px;margin-bottom:13px;font-size:clamp(30px,5vw,56px);line-height:1.02;letter-spacing:-.055em}h2{margin-bottom:7px;font-size:20px;letter-spacing:-.025em}h3{font-size:15px;margin-bottom:6px}.muted{color:var(--muted)}
+    .hero{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:18px;margin-bottom:18px}.hero-copy,.verdict,.panel,.step,.case,.change{border:1px solid var(--line);border-radius:18px;background:var(--surface)}.hero-copy{padding:30px;box-shadow:var(--shadow)}.hero-copy>p:last-child{max-width:760px;margin:0;color:var(--muted);font-size:16px}.verdict{padding:22px;display:flex;flex-direction:column;justify-content:center}.verdict strong{font-size:24px;letter-spacing:-.03em}.status{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}.pill{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid var(--line);border-radius:999px;font-size:11px;font-weight:850}.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}.good{color:var(--green)}.warn{color:var(--amber)}
+    .panel{padding:22px;margin-bottom:18px}.flow{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-top:18px}.step{position:relative;padding:16px;background:var(--raised);border-radius:13px}.step b{display:block;margin-bottom:7px;color:var(--cyan);font-size:10px;letter-spacing:.12em;text-transform:uppercase}.step p{margin:0;color:var(--muted);font-size:13px}.step:not(:last-child)::after{content:"→";position:absolute;right:-8px;top:50%;z-index:2;width:16px;height:22px;display:grid;place-items:center;transform:translateY(-50%);color:var(--cyan);background:var(--bg);font-weight:900}
+    .cases{display:grid;grid-template-columns:1fr 1fr;gap:14px}.case{padding:21px}.case-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.case code{display:block;overflow-wrap:anywhere;margin:14px 0;padding:11px;border:1px solid var(--line);border-radius:9px;background:var(--raised);color:var(--cyan);font-size:12px}.badge{display:inline-flex;white-space:nowrap;padding:4px 7px;border-radius:6px;background:var(--raised);font-size:10px;font-weight:850;letter-spacing:.08em;text-transform:uppercase}.case ul,.change ul{padding-left:19px;margin:12px 0 0}.case li,.change li{margin:7px 0;color:var(--muted)}
+    .recommended{border-color:color-mix(in srgb,var(--green) 45%,var(--line))}.recommended .badge{color:var(--green)}.limited .badge{color:var(--amber)}
+    .simulator{display:grid;grid-template-columns:250px minmax(0,1fr);gap:16px}.choices{display:grid;gap:8px}.choice{text-align:left}.choice[aria-pressed="true"]{border-color:var(--cyan);background:color-mix(in srgb,var(--cyan) 10%,var(--surface));color:var(--cyan)}.result{min-height:180px;padding:22px;border:1px solid var(--line);border-radius:13px;background:var(--raised)}.result-top{display:flex;justify-content:space-between;gap:12px;align-items:center}.result-state{font-size:12px;font-weight:850}.result-state.safe{color:var(--green)}.result-state.partial{color:var(--amber)}.result dl{display:grid;grid-template-columns:130px 1fr;gap:8px 12px;margin:18px 0 0}.result dt{color:var(--muted)}.result dd{margin:0;font-weight:700}
+    .changes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.providers{grid-template-columns:repeat(4,minmax(0,1fr))}.change{padding:18px;background:var(--raised);border-radius:13px}.change span{display:grid;place-items:center;width:28px;height:28px;margin-bottom:13px;border:1px solid var(--line);border-radius:8px;color:var(--cyan);font-weight:900}.note{margin:18px 0 0;padding:15px;border-left:3px solid var(--amber);background:color-mix(in srgb,var(--amber) 7%,var(--raised));color:var(--muted)}
+    .footer{display:flex;justify-content:space-between;gap:15px;color:var(--muted);font-size:12px;padding-top:2px}
+    @media(max-width:1100px){.providers{grid-template-columns:1fr 1fr}}@media(max-width:980px){.hero{grid-template-columns:1fr}.flow{grid-template-columns:1fr 1fr}.step:not(:last-child)::after{display:none}.changes{grid-template-columns:1fr 1fr}}
+    @media(max-width:680px){.shell{padding:15px}.brand-copy{display:none}.hero-copy{padding:21px}.cases,.simulator,.changes,.flow{grid-template-columns:1fr}.result dl{grid-template-columns:1fr}.result dd{margin-bottom:6px}.footer{flex-direction:column}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="top"><div class="brand"><div class="mark">P1</div><div class="brand-copy"><p class="eyebrow">Phase One Labz</p><strong>QR Fulfillment Blueprint</strong></div></div><button class="button" id="theme" type="button">Cambiar tema</button></header>
+
+    <section class="hero">
+      <div class="hero-copy"><p class="eyebrow">Caso real confirmado</p><h1>El QR abre el certificado original del laboratorio.</h1><p>La URL del PDF funciona como identificador del COA. El dashboard no necesita comprender el formato de cada laboratorio durante el picking: compara la URL con los documentos aprobados que ya viven en COA Manager.</p></div>
+      <aside class="verdict"><p class="eyebrow">Recomendación</p><strong>Documento registrado → producto + lote</strong><p class="muted">Cada laboratorio puede tener otro dominio. La autoridad es el COA aprobado, no una lista rígida de proveedores.</p><div class="status"><span class="pill good">Sin nuevas etiquetas</span><span class="pill good">Lote verificable</span></div></aside>
+    </section>
+
+    <section class="panel">
+      <p class="eyebrow">Flujo del operador</p><h2>Lo que ocurriría al escanear cada vial</h2>
+      <div class="flow">
+        <article class="step"><b>01 · Leer</b><p>Cámara o escáner QR 2D captura la URL completa del PDF.</p></article>
+        <article class="step"><b>02 · Normalizar</b><p>El servidor valida HTTPS y genera una identidad canónica del enlace.</p></article>
+        <article class="step"><b>03 · Encontrar</b><p>Busca coincidencia en fileUrl, verifyUrl e historial del COA aprobado.</p></article>
+        <article class="step"><b>04 · Comparar</b><p>Valida producto, variante, lote, COA, pedido y cantidad pendiente.</p></article>
+        <article class="step"><b>05 · Capturar</b><p>Registra por unidad el COA y lote físico destinado a ese pedido.</p></article>
+        <article class="step"><b>06 · Asignar</b><p>Al confirmar empaque, refleja esos lotes en el COA del pedido del cliente.</p></article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <p class="eyebrow">Formatos reales encontrados</p><h2>Un motor, cuatro formas diferentes de identificar el COA</h2>
+      <div class="changes providers">
+        <article class="change"><span>F</span><h3>Freedom Diagnostics</h3><ul><li>El certificado aparece en el nombre del PDF.</li><li>Phas2610130018 → PL-RT 60 mg.</li><li>Lote registrado: P1RT60.</li></ul></article>
+        <article class="change"><span>I</span><h3>ILS · Retatrutide</h3><ul><li>Token en la ruta `/verify/...`.</li><li>COA-2026-GI8-SM.</li><li>Lote registrado: P1-10RT06.</li></ul></article>
+        <article class="change"><span>I</span><h3>ILS · Semax</h3><ul><li>El QR original usa HTTP y redirige a HTTPS.</li><li>COA-2026-VM8MMY.</li><li>Lote registrado: P1-SMX-26.</li></ul></article>
+        <article class="change"><span>K</span><h3>Kovera Labs</h3><ul><li>Token dentro del fragmento `#/verify?t=`.</li><li>El fragmento debe conservarse completo.</li><li>Ya existe en el catálogo COA.</li></ul></article>
+      </div>
+    </section>
+
+    <section class="cases">
+      <article class="case recommended"><div class="case-head"><div><p class="eyebrow">QR real revisado</p><h2>Freedom Diagnostics</h2></div><span class="badge">Verificación completa</span></div><code>.../Phas2610130018.pdf</code><ul><li>Producto: PL-RT 60 mg.</li><li>Certificado: Phas2610130018.</li><li>Lote: P1RT60.</li></ul></article>
+      <article class="case limited"><div class="case-head"><div><p class="eyebrow">Regla multi-laboratorio</p><h2>No adivinar por dominio</h2></div><span class="badge">Registro obligatorio</span></div><code>laboratorio-x.com/documento-aprobado.pdf</code><ul><li>Aceptar cualquier proveedor solo si la URL está registrada en un COA aprobado.</li><li>No descargar el PDF durante el picking.</li><li>Un documento desconocido queda bloqueado para revisión administrativa.</li></ul></article>
+    </section>
+
+    <section class="panel" style="margin-top:18px">
+      <p class="eyebrow">Simulador de decisión</p><h2>Qué puede validar realmente cada QR</h2>
+      <div class="simulator">
+        <div class="choices"><button class="button choice" data-case="registered" aria-pressed="true">PDF registrado y aprobado</button><button class="button choice" data-case="alias" aria-pressed="false">URL alternativa registrada</button><button class="button choice" data-case="unknown" aria-pressed="false">PDF todavía desconocido</button><button class="button choice" data-case="unsafe" aria-pressed="false">URL insegura o inválida</button></div>
+        <div class="result" id="result" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <p class="eyebrow">Cambio mínimo en el dashboard</p><h2>No hace falta reconstruir Picking Station</h2>
+      <div class="changes">
+        <article class="change"><span>1</span><h3>Lector dual</h3><ul><li>Aceptar QR Code además de Code 128.</li><li>Guía cuadrada y texto “Escanea el QR del vial”.</li><li>Compatible con cámara y escáner HID 2D.</li></ul></article>
+        <article class="change"><span>2</span><h3>Índice de documentos</h3><ul><li>Indexar fileUrl, verifyUrl e historial ya presentes en los COAs.</li><li>Guardar hash canónico y alias por cambios o redirecciones.</li><li>No consultar al laboratorio durante cada escaneo.</li></ul></article>
+        <article class="change"><span>3</span><h3>Validación existente</h3><ul><li>Reutilizar producto, variante, lote, COA, pedido y locks actuales.</li><li>Bloquear COAs desconocidos, históricos o no aprobados.</li><li>No tocar stock, pagos ni ShipStation.</li></ul></article>
+      </div>
+      <p class="note"><strong>Disponibilidad:</strong> si Freedom Diagnostics u otro laboratorio está caído, el picking puede continuar porque la validación usa el mapeo aprobado guardado localmente. El PDF solo se abre cuando alguien desea consultarlo.</p>
+      <p class="note"><strong>Hardware:</strong> la cámara del teléfono ya puede leer QR. Un lector láser 1D que solo acepta Code 128 no puede leerlos; el lector físico debe ser 2D/QR.</p>
+      <p class="note"><strong>Asignación al cliente:</strong> durante picking el lote queda guardado localmente por unidad. Solo al confirmar Packing se escribe la distribución final en el pedido de WordPress. El reintento consulta primero lo ya asignado y usa una identidad estable para no duplicar cantidades.</p>
+    </section>
+
+    <footer class="footer"><span>Ejemplo validado: PL-RT 60 mg · lote P1RT60 · Phas2610130018.</span><span>Implementado localmente; activación WordPress pendiente de despliegue controlado.</span></footer>
+  </main>
+  <script>
+    const outcomes={
+      registered:{state:'Escaneo aceptable',className:'safe',summary:'El documento coincide con un COA aprobado y con la línea pendiente del pedido.',fields:[['Producto','PL-RT 60 mg'],['Certificado','Phas2610130018'],['Lote físico','P1RT60'],['Acción','Capturar unidad; asignar el lote al confirmar Packing']]},
+      alias:{state:'Escaneo aceptable',className:'safe',summary:'La URL cambió, pero el alias fue aprobado previamente para el mismo certificado.',fields:[['Producto','Desde el COA registrado'],['Certificado','Mismo registro estable'],['Lote físico','Desde el COA registrado'],['Acción','Aceptar y auditar el alias utilizado']]},
+      unknown:{state:'Revisión requerida',className:'partial',summary:'El laboratorio es válido, pero el PDF todavía no está asociado a un COA del catálogo.',fields:[['Producto','No confiar en el nombre del archivo'],['Certificado','Pendiente de registro'],['Lote físico','Pendiente de registro'],['Acción','Bloquear y enviar a COA Manager']]},
+      unsafe:{state:'Escaneo rechazado',className:'partial',summary:'HTTP, URL mal formada o valor que no corresponde a un documento aprobado.',fields:[['Producto','No'],['Certificado','No'],['Lote físico','No'],['Acción','Mostrar motivo sin incrementar cantidad']]}
+    };
+    const result=document.getElementById('result');
+    function draw(key){const x=outcomes[key];result.innerHTML=`<div class="result-top"><div><p class="eyebrow">Resultado</p><h3>${x.summary}</h3></div><span class="result-state ${x.className}">${x.state}</span></div><dl>${x.fields.map(([a,b])=>`<dt>${a}</dt><dd>${b}</dd>`).join('')}</dl>`}
+    document.querySelectorAll('.choice').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('.choice').forEach(x=>x.setAttribute('aria-pressed','false'));button.setAttribute('aria-pressed','true');draw(button.dataset.case)}));draw('registered');
+    document.getElementById('theme').addEventListener('click',()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light'});
+  </script>
+</body>
+</html>

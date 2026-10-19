@@ -7,13 +7,21 @@ import {
 } from "node:crypto";
 const COOKIE_NAME = "phaseone_monitor_session";
 
-interface SessionPayload {
+export type UserRole = "owner" | "administrator" | "operations" | "analyst";
+
+export interface SessionPayload {
   sub: string;
+  username: string;
+  role: UserRole;
+  authVersion: number;
   exp: number;
 }
 
 export interface SessionOptions {
   username: string;
+  userId?: string;
+  role?: UserRole;
+  authVersion?: number;
   sessionSecret: string;
   sessionTtlMs: number;
   cookieSecure: boolean;
@@ -141,7 +149,10 @@ export async function verifyPassword(
 
 export function createSessionCookie(options: SessionOptions): string {
   const payload: SessionPayload = {
-    sub: options.username,
+    sub: options.userId || options.username,
+    username: options.username,
+    role: options.role || "owner",
+    authVersion: options.authVersion || 1,
     exp: Date.now() + options.sessionTtlMs,
   };
   const encodedPayload = encode(JSON.stringify(payload));
@@ -183,11 +194,46 @@ export function verifySessionCookie(
   if (!safeEqual(signature, expectedSignature)) return false;
 
   try {
-    const payload = JSON.parse(
-      Buffer.from(encodedPayload, "base64url").toString("utf8"),
-    ) as SessionPayload;
-    return payload.sub === options.username && payload.exp > Date.now();
+    const payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as Partial<SessionPayload>;
+    const username = typeof payload.username === "string" ? payload.username : payload.sub;
+    return username === options.username && typeof payload.exp === "number" && payload.exp > Date.now();
   } catch {
     return false;
+  }
+}
+
+export function readSessionCookie(
+  cookieHeader: string | undefined,
+  sessionSecret: string,
+): SessionPayload | null {
+  const token = parseCookies(cookieHeader).get(COOKIE_NAME);
+  if (!token) return null;
+  const separator = token.lastIndexOf(".");
+  if (separator <= 0) return null;
+  const encodedPayload = token.slice(0, separator);
+  const signature = token.slice(separator + 1);
+  if (!safeEqual(signature, sign(encodedPayload, sessionSecret))) return null;
+  try {
+    const raw = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as Record<string, unknown>;
+    const role = raw.role;
+    if (
+      typeof raw.sub !== "string" || !raw.sub ||
+      typeof raw.exp !== "number" || raw.exp <= Date.now()
+    ) return null;
+    // Preserve sessions issued before role-based access was introduced. The
+    // request handler resolves their subject against the managed user record.
+    return {
+      sub: raw.sub,
+      username: typeof raw.username === "string" && raw.username ? raw.username : raw.sub,
+      role: ["owner", "administrator", "operations", "analyst"].includes(String(role))
+        ? role as UserRole
+        : "owner",
+      authVersion: Number.isSafeInteger(raw.authVersion) && Number(raw.authVersion) > 0
+        ? Number(raw.authVersion)
+        : 1,
+      exp: raw.exp,
+    };
+  } catch {
+    return null;
   }
 }

@@ -4,6 +4,7 @@ import {
   createSessionCookie,
   hashPassword,
   parseScryptHash,
+  readSessionCookie,
   verifyPassword,
   verifySessionCookie,
 } from "../src/server/auth.js";
@@ -25,6 +26,9 @@ test("scrypt password hashes verify without exposing the password", async () => 
 test("signed session cookies reject tampering", () => {
   const options = {
     username: "operator",
+    userId: "user-123",
+    role: "operations" as const,
+    authVersion: 4,
     sessionSecret: "a-secret-that-is-deliberately-longer-than-32-characters",
     sessionTtlMs: 60_000,
     cookieSecure: true,
@@ -33,6 +37,14 @@ test("signed session cookies reject tampering", () => {
   const cookieHeader = setCookie.split(";")[0];
 
   assert.equal(verifySessionCookie(cookieHeader, options), true);
+  const session = readSessionCookie(cookieHeader, options.sessionSecret);
+  assert.deepEqual(session, {
+    sub: "user-123",
+    username: "operator",
+    role: "operations",
+    authVersion: 4,
+    exp: session?.exp,
+  });
   assert.equal(verifySessionCookie(`${cookieHeader}x`, options), false);
   assert.match(setCookie, /HttpOnly/);
   assert.match(setCookie, /SameSite=Strict/);

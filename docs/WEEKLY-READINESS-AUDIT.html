@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Phase One Labz · Auditoría semanal</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090a0b;
+      --panel: #111315;
+      --panel-2: #17191c;
+      --line: #292d31;
+      --text: #f4f5f3;
+      --muted: #979da3;
+      --soft: #c9cdd0;
+      --green: #7fd4a0;
+      --green-bg: #12271b;
+      --amber: #e9c46a;
+      --amber-bg: #2a2211;
+      --red: #ee8b82;
+      --red-bg: #2b1716;
+      --blue: #8fc7dd;
+      --blue-bg: #14252c;
+      --radius: 18px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 85% -10%, rgba(92, 126, 140, .15), transparent 30rem),
+        var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button { font: inherit; }
+    .shell { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 64px; }
+    .topline { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 46px; }
+    .brand { display: flex; align-items: center; gap: 13px; }
+    .brand-mark {
+      width: 42px; height: 42px; display: grid; place-items: center;
+      border: 1px solid var(--line); border-radius: 13px; background: #f1f2ef; color: #090a0b;
+      font-weight: 900; letter-spacing: -.08em;
+    }
+    .brand strong { display: block; font-size: 14px; letter-spacing: .04em; }
+    .brand span { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }
+    .mode {
+      display: inline-flex; align-items: center; gap: 8px; border: 1px solid #5a4b23;
+      color: var(--amber); background: var(--amber-bg); border-radius: 999px; padding: 9px 13px;
+      font-size: 12px; font-weight: 750;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 14px currentColor; }
+
+    .hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 30px; align-items: end; margin-bottom: 28px; }
+    .eyebrow { color: var(--blue); font-size: 11px; font-weight: 850; letter-spacing: .18em; text-transform: uppercase; }
+    h1 { max-width: 850px; margin: 12px 0 12px; font-size: clamp(38px, 5vw, 68px); line-height: .98; letter-spacing: -.055em; }
+    .hero p { max-width: 800px; margin: 0; color: var(--soft); font-size: 16px; line-height: 1.65; }
+    .date { color: var(--muted); font-size: 12px; text-align: right; line-height: 1.6; }
+
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 38px; }
+    .metric { min-height: 136px; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: rgba(17, 19, 21, .88); }
+    .metric .label { color: var(--muted); font-size: 10px; font-weight: 850; letter-spacing: .14em; text-transform: uppercase; }
+    .metric .value { margin: 17px 0 6px; font-size: 27px; font-weight: 790; letter-spacing: -.035em; }
+    .metric .detail { color: var(--soft); font-size: 12px; line-height: 1.45; }
+    .metric.good .value { color: var(--green); }
+    .metric.watch .value { color: var(--amber); }
+    .metric.blocked .value { color: var(--red); }
+
+    .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 0 0 18px; }
+    .tabs { display: flex; gap: 6px; padding: 5px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel); }
+    .tab { border: 0; border-radius: 9px; padding: 9px 13px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 750; }
+    .tab.active { background: #f1f2ef; color: #0b0c0d; }
+    .progress-copy { color: var(--muted); font-size: 12px; }
+
+    .board { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .section { border: 1px solid var(--line); border-radius: 22px; background: rgba(17, 19, 21, .92); overflow: hidden; }
+    .section-head { padding: 20px 22px 18px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; }
+    .section-head h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
+    .section-head p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .pill { flex: none; border: 1px solid currentColor; border-radius: 999px; padding: 6px 9px; font-size: 9px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+    .pill.blocker { color: var(--red); background: var(--red-bg); }
+    .pill.week { color: var(--amber); background: var(--amber-bg); }
+    .pill.ready { color: var(--green); background: var(--green-bg); }
+    .pill.later { color: var(--blue); background: var(--blue-bg); }
+
+    .items { padding: 7px; }
+    .item { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 12px; padding: 15px; border-radius: 14px; border: 1px solid transparent; }
+    .item + .item { margin-top: 2px; }
+    .item:hover { background: var(--panel-2); border-color: var(--line); }
+    .check { width: 22px; height: 22px; margin-top: 1px; border: 1px solid #4c5258; border-radius: 7px; background: #0d0f10; color: transparent; cursor: pointer; }
+    .check.done { border-color: #426c51; background: var(--green-bg); color: var(--green); }
+    .check.done::before { content: "✓"; display: grid; place-items: center; font-size: 13px; font-weight: 900; }
+    .item-title { color: var(--text); font-size: 13px; font-weight: 760; line-height: 1.35; }
+    .item-copy { margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .tag { align-self: start; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 5px 8px; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+    .item.completed .item-title, .item.completed .item-copy { opacity: .48; text-decoration: line-through; }
+    .item[hidden] { display: none; }
+
+    .summary { margin-top: 18px; display: grid; grid-template-columns: 1.35fr .65fr; gap: 16px; }
+    .note { border: 1px solid var(--line); border-radius: 20px; padding: 22px; background: var(--panel); }
+    .note h3 { margin: 0 0 10px; font-size: 15px; }
+    .note p, .note li { color: var(--soft); font-size: 12px; line-height: 1.7; }
+    .note ul { padding-left: 18px; margin: 8px 0 0; }
+    .status-line { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--line); color: var(--soft); font-size: 12px; }
+    .status-line:last-child { border: 0; }
+    .status-line strong { color: var(--text); text-align: right; }
+    footer { margin-top: 22px; color: #6e747a; font-size: 10px; text-align: center; letter-spacing: .08em; text-transform: uppercase; }
+
+    @media (max-width: 900px) {
+      .metrics, .board { grid-template-columns: 1fr 1fr; }
+      .summary { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 640px) {
+      .shell { width: min(100% - 24px, 1440px); padding-top: 20px; }
+      .topline, .hero, .toolbar { align-items: flex-start; flex-direction: column; }
+      .hero { display: flex; }
+      .date { text-align: left; }
+      .metrics, .board { grid-template-columns: 1fr; }
+      .tabs { width: 100%; overflow-x: auto; }
+      .tab { white-space: nowrap; }
+      .item { grid-template-columns: 26px minmax(0, 1fr); }
+      .tag { grid-column: 2; justify-self: start; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="topline">
+      <div class="brand">
+        <div class="brand-mark">P1</div>
+        <div><strong>PHASE ONE LABZ</strong><span>Operations readiness</span></div>
+      </div>
+      <div class="mode"><span class="dot"></span> Observación paralela · no cortar plugins</div>
+    </div>
+
+    <section class="hero">
+      <div>
+        <div class="eyebrow">Auditoría de cierre</div>
+        <h1>Qué falta para operar al 100%</h1>
+        <p>El producto local ya funciona y compila. Esta semana debe usarse para observar, comparar y documentar; producción solo se aprueba cuando los bloqueos operativos y de recuperación estén cerrados.</p>
+      </div>
+      <div class="date">Corte técnico<br /><strong>19 oct 2026 · Bogotá</strong></div>
+    </section>
+
+    <section class="metrics" aria-label="Resumen técnico">
+      <article class="metric good"><div class="label">Servicios locales</div><div class="value">3 / 3 sanos</div><div class="detail">Dashboard, PostgreSQL y Redis activos.</div></article>
+      <article class="metric good"><div class="label">Validación</div><div class="value">198 aprobadas</div><div class="detail">138 dashboard + 60 tienda. Cero fallos.</div></article>
+      <article class="metric watch"><div class="label">Cobertura pendiente</div><div class="value">31 omitidas</div><div class="detail">Pruebas de concurrencia, persistencia y recuperación con DB/Redis.</div></article>
+      <article class="metric blocked"><div class="label">Salida a producción</div><div class="value">No aprobada</div><div class="detail">Faltan respaldo probado, staging completo y configuración final.</div></article>
+    </section>
+
+    <div class="toolbar">
+      <div class="tabs" role="tablist" aria-label="Filtrar auditoría">
+        <button class="tab active" data-filter="all">Todo</button>
+        <button class="tab" data-filter="blocker">Bloquea producción</button>
+        <button class="tab" data-filter="week">Esta semana</button>
+        <button class="tab" data-filter="later">Después</button>
+      </div>
+      <div class="progress-copy" id="progress">0 tareas marcadas</div>
+    </div>
+
+    <section class="board">
+      <article class="section" data-group="blocker">
+        <header class="section-head"><div><h2>Antes de producción</h2><p>Sin esto no existe una operación recuperable ni un despliegue seguro.</p></div><span class="pill blocker">P0</span></header>
+        <div class="items">
+          <div class="item" data-id="release"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Consolidar los dos repositorios</div><div class="item-copy">Dashboard: 117 archivos cambiados. Storefront: 27. Crear commits revisables, etiqueta de versión y plan de rollback.</div></div><span class="tag">Git</span></div>
+          <div class="item" data-id="integration-tests"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Ejecutar las 31 pruebas de integración omitidas</div><div class="item-copy">Levantar bases de prueba aisladas para PostgreSQL, Redis, concurrencia, idempotencia, evidencia y shipping simulado.</div></div><span class="tag">QA</span></div>
+          <div class="item" data-id="backup"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Probar backup y restauración completa</div><div class="item-copy">PostgreSQL, Redis, fotos de evidencia y secretos. No basta con tener backup: hay que restaurarlo en un entorno vacío.</div></div><span class="tag">Recovery</span></div>
+          <div class="item" data-id="production-env"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Configurar Coolify con dominio HTTPS y secretos definitivos</div><div class="item-copy">Orígenes, cookies seguras, claves estables, volúmenes persistentes, PostgreSQL y Redis sin publicar sus puertos.</div></div><span class="tag">Infra</span></div>
+          <div class="item" data-id="staging-e2e"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Pasar una prueba E2E en staging</div><div class="item-copy">Orden real de prueba → comisión → fulfillment QR → packing → evidencia → correo → recuperación después de reinicio.</div></div><span class="tag">E2E</span></div>
+        </div>
+      </article>
+
+      <article class="section" data-group="week">
+        <header class="section-head"><div><h2>Observar esta semana</h2><p>Mantener el sistema propio y los plugins en paralelo, sin cortar historial.</p></div><span class="pill week">7 días</span></header>
+        <div class="items">
+          <div class="item" data-id="affiliate-reconcile"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Conciliar afiliados todos los días</div><div class="item-copy">Comparar cada orden con cupón, base neta, porcentaje, comisión y estado. El sistema propio ya registra 22 órdenes y $284.02.</div></div><span class="tag">Affiliate</span></div>
+          <div class="item" data-id="refunds"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Validar reembolsos parciales y totales</div><div class="item-copy">Confirmar que la comisión baja o se revierte sin duplicarse en el plugin ni en PostgreSQL.</div></div><span class="tag">Money</span></div>
+          <div class="item" data-id="monitor-uptime"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Vigilar continuidad de Live Monitor</div><div class="item-copy">Hubo una interrupción DNS de staging de unos minutos; desde entonces se recuperó. Registrar cualquier nueva caída y su duración.</div></div><span class="tag">Uptime</span></div>
+          <div class="item" data-id="affiliate-journey"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Probar recorrido completo del afiliado</div><div class="item-copy">Invitación, activación, acceso, venta, historial y solicitud de pago. Actualmente no hay solicitudes ni aplicaciones reales en la base local.</div></div><span class="tag">UAT</span></div>
+          <div class="item" data-id="plugin-overlap"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Detectar acciones duplicadas entre plugins</div><div class="item-copy">WordPress mantiene 57 plugins activos, incluidos dos sistemas de stock notification y dos de backup. Revisar correos y cron duplicados.</div></div><span class="tag">WP</span></div>
+        </div>
+      </article>
+
+      <article class="section" data-group="blocker">
+        <header class="section-head"><div><h2>Integraciones sin cerrar</h2><p>La interfaz existe, pero faltan credenciales o validación real controlada.</p></div><span class="pill blocker">Config</span></header>
+        <div class="items">
+          <div class="item" data-id="storefront-cutover"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Conectar el storefront de producción al dashboard</div><div class="item-copy">Afiliados y COAs apuntan al dashboard solo en el entorno local. En producción todavía existe la ruta antigua de COA de WordPress.</div></div><span class="tag">Storefront</span></div>
+          <div class="item" data-id="coa-reconcile"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Conciliar y aprobar la migración de COAs</div><div class="item-copy">Comparar cantidad, variantes, fechas, PDFs e historial entre WordPress y PostgreSQL antes de retirar el manager antiguo.</div></div><span class="tag">COA</span></div>
+          <div class="item" data-id="search-console"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Configurar Google Search Console</div><div class="item-copy">Faltan OAuth Client ID, Client Secret, callback HTTPS y autorización de la propiedad.</div></div><span class="tag">SEO</span></div>
+          <div class="item" data-id="shipstation"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Validar ShipStation en modo lectura</div><div class="item-copy">Faltan API key y warehouse ID. Las tarifas son mock y comprar etiquetas debe seguir desactivado hasta aprobación separada.</div></div><span class="tag">Shipping</span></div>
+          <div class="item" data-id="evidence-email"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Probar correo de evidencia con SMTP de WordPress</div><div class="item-copy">El almacenamiento cifrado está configurado; el envío permanece desactivado hasta verificar adjuntos y resultado incierto en staging.</div></div><span class="tag">Evidence</span></div>
+        </div>
+      </article>
+
+      <article class="section" data-group="later">
+        <header class="section-head"><div><h2>Certificación operativa</h2><p>Pruebas físicas y documentación antes de entregar el sistema a operación diaria.</p></div><span class="pill later">Después</span></header>
+        <div class="items">
+          <div class="item" data-id="mobile-qr"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Certificar QR en iPhone y Android</div><div class="item-copy">Permisos, enfoque, poca luz, reintentos y recuperación después de bloquear la pantalla.</div></div><span class="tag">Mobile</span></div>
+          <div class="item" data-id="hid"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Prueba de 100 escaneos con lector 2D HID</div><div class="item-copy">Mezclar enlaces Freedom Diagnostics, ILS y Kovera; confirmar cero cantidades dobles y rechazo claro del producto incorrecto.</div></div><span class="tag">Scanner</span></div>
+          <div class="item" data-id="printer"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Probar impresión térmica real</div><div class="item-copy">Etiquetas 4×6 y, si se conserva, impresión de identificadores internos en 203 dpi sin escalado del navegador.</div></div><span class="tag">Printer</span></div>
+          <div class="item" data-id="runbook"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Crear runbooks de operación y emergencia</div><div class="item-copy">Qué hacer si WordPress cae, se interrumpe un scan, queda una etiqueta incierta, falla el correo o toca restaurar datos.</div></div><span class="tag">Ops</span></div>
+          <div class="item" data-id="ci"><button class="check" aria-label="Marcar"></button><div><div class="item-title">Añadir CI antes del siguiente ciclo</div><div class="item-copy">No hay workflows en GitHub. Cada cambio debe ejecutar tests, typecheck y builds antes de poder desplegarse.</div></div><span class="tag">CI</span></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="summary">
+      <article class="note">
+        <h3>Decisión recomendada para esta semana</h3>
+        <p><strong>Dejar todo en paralelo y no desactivar Coupon Affiliates, COA Manager ni evidencia.</strong> Usar el dashboard propio para observar y operar pruebas controladas. Al final de siete días, revisar diferencias por orden y decidir el corte con evidencia, no por intuición.</p>
+        <ul>
+          <li>No activar compras reales de ShipStation.</li>
+          <li>No convertir PostgreSQL en autoridad de stock.</li>
+          <li>No publicar el dashboard sin backup restaurado y pruebas de integración.</li>
+        </ul>
+      </article>
+      <article class="note">
+        <h3>Estado comprobado hoy</h3>
+        <div class="status-line"><span>Operations Bridge</span><strong>1.6.0 activo</strong></div>
+        <div class="status-line"><span>Migraciones</span><strong>14 / 14</strong></div>
+        <div class="status-line"><span>Builds</span><strong>Dashboard + tienda OK</strong></div>
+        <div class="status-line"><span>Label purchase</span><strong>Bloqueado</strong></div>
+      </article>
+    </section>
+
+    <footer>Phase One Labz · Auditoría local · No representa aprobación de producción</footer>
+  </main>
+  <script>
+    const storageKey = "phaseone-weekly-audit-v1";
+    const saved = new Set(JSON.parse(localStorage.getItem(storageKey) || "[]"));
+    const items = [...document.querySelectorAll(".item")];
+    const progress = document.querySelector("#progress");
+
+    function render() {
+      items.forEach((item) => {
+        const done = saved.has(item.dataset.id);
+        item.classList.toggle("completed", done);
+        item.querySelector(".check").classList.toggle("done", done);
+      });
+      progress.textContent = `${saved.size} de ${items.length} tareas marcadas`;
+      localStorage.setItem(storageKey, JSON.stringify([...saved]));
+    }
+
+    document.querySelectorAll(".check").forEach((button) => {
+      button.addEventListener("click", () => {
+        const id = button.closest(".item").dataset.id;
+        saved.has(id) ? saved.delete(id) : saved.add(id);
+        render();
+      });
+    });
+
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((candidate) => candidate.classList.remove("active"));
+        tab.classList.add("active");
+        const filter = tab.dataset.filter;
+        document.querySelectorAll(".section").forEach((section) => {
+          section.hidden = filter !== "all" && section.dataset.group !== filter;
+        });
+      });
+    });
+    render();
+  </script>
+</body>
+</html>
