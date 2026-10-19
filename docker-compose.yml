@@ -5,7 +5,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 8080
-      REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://phaseone-redis:6379
       REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-phaseone:live}
       PRESENCE_TTL_SECONDS: ${PRESENCE_TTL_SECONDS:-45}
       TRACKER_ORIGINS: ${TRACKER_ORIGINS:?Set the Phase One Labz public origins}
@@ -47,7 +47,7 @@ services:
       COOKIE_SECURE: "true"
       TRUST_PROXY: "true"
     depends_on:
-      redis:
+      phaseone-redis:
         condition: service_healthy
     expose:
       - "8080"
@@ -63,7 +63,7 @@ services:
       retries: 6
       start_period: 10s
 
-  redis:
+  phaseone-redis:
     image: redis:7-alpine
     restart: unless-stopped
     command:
