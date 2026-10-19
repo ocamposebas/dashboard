@@ -4,6 +4,7 @@ import {
 } from "./analyticsDate.js";
 import type { DatabaseOptions } from "./database.js";
 import type { ShipStationConfig } from "./shipStationGateway.js";
+import { parseScryptHash } from "./auth.js";
 
 const DEFAULT_TRACKER_ORIGINS = [
   "https://phaseonelabz.com",
@@ -21,6 +22,7 @@ export interface AppConfig {
   coaPublicOrigin: string;
   monitorUsername: string;
   monitorPasswordHash: string;
+  monitorPasswordResetHash?: string;
   sessionSecret: string;
   analyticsHmacSecret: string;
   sessionTtlMs: number;
@@ -261,6 +263,15 @@ export function loadConfig(): AppConfig {
     .map(normalizeOrigin);
   const sessionSecret = requireValue("SESSION_SECRET");
   const analyticsHmacSecret = requireValue("ANALYTICS_HMAC_SECRET");
+  const monitorPasswordResetHash = process.env.MONITOR_PASSWORD_RESET_HASH?.trim() || "";
+
+  if (monitorPasswordResetHash) {
+    try {
+      parseScryptHash(monitorPasswordResetHash);
+    } catch {
+      throw new Error("MONITOR_PASSWORD_RESET_HASH must be a valid scrypt password hash");
+    }
+  }
 
   if (sessionSecret.length < 32) {
     throw new Error("SESSION_SECRET must contain at least 32 characters");
@@ -292,6 +303,7 @@ export function loadConfig(): AppConfig {
     coaPublicOrigin,
     monitorUsername: requireValue("MONITOR_USERNAME"),
     monitorPasswordHash: requireValue("MONITOR_PASSWORD_HASH"),
+    ...(monitorPasswordResetHash ? { monitorPasswordResetHash } : {}),
     sessionSecret,
     analyticsHmacSecret,
     sessionTtlMs: parsePositiveInt("SESSION_TTL_HOURS", 12) * 60 * 60 * 1_000,

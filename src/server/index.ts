@@ -111,6 +111,15 @@ if (config.upstreamMonitor) {
   if (cachedSnapshot) hub.publishUpstreamSnapshot(cachedSnapshot);
 }
 await store.ensureBootstrapAdmin(config.monitorUsername, config.monitorPasswordHash);
+if (config.monitorPasswordResetHash) {
+  const passwordWasReset = await store.applyBootstrapPasswordResetOnce(
+    config.monitorUsername,
+    config.monitorPasswordResetHash,
+  );
+  console.log(passwordWasReset
+    ? "One-time administrator password recovery applied; previous sessions were invalidated"
+    : "One-time administrator password recovery was already applied");
+}
 if (config.wooCommerce) {
   void (async () => {
     if (await store.getIndependentSiteControls()) return;

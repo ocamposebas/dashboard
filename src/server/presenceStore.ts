@@ -1,5 +1,5 @@
 import { createClient, type RedisClientType } from "redis";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   emptyPresenceCounts,
   isPresenceSection,
@@ -442,6 +442,7 @@ export class PresenceStore {
   private readonly customerCacheKey: string;
   private readonly upstreamSnapshotKey: string;
   private readonly usersKey: string;
+  private readonly passwordResetMarkerKey: string;
   private readonly notificationsKey: string;
   private readonly notificationTimelineKey: string;
   private readonly notificationDedupePrefix: string;
@@ -499,6 +500,7 @@ export class PresenceStore {
     this.customerCacheKey = `${keyPrefix}:commerce:customer-directory-cache:v1`;
     this.upstreamSnapshotKey = `${keyPrefix}:analytics:upstream-snapshot:v1`;
     this.usersKey = `${keyPrefix}:access:users:v1`;
+    this.passwordResetMarkerKey = `${keyPrefix}:access:password-reset:v1`;
     this.notificationsKey = `${keyPrefix}:notifications:records:v1`;
     this.notificationTimelineKey = `${keyPrefix}:notifications:timeline:v1`;
     this.notificationDedupePrefix = `${keyPrefix}:notifications:dedupe:v1:`;
@@ -1053,6 +1055,38 @@ export class PresenceStore {
       message: "The primary administrator account is protected and role management is available.",
       actionView: "team",
     });
+  }
+
+  async applyBootstrapPasswordResetOnce(
+    username: string,
+    passwordHash: string,
+  ): Promise<boolean> {
+    const marker = createHash("sha256").update(passwordHash).digest("hex");
+    if (await this.client.get(this.passwordResetMarkerKey) === marker) return false;
+
+    const user = await this.getUserByUsername(username);
+    if (!user) {
+      throw new Error(`The administrator account ${username} does not exist`);
+    }
+
+    const updated: ManagedUserRecord = {
+      ...user,
+      passwordHash,
+      authVersion: user.authVersion + 1,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.client.multi()
+      .hSet(this.usersKey, user.id, JSON.stringify(updated))
+      .set(this.passwordResetMarkerKey, marker)
+      .exec();
+    await this.addNotification({
+      type: "security",
+      severity: "success",
+      title: "Administrator access recovered",
+      message: `${updated.displayName}'s temporary password was activated and previous sessions were closed.`,
+      actionView: "team",
+    });
+    return true;
   }
 
   async listUsers(): Promise<ManagedUserRecord[]> {
