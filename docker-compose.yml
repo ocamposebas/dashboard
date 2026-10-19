@@ -53,6 +53,9 @@ services:
       - "8080"
     volumes:
       - fulfillment_evidence_data:/app/data/evidence
+    networks:
+      - default
+      - coolify
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -90,3 +93,7 @@ volumes:
     name: phaseone_monitor_redis_data
   fulfillment_evidence_data:
     name: phaseone_fulfillment_evidence_data
+
+networks:
+  coolify:
+    external: true
