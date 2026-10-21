@@ -31,3 +31,26 @@ test("waitlist mapping accepts direct arrays and preserves anonymous email ident
   assert.equal(subscribers[0].name, "buyer");
   assert.equal(subscribers[0].productId, 7);
 });
+
+test("waitlist mapping repairs the notifier plugin fragmented REST response", () => {
+  const subscribers = mapWaitlistSubscribers([
+    { id: 401 },
+    { last_modified_date: "2026-10-21T15:00:00" },
+    { status: "cwg_subscribed" },
+    {
+      meta_data: {
+        cwginstock_product_id: ["528"],
+        cwginstock_variation_id: ["0"],
+        cwginstock_subscriber_email: ["waiting@example.com"],
+        cwginstock_subscriber_name: ["Waiting Customer"],
+      },
+    },
+  ]);
+
+  assert.equal(subscribers.length, 1);
+  assert.equal(subscribers[0]?.id, "401");
+  assert.equal(subscribers[0]?.productId, 528);
+  assert.equal(subscribers[0]?.email, "waiting@example.com");
+  assert.equal(subscribers[0]?.name, "Waiting Customer");
+  assert.equal(subscribers[0]?.status, "cwg_subscribed");
+});

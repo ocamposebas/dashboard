@@ -889,13 +889,13 @@ export class PresenceStore {
 
   async getProductCosts(
     productIds: number[],
-  ): Promise<Record<string, { unitCost: number; packagingCost: number; feeRate: number }>> {
+  ): Promise<Record<string, { unitCost: number; packagingCost: number; feeRate: number; affiliateRate: number }>> {
     if (!productIds.length) return {};
     const fields = [...new Set(productIds.map(String))];
     const values = await this.client.hmGet(this.productCostsKey, fields);
     const result: Record<
       string,
-      { unitCost: number; packagingCost: number; feeRate: number }
+      { unitCost: number; packagingCost: number; feeRate: number; affiliateRate: number }
     > = {};
 
     fields.forEach((field, index) => {
@@ -916,6 +916,7 @@ export class PresenceStore {
           unitCost: record.unitCost,
           packagingCost: record.packagingCost,
           feeRate: record.feeRate,
+          affiliateRate: typeof record.affiliateRate === "number" ? record.affiliateRate : 0,
         };
       } catch {
         // Ignore malformed legacy values so one record never breaks the catalog.
@@ -926,7 +927,7 @@ export class PresenceStore {
 
   async setProductCost(
     productId: number,
-    value: { unitCost: number; packagingCost: number; feeRate: number },
+    value: { unitCost: number; packagingCost: number; feeRate: number; affiliateRate: number },
   ): Promise<void> {
     await this.client.hSet(
       this.productCostsKey,

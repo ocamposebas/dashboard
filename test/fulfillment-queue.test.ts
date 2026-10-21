@@ -92,14 +92,23 @@ test("a freshly paid PRISM order with mappings, location and COA waits safely", 
   assert.equal(entry.lines[0]?.coa?.lot, "LOT-101");
 });
 
-test("manual Zelle/Venmo and eDebit orders remain visible but blocked", () => {
+test("approved Zelle/Venmo orders enter fulfillment while unapproved manual and eDebit orders remain blocked", () => {
   const zelle = build(order({
     paymentMethod: "Zelle",
     paymentMethodId: "phaseone_zelle",
     paymentOperations: { kind: "manual", approvalState: "approved" } as CommerceOrder["paymentOperations"],
   }));
-  assert.equal(zelle.queueStatus, "blocked");
-  assert.ok(zelle.reasons.some((reason) => reason.code === "payment_gateway_verification_required"));
+  assert.equal(zelle.queueStatus, "waiting");
+  assert.deepEqual(zelle.reasons, []);
+
+  const pendingZelle = build(order({
+    paymentMethod: "Zelle",
+    paymentMethodId: "phaseone_zelle",
+    paymentOperations: { kind: "manual", approvalState: "pending" } as CommerceOrder["paymentOperations"],
+  }));
+  assert.equal(pendingZelle.queueStatus, "blocked");
+  assert.ok(pendingZelle.reasons.some((reason) => reason.code === "payment_not_approved"));
+  assert.ok(pendingZelle.reasons.some((reason) => reason.code === "payment_gateway_verification_required"));
 
   const edebit = build(order({
     paymentMethod: "eDebit",

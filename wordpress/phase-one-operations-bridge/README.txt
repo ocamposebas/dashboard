@@ -46,3 +46,10 @@ existing Order COA workspace. A stable event fingerprint and atomic WordPress
 ledger make retries replay-safe while the dashboard still reconciles current
 assignments before requesting any missing quantity.
 
+Version 1.7.0 adds idempotent native shipment tracking save and void support.
+
+Version 1.7.1 fixes inventory waitlist visibility. The bridge now reads active
+subscriber records from both installed notifier families, preserves exact
+product and variation relationships, and exposes the existing customer list to
+the Operations Suite without sending notifications or changing stock.
+

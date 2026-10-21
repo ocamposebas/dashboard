@@ -103,9 +103,10 @@ function paymentReasons(order: CommerceOrder): FulfillmentQueueReason[] {
   const method = `${order.paymentMethodId} ${order.paymentMethod}`.toLocaleLowerCase("en");
   if (method.includes("prism")) return [];
   if (method.includes("zelle") || method.includes("venmo") || order.paymentOperations.kind === "manual") {
+    if (order.paymentOperations.approvalState === "approved") return [];
     return [{
       code: "payment_gateway_verification_required",
-      message: "Manual payment is approved, but the installed Zelle/Venmo workflow must be verified before picking.",
+      message: "Approve the Zelle/Venmo payment before picking this order.",
     }];
   }
   if (method.includes("edebit") || method.includes("yodlee") || order.paymentOperations.kind === "bank") {

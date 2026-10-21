@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Phase One Operations Bridge
  * Description: Secure bridge between Phase One Operations Suite, storefront controls, customer rewards and existing COA Manager records.
- * Version: 1.7.0
+ * Version: 1.7.1
  * Author: Phase One Labz
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -145,7 +145,7 @@ final class Phase_One_Operations_Bridge {
     public static function status() {
         return rest_ensure_response([
             'connected' => true,
-            'version' => '1.7.0',
+            'version' => '1.7.1',
             'capabilities' => array_values(array_filter([
                 'edit_coa',
                 'read_customer_rewards',
@@ -531,6 +531,10 @@ final class Phase_One_Operations_Bridge {
             if (!is_array($record)) {
                 continue;
             }
+            $status = sanitize_key((string) ($record['status'] ?? 'subscribed'));
+            if (in_array($status, ['sent', 'notified', 'unsubscribed', 'cancelled', 'canceled', 'deleted', 'inactive'], true)) {
+                continue;
+            }
             $email = strtolower((string) ($record['email'] ?? ''));
             $variation_id = absint($record['variation_id'] ?? 0);
             $source = sanitize_key((string) ($record['source'] ?? 'store'));
@@ -563,21 +567,49 @@ final class Phase_One_Operations_Bridge {
      * intentionally isolated so the official back-in-stock list can still load.
      */
     private static function legacy_waitlist_subscribers($product_id, $input) {
-        $input['product_id'] = $product_id;
-        $input['productId'] = $product_id;
-        $input['product'] = $product_id;
-        $input['per_page'] = min(200, max(1, absint($input['per_page'] ?? 100)));
-        $proxy = new WP_REST_Request('POST', '/wc-instocknotifier/v3/list_subscriber');
-        $proxy->set_header('content-type', 'application/json');
-        $proxy->set_body(wp_json_encode($input));
-        $result = rest_do_request($proxy);
-        if ($result->is_error()) {
+        unset($input);
+        if (!post_type_exists('cwginstocknotifier')) {
             return [];
         }
 
-        $records = self::subscriber_records_from_payload($result->get_data());
+        // The notifier stores each active request as a custom post. Querying the
+        // posts directly preserves parent/variation relationships and avoids the
+        // plugin REST list formatter, which separates one subscriber across
+        // multiple array entries in current releases.
+        $posts = get_posts([
+            'numberposts' => -1,
+            'post_type' => 'cwginstocknotifier',
+            'post_status' => 'cwg_subscribed',
+            'fields' => 'ids',
+            'no_found_rows' => true,
+            'meta_query' => [
+                'relation' => 'OR',
+                [
+                    'key' => 'cwginstock_product_id',
+                    'value' => $product_id,
+                    'compare' => '=',
+                    'type' => 'NUMERIC',
+                ],
+                [
+                    'key' => 'cwginstock_pid',
+                    'value' => $product_id,
+                    'compare' => '=',
+                    'type' => 'NUMERIC',
+                ],
+            ],
+        ]);
         $normalized = [];
-        foreach ($records as $record) {
+        foreach (is_array($posts) ? $posts : [] as $subscriber_id) {
+            $record = [
+                'id' => absint($subscriber_id),
+                'product_id' => absint(get_post_meta($subscriber_id, 'cwginstock_product_id', true)),
+                'variation_id' => absint(get_post_meta($subscriber_id, 'cwginstock_variation_id', true)),
+                'email' => get_post_meta($subscriber_id, 'cwginstock_subscriber_email', true),
+                'name' => get_post_meta($subscriber_id, 'cwginstock_subscriber_name', true),
+                'phone' => get_post_meta($subscriber_id, 'cwginstock_subscriber_phone', true),
+                'status' => get_post_status($subscriber_id) ?: 'cwg_subscribed',
+                'subscribed_at' => get_post_field('post_date_gmt', $subscriber_id),
+            ];
             $subscriber = self::normalize_waitlist_record($record, 'store_notifier', $product_id);
             if ($subscriber) {
                 $normalized[] = $subscriber;
@@ -597,9 +629,20 @@ final class Phase_One_Operations_Bridge {
         $base_tables = [
             $wpdb->prefix . 'woocommerce_bis_notifications',
             $wpdb->prefix . 'woocommerce_bis_activity',
+            $wpdb->prefix . 'wc_bis_notifications',
+            $wpdb->prefix . 'wc_bis_activity',
+            $wpdb->prefix . 'wc_bis_subscribed_emails',
         ];
-        $meta_table = $wpdb->prefix . 'woocommerce_bis_notificationsmeta';
-        $meta_by_id = self::back_in_stock_meta($meta_table);
+        $meta_tables = [
+            $wpdb->prefix . 'woocommerce_bis_notificationsmeta',
+            $wpdb->prefix . 'wc_bis_notificationsmeta',
+        ];
+        $meta_by_id = [];
+        foreach ($meta_tables as $meta_table) {
+            foreach (self::back_in_stock_meta($meta_table) as $reference => $values) {
+                $meta_by_id[$reference] = array_merge($meta_by_id[$reference] ?? [], $values);
+            }
+        }
         $subscribers = [];
 
         foreach ($base_tables as $table) {

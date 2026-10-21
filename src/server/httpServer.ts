@@ -34,6 +34,7 @@ import { CoaScanIdentifierRepository } from "./coaScanIdentifierRepository.js";
 import { resolveCoaQrScan } from "./coaScanResolver.js";
 import { CoaRepository, type CoaUpdateInput } from "./coaRepository.js";
 import { buildThermalLabelDocument } from "../shared/labelPrint.js";
+import { calculateProductProfitability } from "../shared/productProfitability.js";
 import { fulfillmentAccessForRole } from "./fulfillmentAccess.js";
 import {
   FulfillmentRepository,
@@ -708,13 +709,13 @@ export function createMonitorServer(
       const costs = await store.getProductCosts(productIds);
       const productsWithProfit = products.map((product) => {
         const cost = costs[String(product.id)] || null;
-        const fee = cost ? product.price * (cost.feeRate / 100) : 0;
-        const estimatedProfit = cost ? product.price - cost.unitCost - cost.packagingCost - fee : null;
+        const profitability = cost ? calculateProductProfitability(product.price, cost) : null;
+        const estimatedProfit = profitability?.estimatedProfit ?? null;
         return {
           ...product,
           cost,
           estimatedProfit,
-          margin: estimatedProfit === null || product.price <= 0 ? null : (estimatedProfit / product.price) * 100,
+          margin: profitability?.margin ?? null,
         };
       });
       const ordersWithProfit = await Promise.all(orders.map(orderWithProfitability));
@@ -4032,6 +4033,7 @@ export function createMonitorServer(
             unitCost: Math.max(0, Number(input.unitCost) || 0),
             packagingCost: Math.max(0, Number(input.packagingCost) || 0),
             feeRate: Math.min(100, Math.max(0, Number(input.feeRate) || 0)),
+            affiliateRate: Math.min(100, Math.max(0, Number(input.affiliateRate) || 0)),
           });
           productDetailCache.delete(saved.id);
           await invalidateCommerceCache();
@@ -4040,6 +4042,37 @@ export function createMonitorServer(
         } catch (error: unknown) {
           console.error("Product save failed", error);
           json(response, 502, { error: "The product could not be saved" });
+        }
+        return;
+      }
+
+      if (url.pathname === "/api/commerce/product" && request.method === "DELETE") {
+        if (!isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Origin not allowed" });
+          return;
+        }
+        if (!canAdminister) {
+          json(response, 403, { error: "Administrator access is required to remove products" });
+          return;
+        }
+        if (!commerce || !config.wooCommerce || config.wooCommerce.accessMode !== "read_write") {
+          json(response, 403, { error: "A read/write store connection is required" });
+          return;
+        }
+        const productId = Number(url.searchParams.get("productId"));
+        if (!Number.isSafeInteger(productId) || productId <= 0) {
+          json(response, 400, { error: "A valid product id is required" });
+          return;
+        }
+        try {
+          const removed = await commerce.trashProduct(productId);
+          productDetailCache.delete(productId);
+          await invalidateCommerceCache();
+          void refreshCommerce().catch((error: unknown) => console.error("Commerce refresh after product removal failed", error));
+          json(response, 200, { removed: true, recoverable: true, product: removed });
+        } catch (error: unknown) {
+          console.error("Product removal failed", error);
+          json(response, 502, { error: "The product could not be moved to Trash" });
         }
         return;
       }
@@ -4227,9 +4260,31 @@ export function createMonitorServer(
           console.error("Restock program fetch failed", error);
           return [];
         });
+        const waitlistProductIds = [...new Set([
+          ...restocks.map((item) => item.productId),
+          ...products.flatMap((item) => {
+            if (!item || typeof item !== "object") return [];
+            const product = item as Record<string, unknown>;
+            return product.stockStatus === "outofstock" ? [Number(product.id)] : [];
+          }),
+        ].filter((value) => Number.isSafeInteger(value) && value > 0))].slice(0, 50);
+        const waitlistEntries = await Promise.all(waitlistProductIds.map(async (productId) => {
+          try {
+            return [String(productId), (await commerce.listWaitlistSubscribers(productId)).length] as const;
+          } catch (error: unknown) {
+            bridgeAvailable = false;
+            console.error(`Waitlist count fetch failed for product ${productId}`, error);
+            return [String(productId), null] as const;
+          }
+        }));
+        const waitlistCounts = Object.fromEntries(waitlistEntries);
         json(response, 200, {
-          restocks,
+          restocks: restocks.map((item) => ({
+            ...item,
+            waitlistCount: waitlistCounts[String(item.productId)] ?? item.waitlistCount,
+          })),
           products,
+          waitlistCounts,
           bridgeAvailable,
           syncedAt: new Date().toISOString(),
         });
@@ -4338,7 +4393,9 @@ export function createMonitorServer(
             });
             return;
           }
-          const updated = await commerce.updateOrderStatus(orderId, targetStatus);
+          const updated = action === "confirm"
+            ? await commerce.approveOrderPayment(orderId)
+            : await commerce.updateOrderStatus(orderId, targetStatus);
           const profitableOrder = await orderWithProfitability(updated);
           updateCachedOrder(profitableOrder);
           markCustomersStale();
@@ -4435,22 +4492,24 @@ export function createMonitorServer(
         const unitCost = Number(input.unitCost);
         const packagingCost = Number(input.packagingCost);
         const feeRate = Number(input.feeRate);
+        const affiliateRate = input.affiliateRate === undefined ? 0 : Number(input.affiliateRate);
         const validMoney = (value: number) =>
           Number.isFinite(value) && value >= 0 && value <= 1_000_000_000;
         if (
           !Number.isSafeInteger(productId) || productId <= 0 ||
           !validMoney(unitCost) || !validMoney(packagingCost) ||
-          !Number.isFinite(feeRate) || feeRate < 0 || feeRate > 100
+          !Number.isFinite(feeRate) || feeRate < 0 || feeRate > 100 ||
+          !Number.isFinite(affiliateRate) || affiliateRate < 0 || affiliateRate > 100
         ) {
           json(response, 400, { error: "The profitability values are invalid" });
           return;
         }
-        await store.setProductCost(productId, { unitCost, packagingCost, feeRate });
+        await store.setProductCost(productId, { unitCost, packagingCost, feeRate, affiliateRate });
         await invalidateCommerceCache();
         json(response, 200, {
           saved: true,
           productId,
-          cost: { unitCost, packagingCost, feeRate },
+          cost: { unitCost, packagingCost, feeRate, affiliateRate },
         });
         return;
       }

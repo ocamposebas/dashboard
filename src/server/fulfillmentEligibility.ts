@@ -34,7 +34,12 @@ export function evaluateFulfillmentEligibility(order: CommerceOrder): Fulfillmen
     });
   }
 
-  if (!order.paidAt) {
+  const approvedManualPayment =
+    order.paymentOperations.kind === "manual" &&
+    order.paymentOperations.approvalState === "approved" &&
+    order.status === "processing";
+
+  if (!order.paidAt && !approvedManualPayment) {
     reasons.push({
       code: "payment_date_missing",
       message: "The source order does not contain a paid timestamp.",

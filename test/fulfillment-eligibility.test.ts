@@ -133,6 +133,27 @@ test("manual payments require the existing payment workflow to approve them", ()
   assert.ok(result.reasons.some((reason) => reason.code === "payment_not_approved"));
 });
 
+test("an approved manual payment can enter fulfillment even when WooCommerce omitted date_paid", () => {
+  const order = eligibleOrder({
+    paidAt: null,
+    paymentOperations: {
+      ...eligibleOrder().paymentOperations,
+      kind: "manual",
+      approvalState: "approved",
+    },
+  });
+  assert.deepEqual(evaluateFulfillmentEligibility(order), {
+    eligible: true,
+    reasons: [],
+  });
+});
+
+test("a non-manual payment without date_paid still fails closed", () => {
+  const result = evaluateFulfillmentEligibility(eligibleOrder({ paidAt: null }));
+  assert.equal(result.eligible, false);
+  assert.ok(result.reasons.some((reason) => reason.code === "payment_date_missing"));
+});
+
 test("completed, unpaid, refunded, empty and missing-SKU orders fail closed", () => {
   const order = eligibleOrder({
     status: "completed",

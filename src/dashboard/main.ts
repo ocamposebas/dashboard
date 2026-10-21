@@ -5,6 +5,7 @@ import "./fulfillment.css";
 import "./clean-ui.css";
 import { initAffiliateAdmin, loadAffiliateAdmin } from "./affiliates-admin";
 import type { AffiliateCommissionSummary } from "../shared/affiliates";
+import { calculateProductProfitability } from "../shared/productProfitability";
 import type { DecodeHintType as ZXingDecodeHintType } from "@zxing/library";
 import type {
   BarcodeLabel,
@@ -88,6 +89,7 @@ interface CommerceCost {
   unitCost: number;
   packagingCost: number;
   feeRate: number;
+  affiliateRate: number;
 }
 
 interface CommerceMedia {
@@ -147,6 +149,7 @@ interface ProductDraftRecord {
   price: number;
   packaging: number;
   feeRate: number;
+  affiliateRate?: number;
 }
 
 interface CommerceOrder {
@@ -300,6 +303,7 @@ interface InventoryOperationsPayload {
     waitlistCount: number | null;
   }>;
   products: CommerceProduct[];
+  waitlistCounts: Record<string, number | null>;
   bridgeAvailable: boolean;
   syncedAt: string;
 }
@@ -2888,7 +2892,13 @@ function localDraftProducts(): CommerceProduct[] {
       const unitCost = Number(draft.cost) || 0;
       const packagingCost = Number(draft.packaging) || 0;
       const feeRate = Number(draft.feeRate) || 0;
-      const estimatedProfit = price - unitCost - packagingCost - price * (feeRate / 100);
+      const affiliateRate = Number(draft.affiliateRate) || 0;
+      const profitability = calculateProductProfitability(price, {
+        unitCost,
+        packagingCost,
+        feeRate,
+        affiliateRate,
+      });
       return [{
         id: Number(draft.id) || -(index + 1),
         name: draft.name.trim(),
@@ -2910,9 +2920,9 @@ function localDraftProducts(): CommerceProduct[] {
         images: [],
         variationIds: [],
         attributes: [],
-        cost: { unitCost, packagingCost, feeRate },
-        estimatedProfit,
-        margin: price > 0 ? (estimatedProfit / price) * 100 : null,
+        cost: { unitCost, packagingCost, feeRate, affiliateRate },
+        estimatedProfit: profitability.estimatedProfit,
+        margin: profitability.margin,
         localDraft: true as const,
       }];
     });
@@ -3080,12 +3090,13 @@ function renderInventoryOperations(): void {
   });
   const out = sourceProducts.filter((product) => inventoryState(product).tone === "critical");
   const low = sourceProducts.filter((product) => inventoryState(product).tone === "warning");
-  const bundles = sourceProducts.filter((product) => product.type.includes("bundle") || product.type.includes("group"));
+  const waitlistCounts = inventoryOperations?.waitlistCounts || {};
+  const waitingCustomers = Object.values(waitlistCounts).reduce<number>((sum, value) => sum + (value ?? 0), 0);
   requiredElement<HTMLElement>("#inventory-kpis").innerHTML = `
     <article><span>Out of stock</span><strong>${formatNumber(out.length)}</strong><small>Immediate sales risk</small></article>
     <article><span>Low stock</span><strong>${formatNumber(low.length)}</strong><small>Below 5 available units</small></article>
     <article><span>Active restocks</span><strong>${formatNumber(restocks.length)}</strong><small>Incoming inventory records</small></article>
-    <article><span>Bundles monitored</span><strong>${formatNumber(bundles.length)}</strong><small>Dependent inventory</small></article>`;
+    <article><span>Waiting customers</span><strong>${formatNumber(waitingCustomers)}</strong><small>Live stock-alert audience</small></article>`;
   for (const button of document.querySelectorAll<HTMLButtonElement>("[data-inventory-view]")) {
     const active = button.dataset.inventoryView === inventoryView;
     button.classList.toggle("is-active", active);
@@ -3103,7 +3114,7 @@ function renderInventoryOperations(): void {
         const state = inventoryState(product);
         const restock = restockByProduct.get(product.id);
         const available = product.stockQuantity === null ? (product.stockStatus === "instock" ? "Available" : "0") : formatNumber(product.stockQuantity);
-        const waitlist = restock?.waitlistCount;
+        const waitlist = waitlistCounts[String(product.id)] ?? restock?.waitlistCount;
         const visual = product.thumbnailUrl || product.imageUrl
           ? `<img src="${escapeHtml(product.thumbnailUrl || product.imageUrl || "")}" alt="" loading="lazy" decoding="async" />`
           : `<b>${escapeHtml(product.name.charAt(0).toUpperCase() || "P")}</b>`;
@@ -3116,7 +3127,8 @@ function renderInventoryOperations(): void {
       const product = sourceProducts.find((candidate) => candidate.id === item.productId);
       const productName = product?.name || item.productName;
       const productReference = product?.sku || `Product ${item.productId}`;
-      return `<article><div><span class="restock-index">${String(item.id).slice(-2)}</span><div><strong>${escapeHtml(productName)}</strong><small>${escapeHtml(productReference)} · ${item.expectedAt ? `Expected ${escapeHtml(formatCommerceDate(item.expectedAt))}` : "Arrival date not recorded"}</small></div></div><span><b class="restock-state">${escapeHtml(item.status)}</b><small>${item.waitlistCount === null ? "Audience available on open" : `${formatNumber(item.waitlistCount)} waiting`}</small></span></article>`;
+      const waitlistCount = waitlistCounts[String(item.productId)] ?? item.waitlistCount;
+      return `<article><div><span class="restock-index">${String(item.id).slice(-2)}</span><div><strong>${escapeHtml(productName)}</strong><small>${escapeHtml(productReference)} · ${item.expectedAt ? `Expected ${escapeHtml(formatCommerceDate(item.expectedAt))}` : "Arrival date not recorded"}</small></div></div><span><b class="restock-state">${escapeHtml(item.status)}</b><small>${waitlistCount === null || waitlistCount === undefined ? "Audience unavailable" : `${formatNumber(waitlistCount)} waiting`}</small></span></article>`;
     }).join("")
     : `<div class="operations-empty"><strong>${inventoryOperations?.bridgeAvailable === false ? "Restock sync unavailable" : "No active restocks"}</strong><span>${inventoryOperations?.bridgeAvailable === false ? "The Operations Bridge update is required to read the live restock program." : "Incoming inventory will appear here."}</span></div>`;
   const waitlistProductMap = new Map<number, {
@@ -3134,7 +3146,11 @@ function renderInventoryOperations(): void {
   }
   const waitlistProducts = [...waitlistProductMap.values()];
   requiredElement<HTMLElement>("#waitlist-overview-list").innerHTML = waitlistProducts.length
-    ? waitlistProducts.map(({ product, restock }) => `<button class="waitlist-product-row" type="button" data-view-waitlist="${product?.id || restock?.productId}"><span>${product?.thumbnailUrl || product?.imageUrl ? `<img src="${escapeHtml(product.thumbnailUrl || product.imageUrl || "")}" alt="" loading="lazy" />` : escapeHtml((product?.name || restock?.productName || "P").charAt(0))}</span><div><strong>${escapeHtml(product?.name || restock?.productName || "Product")}</strong><small>${escapeHtml(product?.sku || (restock?.productId ? `Product ${restock.productId}` : "Subscriber list"))}</small></div><b>${restock?.waitlistCount === null || restock?.waitlistCount === undefined ? "View people" : `${formatNumber(restock.waitlistCount)} waiting`}</b><i>→</i></button>`).join("")
+    ? waitlistProducts.map(({ product, restock }) => {
+      const productId = product?.id || restock?.productId || 0;
+      const waitlistCount = waitlistCounts[String(productId)] ?? restock?.waitlistCount;
+      return `<button class="waitlist-product-row" type="button" data-view-waitlist="${productId}"><span>${product?.thumbnailUrl || product?.imageUrl ? `<img src="${escapeHtml(product.thumbnailUrl || product.imageUrl || "")}" alt="" loading="lazy" />` : escapeHtml((product?.name || restock?.productName || "P").charAt(0))}</span><div><strong>${escapeHtml(product?.name || restock?.productName || "Product")}</strong><small>${escapeHtml(product?.sku || (restock?.productId ? `Product ${restock.productId}` : "Subscriber list"))}</small></div><b>${waitlistCount === null || waitlistCount === undefined ? "Unavailable" : `${formatNumber(waitlistCount)} waiting`}</b><i>→</i></button>`;
+    }).join("")
     : '<div class="operations-empty"><strong>No active waitlists</strong><span>Products with back-in-stock demand will appear here.</span></div>';
   renderSkuStockLedger();
 }
@@ -3152,6 +3168,7 @@ async function loadInventoryOperations(force = false): Promise<void> {
     inventoryOperations = {
       restocks: [],
       products: commerceData?.products || [],
+      waitlistCounts: {},
       bridgeAvailable: false,
       syncedAt: new Date().toISOString(),
     };
@@ -6991,6 +7008,8 @@ const productCostInput = requiredElement<HTMLInputElement>("#product-cost-input"
 const productPriceInput = requiredElement<HTMLInputElement>("#product-price-input");
 const productPackagingInput = requiredElement<HTMLInputElement>("#product-packaging-input");
 const productFeeInput = requiredElement<HTMLInputElement>("#product-fee-input");
+const productAffiliateRateInput = requiredElement<HTMLInputElement>("#product-affiliate-rate-input");
+const trashProductButton = requiredElement<HTMLButtonElement>("#trash-product");
 const productImagesInput = requiredElement<HTMLInputElement>("#product-images-input");
 const productImagePreview = requiredElement<HTMLElement>("#product-image-preview");
 const productImageCount = requiredElement<HTMLElement>("#product-image-count");
@@ -7951,13 +7970,17 @@ function calculateProductProfit(): void {
   const cost = Number(productCostInput.value) || 0;
   const packaging = Number(productPackagingInput.value) || 0;
   const feeRate = Number(productFeeInput.value) || 0;
-  const fee = price * (feeRate / 100);
-  const profit = price - cost - packaging - fee;
-  const margin = price > 0 ? (profit / price) * 100 : 0;
-  requiredElement<HTMLElement>("#calculator-profit").textContent = formatCurrency(profit);
-  requiredElement<HTMLElement>("#calculator-margin").textContent = `${margin.toFixed(1)}%`;
+  const affiliateRate = Number(productAffiliateRateInput.value) || 0;
+  const profitability = calculateProductProfitability(price, {
+    unitCost: cost,
+    packagingCost: packaging,
+    feeRate,
+    affiliateRate,
+  });
+  requiredElement<HTMLElement>("#calculator-profit").textContent = formatCurrency(profitability.estimatedProfit);
+  requiredElement<HTMLElement>("#calculator-margin").textContent = `${(profitability.margin || 0).toFixed(1)}%`;
   requiredElement<HTMLElement>("#calculator-equation").textContent =
-    `${formatCurrency(price)} − ${formatCurrency(cost)} − ${formatCurrency(packaging)} − ${formatCurrency(fee)} fee`;
+    `${formatCurrency(price)} − ${formatCurrency(cost)} cost − ${formatCurrency(packaging)} operations − ${formatCurrency(profitability.transactionFee)} fee − ${formatCurrency(profitability.affiliateReserve)} affiliate`;
 }
 
 function populateProductWorkspace(product: CommerceProduct, variations: CommerceVariation[] = []): void {
@@ -7974,6 +7997,7 @@ function populateProductWorkspace(product: CommerceProduct, variations: Commerce
   productPriceInput.value = String(product?.price ?? 0);
   productPackagingInput.value = String(product?.cost?.packagingCost ?? 0);
   productFeeInput.value = String(product?.cost?.feeRate ?? 3.5);
+  productAffiliateRateInput.value = String(product?.cost?.affiliateRate ?? 0);
   selectedProductMedia = [...(product.images || [])];
   productImageFiles = [];
   renderProductImages();
@@ -8036,6 +8060,11 @@ function openProductDrawer(product?: CommerceProduct): void {
   productPriceInput.value = String(product?.regularPrice || product?.price || 0);
   productPackagingInput.value = String(product?.cost?.packagingCost ?? 0);
   productFeeInput.value = String(product?.cost?.feeRate ?? 3.5);
+  productAffiliateRateInput.value = String(product?.cost?.affiliateRate ?? 0);
+  trashProductButton.hidden = !product || Boolean(product.localDraft);
+  trashProductButton.classList.remove("is-confirming");
+  trashProductButton.textContent = "Move to Trash";
+  delete trashProductButton.dataset.confirming;
   for (const input of [productNameInput, productSkuInput, productStockInput, productCategoryInput, productPriceInput]) input.readOnly = false;
   productStatusInput.disabled = false;
   const submitButton = productForm.querySelector<HTMLButtonElement>('button[type="submit"]');
@@ -8793,7 +8822,7 @@ requiredElement<HTMLButtonElement>("#waitlist-notify-button").addEventListener("
 requiredElement<HTMLButtonElement>("#close-product-drawer").addEventListener("click", closeProductDrawer);
 requiredElement<HTMLButtonElement>("#cancel-product").addEventListener("click", closeProductDrawer);
 drawerBackdrop.addEventListener("click", closeProductDrawer);
-for (const input of [productCostInput, productPriceInput, productPackagingInput, productFeeInput]) {
+for (const input of [productCostInput, productPriceInput, productPackagingInput, productFeeInput, productAffiliateRateInput]) {
   input.addEventListener("input", calculateProductProfit);
 }
 productImagesInput.addEventListener("change", () => {
@@ -8880,6 +8909,7 @@ productForm.addEventListener("submit", (event) => {
       unitCost: Number(productCostInput.value) || 0,
       packagingCost: Number(productPackagingInput.value) || 0,
       feeRate: Number(productFeeInput.value) || 0,
+      affiliateRate: Number(productAffiliateRateInput.value) || 0,
       images: selectedProductMedia.map((item) => item.id > 0 ? { id: item.id } : { src: item.src }),
       attributeName: productVariantsToggle.checked ? variantAttributeInput.value.trim() : "",
       variants: productVariantsToggle.checked ? collectVariants() : [],
@@ -8894,6 +8924,38 @@ productForm.addEventListener("submit", (event) => {
   void operation.then(() => closeProductDrawer())
     .catch((error) => showToast("Unable to save", error instanceof Error ? error.message : "Check the connection and try again.", false))
     .finally(() => { if (submitButton) submitButton.disabled = false; });
+});
+
+trashProductButton.addEventListener("click", () => {
+  if (!editingProductId || trashProductButton.disabled) return;
+  if (trashProductButton.dataset.confirming !== "true") {
+    trashProductButton.dataset.confirming = "true";
+    trashProductButton.classList.add("is-confirming");
+    trashProductButton.textContent = "Confirm move to Trash";
+    showToast("Removal is recoverable", "Press the red button once more to move this product to the WordPress Trash.");
+    return;
+  }
+  const productId = editingProductId;
+  trashProductButton.disabled = true;
+  void fetch(`/api/commerce/product?productId=${encodeURIComponent(String(productId))}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+  }).then(async (response) => {
+    const payload: unknown = await response.json();
+    if (!response.ok) throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The product could not be removed");
+    closeProductDrawer();
+    await loadCommerce();
+    inventoryOperations = undefined;
+    showToast("Product moved to Trash", "It is no longer in the catalog and can still be restored from WordPress Trash.");
+  }).catch((error) => {
+    trashProductButton.dataset.confirming = "true";
+    trashProductButton.classList.add("is-confirming");
+    trashProductButton.textContent = "Try moving to Trash again";
+    showToast("Unable to remove product", error instanceof Error ? error.message : "Try again.", false);
+  }).finally(() => {
+    trashProductButton.disabled = false;
+  });
 });
 
 requiredElement<HTMLElement>("#products-table-body").addEventListener("click", (event) => {

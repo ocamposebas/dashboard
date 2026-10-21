@@ -94,6 +94,107 @@ test("loads a complete bounded sales period on demand", async () => {
   assert.equal(requests[0]?.searchParams.get("per_page"), "100");
 });
 
+test("moves products to recoverable Trash instead of permanently deleting them", async () => {
+  let request: { method: string; force: string | null } | undefined;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    request = { method: init?.method || "GET", force: url.searchParams.get("force") };
+    return new Response(JSON.stringify({
+      id: 22,
+      name: "Legacy accessory",
+      sku: "ACC-22",
+      type: "simple",
+      status: "trash",
+      catalog_visibility: "hidden",
+      price: "10.00",
+      regular_price: "10.00",
+      stock_quantity: 0,
+      stock_status: "outofstock",
+      categories: [],
+      images: [],
+      variations: [],
+      attributes: [],
+    }), { status: 200 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example",
+    consumerKey: "ck_test",
+    consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  const removed = await gateway.trashProduct(22);
+  assert.equal(removed.status, "trash");
+  assert.deepEqual(request, { method: "DELETE", force: "false" });
+});
+
+test("approving a manual payment records both the paid time and approval metadata", async () => {
+  let body: Record<string, unknown> | undefined;
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      id: 3154,
+      number: "3154",
+      status: "processing",
+      currency: "USD",
+      total: "382.36",
+      payment_method: "zelle",
+      payment_method_title: "Zelle",
+      date_paid: body.date_paid,
+      billing: { first_name: "Sebastian", last_name: "Garcia" },
+      line_items: [{ id: 1, product_id: 22, name: "KPV", sku: "KPV", quantity: 1, total: "50.00" }],
+      meta_data: body.meta_data,
+    }), { status: 200 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example",
+    consumerKey: "ck_test",
+    consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  const approved = await gateway.approveOrderPayment(3154);
+  assert.equal(approved.status, "processing");
+  assert.equal(approved.paymentOperations.approvalState, "approved");
+  assert.ok(approved.paidAt);
+  assert.equal(body?.status, "processing");
+  assert.ok(Array.isArray(body?.meta_data));
+});
+
+test("waitlist lookup falls back to the installed notifier when the older bridge returns no people", async () => {
+  const paths: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    paths.push(url.pathname);
+    if (url.pathname.endsWith("/phaseone-ops/v1/waitlist")) {
+      return new Response(JSON.stringify({ subscribers: [] }), { status: 200 });
+    }
+    return new Response(JSON.stringify([
+      { id: 801 },
+      { last_modified_date: "2026-10-21T15:00:00" },
+      { status: "cwg_subscribed" },
+      {
+        meta_data: {
+          cwginstock_product_id: ["528"],
+          cwginstock_variation_id: ["0"],
+          cwginstock_subscriber_email: ["stock@example.com"],
+        },
+      },
+    ]), { status: 200 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example",
+    consumerKey: "ck_test",
+    consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  const subscribers = await gateway.listWaitlistSubscribers(528);
+  assert.equal(subscribers.length, 1);
+  assert.equal(subscribers[0]?.email, "stock@example.com");
+  assert.deepEqual(paths, [
+    "/wp-json/phaseone-ops/v1/waitlist",
+    "/wp-json/wc-instocknotifier/v3/list_subscriber",
+  ]);
+});
+
 test("affiliate incremental scans keep the newest WooCommerce orders inside the window", async () => {
   const requests: URL[] = [];
   const fetchImpl: typeof fetch = async (input) => {

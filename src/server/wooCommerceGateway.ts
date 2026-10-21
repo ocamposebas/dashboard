@@ -850,6 +850,11 @@ function mapOrder(value: unknown): CommerceOrder {
   const methodTitle = text(order.payment_method_title) || "Not specified";
   const kind = paymentKind(methodId, methodTitle);
   const reference = metadataText(order, "_phaseone_payment_reference", "_phaseone_manual_payment_reference", "payment_reference") || text(order.transaction_id);
+  const manualPaymentStatus = metadataText(
+    order,
+    "_phaseone_manual_payment_status",
+    "_phaseone_payment_verification",
+  ).toLocaleLowerCase("en");
   const agreementStatus = metadataText(order, "_phaseone_contract_archive_status").toLocaleLowerCase("en");
   const acceptedAt = isoDate(metadataValue(order, "_phaseone_contract_accepted_at"));
   const fileName = metadataText(order, "_phaseone_contract_pdf_filename");
@@ -860,7 +865,7 @@ function mapOrder(value: unknown): CommerceOrder {
     shippingTax: number(order.shipping_tax), discountTotal: number(order.discount_total), discountTax: number(order.discount_tax),
     paymentMethod: methodTitle, paymentMethodId: methodId, transactionId: text(order.transaction_id),
     customer: name || "Guest customer", location: location || "Location unavailable", customerNote: text(order.customer_note),
-    createdAt: isoDate(order.date_created_gmt), modifiedAt: isoDate(order.date_modified_gmt), paidAt: isoDate(order.date_paid_gmt),
+    createdAt: isoDate(order.date_created_gmt), modifiedAt: isoDate(order.date_modified_gmt), paidAt: isoDate(order.date_paid_gmt || order.date_paid),
     completedAt: isoDate(order.date_completed_gmt), billing, shipping, lineItems, feeLines, couponLines, refunds,
     refundedTotal, refundableTotal: Math.max(0, total - refundedTotal),
     pointsEarned: Math.max(0, number(metadataValue(order, "_lab_points_earned"))),
@@ -876,9 +881,11 @@ function mapOrder(value: unknown): CommerceOrder {
       processingFeeRate: Math.max(0, metadataNumber(order, "_phaseone_processing_fee_rate")),
       approvalState: kind !== "manual"
         ? "not_required"
-        : ["processing", "completed"].includes(text(order.status))
+        : ["approved", "verified", "paid", "complete", "completed"].includes(manualPaymentStatus) ||
+            ["processing", "completed"].includes(text(order.status))
           ? "approved"
-          : ["cancelled", "failed", "refunded"].includes(text(order.status))
+          : ["rejected", "declined", "failed"].includes(manualPaymentStatus) ||
+              ["cancelled", "failed", "refunded"].includes(text(order.status))
             ? "rejected"
             : "pending",
     },
@@ -1027,8 +1034,34 @@ export function mapWaitlistSubscribers(value: unknown): CommerceWaitlistSubscrib
   const payload = record(value);
   const direct = listFromPayload(value, "subscribers", "subscriber", "items", "data", "results");
   const nested = direct.length ? direct : listFromPayload(payload.data, "subscribers", "subscriber", "items", "results", "records");
-  return nested.flatMap((item, index) => {
-    const subscriber = record(item);
+  const fragments = nested.every((item) => Object.keys(record(item)).length <= 1) &&
+    nested.some((item) => Object.prototype.hasOwnProperty.call(record(item), "meta_data"));
+  const records = fragments
+    ? nested.reduce<Record<string, unknown>[]>((result, item) => {
+        const part = record(item);
+        if (Object.prototype.hasOwnProperty.call(part, "id") || result.length === 0) result.push({});
+        Object.assign(result[result.length - 1]!, part);
+        return result;
+      }, [])
+    : nested.map(record);
+  return records.flatMap((rawSubscriber, index) => {
+    const metadata = record(rawSubscriber.meta_data);
+    const metaValue = (...keys: string[]): unknown => {
+      for (const key of keys) {
+        const value = metadata[key];
+        if (Array.isArray(value) && value.length) return value[0];
+        if (value !== undefined && value !== null && value !== "") return value;
+      }
+      return undefined;
+    };
+    const subscriber: Record<string, unknown> = {
+      ...rawSubscriber,
+      product_id: rawSubscriber.product_id || metaValue("cwginstock_product_id", "cwginstock_pid"),
+      variation_id: rawSubscriber.variation_id || metaValue("cwginstock_variation_id"),
+      email: rawSubscriber.email || metaValue("cwginstock_subscriber_email"),
+      subscriber_name: rawSubscriber.subscriber_name || metaValue("cwginstock_subscriber_name"),
+      subscriber_phone: rawSubscriber.subscriber_phone || metaValue("cwginstock_subscriber_phone"),
+    };
     const email = text(subscriber.email || subscriber.subscriber_email || subscriber.user_email).trim();
     const idValue = subscriber.id || subscriber.subscriber_id || subscriber.ID;
     const rawId = (typeof idValue === "number" ? String(idValue) : text(idValue)).trim() || `${email}-${index + 1}`;
@@ -1681,7 +1714,9 @@ export class WooCommerceGateway {
       this.listPublicThumbnails().catch(() => new Map<number, string>()),
     ]);
     if (!Array.isArray(payload)) throw new Error("Commerce products response was not an array");
-    return payload.flatMap((value) => { try { return [mapProduct(value, thumbnails)]; } catch { return []; } });
+    return payload
+      .flatMap((value) => { try { return [mapProduct(value, thumbnails)]; } catch { return []; } })
+      .filter((product) => product.status !== "trash");
   }
 
   async getProduct(productId: number): Promise<CommerceProduct> {
@@ -1719,6 +1754,13 @@ export class WooCommerceGateway {
       });
     }
     return saved;
+  }
+
+  async trashProduct(productId: number): Promise<CommerceProduct> {
+    return mapProduct(await this.request(`products/${productId}`, {
+      method: "DELETE",
+      parameters: { force: "false" },
+    }));
   }
 
   async listOrders(limit = 100): Promise<CommerceOrder[]> {
@@ -2146,12 +2188,19 @@ export class WooCommerceGateway {
   }
 
   async listWaitlistSubscribers(productId: number): Promise<CommerceWaitlistSubscriber[]> {
-    const payload = await this.requestRoute("/wp-json/phaseone-ops/v1/waitlist", {
+    const fromBridge = await this.requestRoute("/wp-json/phaseone-ops/v1/waitlist", {
       method: "POST",
       body: { product_id: productId, productId, product: productId, per_page: 100 },
       headers: this.operationsHeaders(),
-    }, false);
-    return mapWaitlistSubscribers(payload).filter((subscriber) => !subscriber.productId || subscriber.productId === productId);
+    }, false).then(mapWaitlistSubscribers).catch(() => []);
+    const subscribers = fromBridge.length ? fromBridge : mapWaitlistSubscribers(await this.requestRoute(
+      "/wp-json/wc-instocknotifier/v3/list_subscriber",
+      {
+        method: "POST",
+        body: { p_ids: [productId], status: ["cwg_subscribed"] },
+      },
+    ));
+    return subscribers.filter((subscriber) => !subscriber.productId || subscriber.productId === productId);
   }
 
   async notifyWaitlist(productId: number): Promise<unknown> {
@@ -2180,6 +2229,20 @@ export class WooCommerceGateway {
   }
 
   async getOrder(orderId: number): Promise<CommerceOrder> { return mapOrder(await this.request(`orders/${orderId}`)); }
+  async approveOrderPayment(orderId: number): Promise<CommerceOrder> {
+    const approvedAt = new Date().toISOString();
+    return mapOrder(await this.request(`orders/${orderId}`, {
+      method: "PUT",
+      body: {
+        status: "processing",
+        date_paid: approvedAt,
+        meta_data: [
+          { key: "_phaseone_manual_payment_status", value: "approved" },
+          { key: "_phaseone_manual_payment_approved_at", value: approvedAt },
+        ],
+      },
+    }));
+  }
   async updateOrderStatus(orderId: number, status: "processing" | "completed" | "cancelled"): Promise<CommerceOrder> {
     return mapOrder(await this.request(`orders/${orderId}`, { method: "PUT", body: { status } }));
   }
