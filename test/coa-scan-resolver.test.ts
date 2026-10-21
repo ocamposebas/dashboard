@@ -108,6 +108,30 @@ test("resolves a printed ILS portal QR through its registered COA alias", () => 
   assert.equal(result?.barcodeValue, rawValue);
 });
 
+test("resolves the original laboratory URL after the COA document is copied into the custom library", () => {
+  const rawValue = "https://coas.freedomdiagnosticstesting.com/Phas2610050320.pdf";
+  const result = resolveCoaQrScan({
+    rawValue,
+    coas: [coa({
+      id: "phas2610050320",
+      matchedProductId: 539,
+      matchedVariationId: 2847,
+      coaNumber: "Phas2610050320",
+      productName: "KPV - 30MG",
+      lot: "P1KPV30",
+      batch: "P1KPV30",
+      fileUrl: "https://phaseonelabz.is/api/public/v1/coas/phas2610050320/document",
+      externalFileUrl: rawValue,
+      verifyUrl: "",
+      currentShippingLot: false,
+    })],
+  });
+
+  assert.equal(result?.coaId, "phas2610050320");
+  assert.equal(result?.variationId, 2847);
+  assert.equal(result?.lot, "P1KPV30");
+});
+
 test("unknown, ambiguous and historical URLs fail closed", () => {
   assert.equal(resolveCoaQrScan({ rawValue: "https://unknown.example/coa/1", coas: [coa()] }), null);
   const repeated = coa({ verifyUrl: "https://lab.example/duplicate" });

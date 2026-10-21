@@ -44,6 +44,7 @@ export function coaScanProvider(rawValue: string): string {
 function currentCoaUrls(coa: CommerceCoa): string[] {
   return [
     coa.fileUrl,
+    coa.externalFileUrl,
     coa.verifyUrl,
     coa.currentCoa?.fileUrl,
     coa.currentCoa?.verifyUrl,
@@ -70,6 +71,10 @@ function recordForCoa(rawValue: string, coa: CommerceCoa, provider: string): Bar
     createdBy: `external-coa-qr:${provider}`,
     createdAt: new Date().toISOString(),
   };
+}
+
+export function coaIsAvailableForVialScan(coa: CommerceCoa): boolean {
+  return ["available", "publish", "published", "active"].includes(normalized(coa.status));
 }
 
 /**

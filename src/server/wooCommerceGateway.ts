@@ -372,6 +372,7 @@ export interface CommerceCoa {
   tested: string;
   currentShippingLot: boolean;
   fileUrl: string;
+  externalFileUrl?: string;
   verifyUrl: string;
   fileAttachmentId: number;
   aliases: string[];

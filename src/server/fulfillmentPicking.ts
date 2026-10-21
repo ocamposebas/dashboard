@@ -7,6 +7,7 @@ import type {
   JsonValue,
 } from "../shared/fulfillment.js";
 import { evaluateFulfillmentEligibility } from "./fulfillmentEligibility.js";
+import { coaIsAvailableForVialScan } from "./coaScanResolver.js";
 import type { CommerceCoa, CommerceOrder } from "./wooCommerceGateway.js";
 
 interface SnapshotLine {
@@ -219,10 +220,7 @@ function rejected(
 }
 
 function coaIsApproved(coa: CommerceCoa, line: SnapshotLine, barcode: BarcodeRegistryRecord): boolean {
-  const status = normalized(coa.status);
-  const explicitlyUnavailable = ["archiv", "review", "draft", "trash", "private", "inactive"]
-    .some((value) => status.includes(value));
-  if (!coa.currentShippingLot || explicitlyUnavailable) return false;
+  if (!coaIsAvailableForVialScan(coa)) return false;
   if (coa.id !== barcode.coaId || normalized(coa.lot || coa.batch) !== normalized(barcode.lot)) {
     return false;
   }
@@ -350,7 +348,7 @@ export function decideFulfillmentScan(input: {
     return rejected(
       progress,
       "invalid_coa",
-      "The COA or current shipping lot is no longer approved for this item.",
+      "The scanned COA is not Available or no longer matches this product, variation and lot.",
       {
         barcode: input.barcode,
         line,

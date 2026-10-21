@@ -5,6 +5,7 @@ import type {
   FulfillmentSession,
 } from "../shared/fulfillment.js";
 import { evaluateFulfillmentEligibility } from "./fulfillmentEligibility.js";
+import { coaIsAvailableForVialScan } from "./coaScanResolver.js";
 import type { CommerceCoa, CommerceOrder } from "./wooCommerceGateway.js";
 
 interface SecuredLine {
@@ -116,10 +117,7 @@ function coaIsApproved(
   line: SecuredLine,
   allocation: ProgressAllocation,
 ): boolean {
-  const status = normalized(coa.status);
-  const unavailable = ["archiv", "review", "draft", "trash", "private", "inactive"]
-    .some((value) => status.includes(value));
-  if (!coa.currentShippingLot || unavailable) return false;
+  if (!coaIsAvailableForVialScan(coa)) return false;
   if (coa.id !== allocation.coaId || normalized(coa.lot || coa.batch) !== normalized(allocation.lot)) return false;
   if (coa.matchedProductId > 0 && coa.matchedProductId !== line.productId) return false;
   if (coa.matchedVariationId > 0 && coa.matchedVariationId !== line.variationId) return false;
@@ -210,7 +208,7 @@ export function buildPackingSnapshot(input: {
       const coa = input.coas.find((candidate) => candidate.id === allocation.coaId);
       if (!coa || !coaIsApproved(coa, line, allocation)) {
         throw new FulfillmentPackingError(
-          `The scanned lot for ${live.name} is no longer an approved current-shipping COA`,
+          `The scanned lot for ${live.name} is no longer an Available COA for this exact product and variation`,
           "invalid_state",
         );
       }

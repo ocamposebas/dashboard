@@ -216,8 +216,20 @@ test("product-only and variation-only labels cannot stand in for a physical batc
   }
 });
 
-test("an unapproved, archived or non-current COA is rejected", () => {
-  for (const invalid of [coa({ currentShippingLot: false }), coa({ status: "Archived" })]) {
+test("an Available scanned COA is accepted even when it is not the designated current shipping lot", () => {
+  const decision = decideFulfillmentScan({
+    session: session(),
+    barcode: barcode(),
+    order: order(),
+    coas: [coa({ currentShippingLot: false })],
+  });
+  assert.equal(decision.result, "accepted");
+  assert.equal(decision.quantityDelta, 1);
+});
+
+test("archived, review and inactive COAs are rejected", () => {
+  for (const status of ["Archived", "Review", "Inactive"]) {
+    const invalid = coa({ currentShippingLot: false, status });
     const decision = decideFulfillmentScan({ session: session(), barcode: barcode(), order: order(), coas: [invalid] });
     assert.equal(decision.reasonCode, "invalid_coa");
     assert.equal(decision.quantityDelta, 0);

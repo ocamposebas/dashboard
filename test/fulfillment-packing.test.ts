@@ -262,10 +262,16 @@ test("packing rejects changed order lines and manipulated progress", () => {
   }), FulfillmentPackingError);
 });
 
-test("packing requires the exact approved current-shipping COA and lot", () => {
+test("packing accepts an exact Available scanned COA without the current-shipping preference", () => {
+  const snapshot = pack({ coas: [coa({ currentShippingLot: false })] });
+  assert.equal(snapshot.lines[0]?.coaId, "coa-201");
+  assert.equal(snapshot.lines[0]?.lot, "LOT-201");
+});
+
+test("packing requires the exact Available COA and lot", () => {
   for (const invalid of [
-    coa({ currentShippingLot: false }),
     coa({ status: "Archived" }),
+    coa({ status: "Review" }),
     coa({ lot: "LOT-OTHER", batch: "LOT-OTHER" }),
   ]) {
     assert.throws(

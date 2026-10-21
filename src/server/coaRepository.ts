@@ -207,6 +207,7 @@ function rowToCoa(row: CoaRow, publicOrigin: string): CustomCoa {
     tested: row.tested,
     currentShippingLot: row.current_shipping_lot,
     fileUrl: documentUrl,
+    externalFileUrl: row.external_file_url,
     verifyUrl: row.verify_url,
     fileAttachmentId: Math.max(0, Number(row.file_attachment_id || 0)),
     aliases: uniqueTextList(row.aliases),

@@ -607,7 +607,7 @@ Status: **complete locally — physical-vial pilot still required**
 - [x] Read the QR already printed on each vial with the phone camera or any 2D USB/Bluetooth HID scanner.
 - [x] Accept full Freedom Diagnostics PDF URLs, ILS verification URLs and Kovera hash-token URLs without opening the laboratory website during picking.
 - [x] Preserve URL fragments such as Kovera's `#/verify?t=...` token and normalize the confirmed ILS HTTP-to-HTTPS redirect.
-- [x] Resolve every QR locally against the governed current COA, product, variation and lot; unknown or ambiguous URLs fail closed.
+- [x] Resolve every QR locally against an Available governed COA, exact product, variation and lot; the current-shipping flag is only a catalog preference and unknown or ambiguous URLs fail closed.
 - [x] Register the two confirmed ILS vial QR aliases in PostgreSQL migration `012_coa_scan_identifiers` while continuing to use WordPress COA/catalog data as the source of truth.
 - [x] Reuse the existing transactional, idempotent scan ledger and order-level locking. No stock, payment, order status or shipping behavior changed.
 - [x] Add a ten-second in-process COA cache for consecutive vial scans; this avoids repeating the full COA download while retaining frequent status refreshes.
@@ -627,7 +627,7 @@ Status: **complete locally — physical-vial pilot still required**
 - [ ] Scan one real vial from Freedom Diagnostics, ILS and Kovera on the warehouse phone over HTTPS.
 - [ ] Confirm the warehouse's physical scanner supports 2D QR symbols (a 1D-only laser scanner cannot read vial QR codes).
 - [ ] Run a deliberate wrong-product scan against a test order and verify the audible/visual rejection at the packing table.
-- [ ] Register any additional printed vendor URL that is not already the current COA `fileUrl` or `verifyUrl` before using that lot.
+- [ ] Register any additional printed vendor URL that is not already the COA `fileUrl`, original external source URL or `verifyUrl` before using that lot.
 
 ## Vial QR → customer order COA assignment
 
@@ -635,7 +635,7 @@ Status: **complete locally — WordPress bridge 1.6.0 deployment and isolated st
 
 ### Implemented locally
 
-- [x] Treat the approved vial QR as the physical source of truth for the lot selected during picking; a valid alternate current-shipping lot for the same product/variation is accepted even when it differs from the queue's initial suggestion.
+- [x] Treat the approved vial QR as the physical source of truth for the lot selected during picking; any Available exact product/variation COA is accepted even when it is not marked as the catalog's current-shipping preference.
 - [x] Persist the exact `order item + COA + lot + quantity` allocation inside durable picking progress and the existing accepted scan ledger.
 - [x] Support multiple lots on one order line without flattening them into a fabricated single batch.
 - [x] Preserve the final per-lot distribution in the immutable Packing snapshot.
