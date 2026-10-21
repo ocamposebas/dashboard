@@ -275,7 +275,11 @@ export function decideFulfillmentScan(input: {
     );
   }
   if (!input.barcode) {
-    return rejected(progress, "unknown_barcode", "This barcode is not registered in Phase One Labz.");
+    return rejected(
+      progress,
+      "unknown_barcode",
+      "The QR was read, but its lab certificate is not linked to an Available COA in Phase One Labz. Publish or link the COA, then scan again.",
+    );
   }
   if (!input.barcode.active) {
     return rejected(

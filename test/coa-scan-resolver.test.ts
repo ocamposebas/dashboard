@@ -5,6 +5,7 @@ import type { CommerceCoa } from "../src/server/wooCommerceGateway.js";
 import {
   canonicalizeCoaScanValue,
   coaScanProvider,
+  coaScanIdentity,
   resolveCoaQrScan,
 } from "../src/server/coaScanResolver.js";
 
@@ -64,6 +65,18 @@ test("canonicalizes known lab redirects without losing QR identity", () => {
     "https://koveralabs.com/#/verify?t=50b6901a3b56c532f05f2c1a",
   );
   assert.equal(coaScanProvider("https://coas.freedomdiagnosticstesting.com/test.pdf"), "freedom-diagnostics");
+  assert.equal(
+    canonicalizeCoaScanValue("https://www.coas.freedomdiagnosticstesting.com/Phas2610050320.PDF?utm_source=qr"),
+    "https://coas.freedomdiagnosticstesting.com/Phas2610050320.PDF",
+  );
+  assert.equal(
+    coaScanIdentity("https://www.koveralabs.com/#/verify?code=50b6901a3b56c532f05f2c1a"),
+    "kovera:50b6901a3b56c532f05f2c1a",
+  );
+  assert.notEqual(
+    coaScanIdentity("https://unknown.example/Phas2610050320.pdf"),
+    coaScanIdentity("https://coas.freedomdiagnosticstesting.com/Phas2610050320.pdf"),
+  );
 });
 
 test("resolves a current COA URL directly from governed catalog data", () => {
@@ -130,6 +143,56 @@ test("resolves the original laboratory URL after the COA document is copied into
   assert.equal(result?.coaId, "phas2610050320");
   assert.equal(result?.variationId, 2847);
   assert.equal(result?.lot, "P1KPV30");
+});
+
+test("accepts safe Freedom URL variants and ignores a stale alias when the governed URL is unique", () => {
+  const stored = "https://coas.freedomdiagnosticstesting.com/Phas2610050320.pdf";
+  const scanned = "http://www.coas.freedomdiagnosticstesting.com/Phas2610050320.PDF?source=vial";
+  const result = resolveCoaQrScan({
+    rawValue: scanned,
+    coas: [coa({
+      id: "phas2610050320",
+      coaNumber: "Phas2610050320",
+      matchedProductId: 539,
+      matchedVariationId: 2847,
+      lot: "P1KPV30",
+      batch: "P1KPV30",
+      externalFileUrl: stored,
+      verifyUrl: stored,
+    })],
+    registeredIdentifier: {
+      canonicalValue: canonicalizeCoaScanValue(scanned)!,
+      rawValue: scanned,
+      coaReference: "a-stale-reference",
+      provider: "freedom-diagnostics",
+      active: true,
+      createdBy: "test",
+      createdAt: "2026-10-17T00:00:00.000Z",
+      updatedAt: "2026-10-17T00:00:00.000Z",
+    },
+  });
+  assert.equal(result?.coaId, "phas2610050320");
+  assert.equal(result?.variationId, 2847);
+});
+
+test("fails closed when a registered alias conflicts with a different governed COA", () => {
+  const rawValue = "https://coas.freedomdiagnosticstesting.com/Phas2610050320.pdf";
+  const direct = coa({ id: "direct", coaNumber: "Phas2610050320", verifyUrl: rawValue });
+  const registered = coa({ id: "registered", coaNumber: "OTHER-COA", verifyUrl: "https://lab.example/other" });
+  assert.equal(resolveCoaQrScan({
+    rawValue,
+    coas: [direct, registered],
+    registeredIdentifier: {
+      canonicalValue: rawValue,
+      rawValue,
+      coaReference: registered.coaNumber,
+      provider: "freedom-diagnostics",
+      active: true,
+      createdBy: "test",
+      createdAt: "2026-10-17T00:00:00.000Z",
+      updatedAt: "2026-10-17T00:00:00.000Z",
+    },
+  }), null);
 });
 
 test("unknown, ambiguous and historical URLs fail closed", () => {

@@ -31,6 +31,7 @@ import {
   BarcodeRegistryRepository,
 } from "./barcodeRegistryRepository.js";
 import { CoaScanIdentifierRepository } from "./coaScanIdentifierRepository.js";
+import { resolveExternalCoaQr } from "./coaExternalQrResolver.js";
 import { resolveCoaQrScan } from "./coaScanResolver.js";
 import { CoaRepository, type CoaUpdateInput } from "./coaRepository.js";
 import { buildThermalLabelDocument } from "../shared/labelPrint.js";
@@ -2350,7 +2351,7 @@ export function createMonitorServer(
             json(response, 404, { error: "The picking session does not exist" });
             return;
           }
-          const [order, coas, legacyBarcode, registeredIdentifier] = await Promise.all([
+          const [order, coas, legacyBarcode, storedIdentifier] = await Promise.all([
             commerce.getOrder(session.orderId),
             fulfillmentCoas(),
             barcodeRegistry.resolve(rawBarcode).catch((error: unknown) => {
@@ -2359,6 +2360,18 @@ export function createMonitorServer(
             }),
             coaScanIdentifiers.resolve(rawBarcode),
           ]);
+          let registeredIdentifier = storedIdentifier;
+          if (!registeredIdentifier) {
+            const externalResolution = await resolveExternalCoaQr({ rawValue: rawBarcode, coas });
+            if (externalResolution) {
+              registeredIdentifier = await coaScanIdentifiers.register({
+                rawValue: rawBarcode,
+                coaReference: externalResolution.coaReference,
+                provider: externalResolution.provider,
+                createdBy: currentUser.id,
+              });
+            }
+          }
           const registeredBarcode = resolveCoaQrScan({
             rawValue: rawBarcode,
             coas,

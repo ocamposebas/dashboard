@@ -41,6 +41,34 @@ function identifierFromRow(row: CoaScanIdentifierRow): CoaScanIdentifier {
 export class CoaScanIdentifierRepository {
   constructor(private readonly database: Database) {}
 
+  async register(input: {
+    rawValue: string;
+    coaReference: string;
+    provider: string;
+    createdBy: string;
+  }): Promise<CoaScanIdentifier | null> {
+    const canonicalValue = canonicalizeCoaScanValue(input.rawValue);
+    const coaReference = input.coaReference.trim();
+    const provider = input.provider.trim();
+    const createdBy = input.createdBy.trim();
+    if (!canonicalValue || !coaReference || !provider || !createdBy) return null;
+    const result = await this.database.query<CoaScanIdentifierRow>(
+      `INSERT INTO coa_scan_identifiers (
+         canonical_value, raw_value, coa_reference, provider, is_active, created_by
+       ) VALUES ($1,$2,$3,$4,true,$5)
+       ON CONFLICT (canonical_value) DO UPDATE SET
+         raw_value=EXCLUDED.raw_value,
+         provider=EXCLUDED.provider,
+         is_active=true,
+         updated_at=now()
+       WHERE lower(coa_scan_identifiers.coa_reference) = lower(EXCLUDED.coa_reference)
+       RETURNING canonical_value, raw_value, coa_reference, provider, is_active,
+                 created_by, created_at, updated_at`,
+      [canonicalValue, input.rawValue.trim(), coaReference, provider, createdBy],
+    );
+    return result.rows[0] ? identifierFromRow(result.rows[0]) : null;
+  }
+
   async resolve(rawValue: string): Promise<CoaScanIdentifier | null> {
     const canonicalValue = canonicalizeCoaScanValue(rawValue);
     if (!canonicalValue) return null;
