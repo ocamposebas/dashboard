@@ -621,7 +621,8 @@ interface ExtensionsPayload {
   coaWriteEnabled?: boolean;
   siteControlsWriteEnabled?: boolean;
   siteControlsSource?: string;
-  wordpressSyncAvailable?: boolean;
+  siteControlsStorage?: string;
+  storefrontDelivery?: string;
   coaBridgeVersion?: string | null;
   cachedAt?: string;
 }
@@ -5950,7 +5951,7 @@ function renderSiteControls(): void {
   save.disabled = !writable || !controls;
   save.textContent = writable ? "Save storefront controls" : "Read-only access";
   requiredElement<HTMLElement>("#site-controls-write-status").textContent = writable
-    ? "Independent control plane · available even when WordPress is offline"
+    ? "Direct storefront control · WordPress is not used by this module"
     : "Your role can review controls but cannot publish changes.";
   if (!controls) {
     requiredElement<HTMLElement>("#site-controls-version").textContent = "Control service unavailable";
@@ -6039,7 +6040,8 @@ async function loadIndependentSiteControls(): Promise<void> {
       siteControls: payload.siteControls as unknown as SiteControls,
       siteControlsWriteEnabled: payload.canManage === true,
       siteControlsSource: "operations-control-plane",
-      wordpressSyncAvailable: payload.wordpressSyncAvailable === true,
+      siteControlsStorage: typeof payload.storage === "string" ? payload.storage : "independent",
+      storefrontDelivery: typeof payload.storefrontDelivery === "string" ? payload.storefrontDelivery : "research-peptides-direct",
     };
     renderSiteControls();
   } catch {
@@ -6059,6 +6061,7 @@ async function saveSiteControls(): Promise<void> {
   save.textContent = "Securing change…";
   const selectedProduct = siteControlProduct();
   const payload = {
+    expectedRevision: Number(extensionsData?.siteControls?.revision || 0),
     promo: {
       enabled: requiredElement<HTMLInputElement>("#promo-enabled").checked,
       type: selectedPromoType,
@@ -6108,13 +6111,14 @@ async function saveSiteControls(): Promise<void> {
     } else {
       await loadExtensions();
     }
-    const syncLabel = isRecord(result) && result.wordpressSync === "synced"
-      ? " The compatibility mirror also synchronized."
-      : isRecord(result) && result.wordpressSync === "pending"
-        ? " The WordPress mirror is continuing in the background."
-        : " WordPress is unavailable, but the independent storefront control is live.";
-    showToast("Storefront controls saved", `The independent control plane is now authoritative.${syncLabel}`);
+    showToast(
+      "Storefront controls published",
+      "research-peptides is now reading this revision directly. WordPress was not contacted.",
+    );
   } catch (error) {
+    if (error instanceof Error && error.message.includes("another session")) {
+      await loadIndependentSiteControls();
+    }
     showToast("Unable to publish", error instanceof Error ? error.message : "Check the protected connection and try again.", false);
   } finally {
     save.textContent = workspaceSession?.permissions.operate ? "Save storefront controls" : "Read-only access";

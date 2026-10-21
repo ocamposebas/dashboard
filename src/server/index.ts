@@ -4,14 +4,17 @@ import { PresenceStore } from "./presenceStore.js";
 import { SocketHub } from "./socketHub.js";
 import { WooOrderSync } from "./wooOrderSync.js";
 import { UpstreamMonitorClient } from "./upstreamMonitorClient.js";
-import { importCommerceSiteControls } from "./siteControls.js";
-import { WooCommerceGateway } from "./wooCommerceGateway.js";
+import {
+  defaultIndependentSiteControls,
+  type IndependentSiteControls,
+} from "./siteControls.js";
 import { Database } from "./database.js";
 import { migrateDatabase } from "./databaseMigrations.js";
 import { BarcodeLabelService } from "./barcodeLabels.js";
 import { AffiliateRepository } from "./affiliateRepository.js";
 import { AffiliateShadowSync } from "./affiliateShadowSync.js";
 import { ShipStationGateway } from "./shipStationGateway.js";
+import { SiteControlRepository } from "./siteControlRepository.js";
 
 const config = loadConfig();
 const fulfillmentDatabase = config.fulfillmentDatabase
@@ -27,6 +30,9 @@ const barcodeLabels = config.barcodeSigningSecret
   ? new BarcodeLabelService(config.barcodeSigningSecret)
   : undefined;
 const shipStationGateway = new ShipStationGateway(config.shipStation);
+const siteControlRepository = fulfillmentDatabase
+  ? new SiteControlRepository(fulfillmentDatabase)
+  : undefined;
 const store = new PresenceStore(
   config.redisUrl,
   config.redisKeyPrefix,
@@ -36,6 +42,7 @@ const store = new PresenceStore(
 const server = createMonitorServer(config, store, {
   ...(fulfillmentDatabase ? { fulfillmentDatabase } : {}),
   ...(barcodeLabels ? { barcodeLabels } : {}),
+  ...(siteControlRepository ? { siteControlRepository } : {}),
   shipStationGateway,
 });
 const hub = new SocketHub(config, store);
@@ -120,18 +127,25 @@ if (config.monitorPasswordResetHash) {
     ? "One-time administrator password recovery applied; previous sessions were invalidated"
     : "One-time administrator password recovery was already applied");
 }
-if (config.wooCommerce) {
-  void (async () => {
-    if (await store.getIndependentSiteControls()) return;
-    const imported = await new WooCommerceGateway(config.wooCommerce!).getSiteControls();
-    await store.seedIndependentSiteControls(importCommerceSiteControls(imported));
-    console.log("Independent Site Controls imported from the existing storefront configuration");
-  })().catch((error: unknown) => {
-    console.warn(
-      "Independent Site Controls started with safe defaults; the WordPress bootstrap was unavailable",
-      error,
+if (siteControlRepository) {
+  const durableControls = await siteControlRepository.get();
+  if (!durableControls) {
+    const previousIndependentControls = await store.getIndependentSiteControls();
+    const seeded = await siteControlRepository.seed(
+      previousIndependentControls
+        ? {
+            ...previousIndependentControls as IndependentSiteControls,
+            version: "3.0",
+            source: "operations-control-plane",
+            updatedBy: `${previousIndependentControls.updatedBy} · PostgreSQL migration`,
+          }
+        : defaultIndependentSiteControls(),
     );
-  });
+    await store.cacheIndependentSiteControls(seeded);
+    console.log(previousIndependentControls
+      ? "Independent Site Controls migrated from Redis to PostgreSQL"
+      : "Independent Site Controls initialized in PostgreSQL");
+  }
 }
 hub.attach(server);
 upstreamMonitor?.start();

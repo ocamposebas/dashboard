@@ -1,9 +1,3 @@
-import type {
-  CommerceSiteControls,
-  CommerceSiteControlsWrite,
-} from "./wooCommerceGateway.js";
-import type { IndependentSiteControlsRecord } from "./presenceStore.js";
-
 export interface SiteControlProductSnapshot {
   id: number;
   name: string;
@@ -12,7 +6,66 @@ export interface SiteControlProductSnapshot {
   originalPrice: number;
 }
 
-export type IndependentSiteControls = IndependentSiteControlsRecord & CommerceSiteControls;
+export interface IndependentSiteControls {
+  version: string;
+  source: "operations-control-plane";
+  revision: number;
+  updatedAt: string;
+  updatedBy: string;
+  promo: {
+    enabled: boolean;
+    type: string;
+    durationMinutes: number;
+    eyebrow: string;
+    title: string;
+    info: string;
+    endsAt: string | null;
+    ctaLabel: string;
+    ctaUrl: string;
+    product: {
+      id: number;
+      name: string;
+      sku: string;
+      image: string;
+      originalPrice: number;
+      promoPrice: number;
+      salePriceActive: boolean;
+    } | null;
+    simpleGifts?: unknown;
+  };
+  maintenance: {
+    enabled: boolean;
+    title: string;
+    message: string;
+    supportEmail: string;
+    updatedAt: string | null;
+  };
+}
+
+export interface IndependentSiteControlsWrite {
+  promo: {
+    enabled: boolean;
+    type: "general" | "product" | "simple_gifts";
+    productId: number;
+    salePrice: number;
+    sitewideLabel: string;
+    eyebrow: string;
+    title: string;
+    info: string;
+    ctaLabel: string;
+    ctaUrl: string;
+    durationDays: number;
+    durationHours: number;
+    durationMinutes: number;
+    restart: boolean;
+  };
+  maintenance: {
+    enabled: boolean;
+    title: string;
+    message: string;
+    supportEmail: string;
+  };
+}
 
 const DEFAULT_PROMO = {
   enabled: false,
@@ -37,7 +90,7 @@ const DEFAULT_MAINTENANCE = {
 
 export function defaultIndependentSiteControls(): IndependentSiteControls {
   return {
-    version: "2.0",
+    version: "3.0",
     source: "operations-control-plane",
     revision: 0,
     updatedAt: new Date(0).toISOString(),
@@ -47,21 +100,8 @@ export function defaultIndependentSiteControls(): IndependentSiteControls {
   };
 }
 
-export function importCommerceSiteControls(
-  value: CommerceSiteControls,
-  updatedBy = "wordpress-bootstrap",
-): Omit<IndependentSiteControls, "revision" | "updatedAt"> {
-  return {
-    version: value.version || "2.0",
-    source: "operations-control-plane",
-    updatedBy,
-    promo: { ...value.promo },
-    maintenance: { ...value.maintenance },
-  };
-}
-
 export function buildIndependentSiteControls(
-  write: CommerceSiteControlsWrite,
+  write: IndependentSiteControlsWrite,
   current: IndependentSiteControls,
   product: SiteControlProductSnapshot | null,
   updatedBy: string,
@@ -98,7 +138,7 @@ export function buildIndependentSiteControls(
     : null;
 
   return {
-    version: "2.0",
+    version: "3.0",
     source: "operations-control-plane",
     updatedBy,
     promo: {

@@ -5,10 +5,14 @@ import {
   buildIndependentSiteControls,
   defaultIndependentSiteControls,
   publicSiteControls,
+  type IndependentSiteControlsWrite,
 } from "../src/server/siteControls.js";
-import type { CommerceSiteControlsWrite } from "../src/server/wooCommerceGateway.js";
+import {
+  nextSiteControlRevision,
+  SiteControlRepositoryError,
+} from "../src/server/siteControlRepository.js";
 
-function writeInput(): CommerceSiteControlsWrite {
+function writeInput(): IndependentSiteControlsWrite {
   return {
     promo: {
       enabled: false,
@@ -40,6 +44,7 @@ test("independent Site Controls default to an open storefront", () => {
   assert.equal(value.source, "operations-control-plane");
   assert.equal(value.maintenance.enabled, false);
   assert.equal(value.revision, 0);
+  assert.equal(value.version, "3.0");
 });
 
 test("a control-plane write does not require a WordPress response", () => {
@@ -64,4 +69,12 @@ test("public Site Controls excludes the internal editor identity", () => {
   });
   assert.equal(payload.source, "operations-control-plane");
   assert.equal("updatedBy" in payload, false);
+});
+
+test("independent Site Controls reject stale editor revisions", () => {
+  assert.equal(nextSiteControlRevision(7, 7), 8);
+  assert.throws(
+    () => nextSiteControlRevision(8, 7),
+    (error: unknown) => error instanceof SiteControlRepositoryError && error.code === "revision_conflict",
+  );
 });

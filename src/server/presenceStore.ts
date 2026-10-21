@@ -1033,6 +1033,10 @@ export class PresenceStore {
     return value;
   }
 
+  async cacheIndependentSiteControls(value: IndependentSiteControlsRecord): Promise<void> {
+    await this.client.set(this.independentSiteControlsKey, JSON.stringify(value));
+  }
+
   async seedIndependentSiteControls(
     input: Omit<IndependentSiteControlsRecord, "revision" | "updatedAt">,
   ): Promise<IndependentSiteControlsRecord> {

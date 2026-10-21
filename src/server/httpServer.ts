@@ -110,11 +110,15 @@ import { buildOrderReportPdf } from "./orderReportPdf.js";
 import {
   buildIndependentSiteControls,
   defaultIndependentSiteControls,
-  importCommerceSiteControls,
   publicSiteControls,
   type IndependentSiteControls,
+  type IndependentSiteControlsWrite,
   type SiteControlProductSnapshot,
 } from "./siteControls.js";
+import {
+  SiteControlRepository,
+  SiteControlRepositoryError,
+} from "./siteControlRepository.js";
 import {
   WooCommerceGateway,
   type CommerceCoa,
@@ -124,7 +128,6 @@ import {
   type CommerceRewardAdjustmentWrite,
   type CommerceRewardControl,
   type CommerceRewardSettings,
-  type CommerceSiteControlsWrite,
   type CommerceVariation,
 } from "./wooCommerceGateway.js";
 
@@ -379,6 +382,7 @@ export interface MonitorServerDependencies {
   fulfillmentDatabase?: Database;
   barcodeLabels?: BarcodeLabelService;
   shipStationGateway?: ShipStationGateway;
+  siteControlRepository?: SiteControlRepository;
 }
 
 export function createMonitorServer(
@@ -441,6 +445,11 @@ export function createMonitorServer(
       )
     : undefined;
   const barcodeLabels = dependencies.barcodeLabels;
+  const siteControlRepository = dependencies.siteControlRepository || (
+    dependencies.fulfillmentDatabase
+      ? new SiteControlRepository(dependencies.fulfillmentDatabase)
+      : undefined
+  );
 
   const publicUser = (user: ManagedUserRecord) => ({
     id: user.id, username: user.username, displayName: user.displayName, email: user.email,
@@ -514,6 +523,11 @@ export function createMonitorServer(
   const salesReportCache = new Map<string, { orders: CommerceOrder[]; updatedAt: number }>();
 
   async function independentSiteControls(): Promise<IndependentSiteControls> {
+    const durable = await siteControlRepository?.get().catch((error: unknown) => {
+      console.error("PostgreSQL Site Controls read failed; using the independent cache", error);
+      return null;
+    });
+    if (durable) return durable;
     const stored = await store.getIndependentSiteControls();
     return stored
       ? stored as IndependentSiteControls
@@ -619,35 +633,6 @@ export function createMonitorServer(
         },
       };
     }
-  }
-
-  async function seedIndependentSiteControls(
-    imported: Awaited<ReturnType<WooCommerceGateway["getSiteControls"]>>,
-  ): Promise<IndependentSiteControls> {
-    const seeded = await store.seedIndependentSiteControls(
-      importCommerceSiteControls(imported),
-    );
-    return seeded as IndependentSiteControls;
-  }
-
-  async function mirrorSiteControlsToWordPress(
-    input: CommerceSiteControlsWrite,
-  ): Promise<"synced" | "pending" | "unavailable"> {
-    if (!commerce || commerceConfig?.accessMode !== "read_write") return "unavailable";
-    const sync = commerce.saveSiteControls(input)
-      .then(() => "synced" as const)
-      .catch((error: unknown) => {
-        console.error("WordPress Site Controls mirror failed", error);
-        return "unavailable" as const;
-      });
-    let timeout: NodeJS.Timeout | undefined;
-    const delayed = new Promise<"pending">((resolvePending) => {
-      timeout = setTimeout(() => resolvePending("pending"), 1_500);
-      timeout.unref();
-    });
-    const result = await Promise.race([sync, delayed]);
-    if (timeout) clearTimeout(timeout);
-    return result;
   }
 
   async function restoreCommerceCache(): Promise<void> {
@@ -889,35 +874,26 @@ export function createMonitorServer(
   async function refreshExtensions(): Promise<Record<string, unknown>> {
     if (extensionsRefresh) return extensionsRefresh;
     extensionsRefresh = (async () => {
-      const storedControls = await store.getIndependentSiteControls();
-      const [coasResult, wordpressControlsResult, bridgeResult] = await Promise.allSettled([
+      const siteControls = await independentSiteControls();
+      const [coasResult, bridgeResult] = await Promise.allSettled([
         customCoas
           ? ensureCustomCoaHistory().then(() => customCoas.list({ limit: 500 }))
           : commerce
             ? commerce.listCoas()
             : Promise.reject(new Error("COA storage is not configured")),
         commerce
-          ? commerce.getSiteControls()
-          : Promise.reject(new Error("Commerce is not configured")),
-        commerce
           ? commerce.getOperationsBridgeStatus()
           : Promise.reject(new Error("Commerce is not configured")),
       ]);
-      const wordpressControls = wordpressControlsResult.status === "fulfilled"
-        ? wordpressControlsResult.value
-        : null;
-      const siteControls = storedControls
-        ? storedControls as IndependentSiteControls
-        : wordpressControls
-          ? await seedIndependentSiteControls(wordpressControls)
-          : defaultIndependentSiteControls();
       const bridge = bridgeResult.status === "fulfilled" ? bridgeResult.value : null;
       const payload: Record<string, unknown> = {
-        connected: coasResult.status === "fulfilled" || Boolean(wordpressControls),
+        connected: coasResult.status === "fulfilled",
         coas: coasResult.status === "fulfilled" ? coasResult.value : [],
         siteControls,
         siteControlsSource: "operations-control-plane",
-        wordpressSyncAvailable: config.wooCommerce?.accessMode === "read_write" && Boolean(bridge?.connected && bridge.capabilities.includes("edit_site_controls")),
+        siteControlsStorage: siteControlRepository ? "postgresql" : "redis-fallback",
+        storefrontDelivery: "research-peptides-direct",
+        wordpressSyncAvailable: false,
         coaWriteEnabled: Boolean(customCoas),
         coaSource: customCoas ? "phase-one-postgresql" : "wordpress-legacy",
         siteControlsWriteEnabled: true,
@@ -1272,6 +1248,7 @@ export function createMonitorServer(
         response.setHeader("ETag", etag);
         response.setHeader("Vary", "Origin");
         response.setHeader("X-Site-Control-Source", "operations-control-plane");
+        response.setHeader("X-Site-Control-Revision", String(controls.revision || 0));
         if (firstHeaderValue(request.headers["if-none-match"]) === etag) {
           response.statusCode = 304;
           response.end();
@@ -2967,9 +2944,9 @@ export function createMonitorServer(
           siteControls: await independentSiteControls(),
           source: "operations-control-plane",
           canManage: canOperate,
-          wordpressSyncAvailable: Boolean(
-            commerceConfig?.accessMode === "read_write",
-          ),
+          storage: siteControlRepository ? "postgresql" : "redis-fallback",
+          storefrontDelivery: "research-peptides-direct",
+          wordpressSyncAvailable: false,
         });
         return;
       }
@@ -3835,6 +3812,9 @@ export function createMonitorServer(
         const productInput = promo.product && typeof promo.product === "object" ? promo.product as Record<string, unknown> : {};
         const cleanText = (value: unknown, maximum: number) => typeof value === "string" ? value.trim().slice(0, maximum) : "";
         const integer = (value: unknown, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, Math.floor(Number(value) || 0)));
+        const expectedRevision = root.expectedRevision === undefined
+          ? undefined
+          : integer(root.expectedRevision, 0, Number.MAX_SAFE_INTEGER);
         const promoType = cleanText(promo.type, 24);
         if (!["general", "product", "simple_gifts"].includes(promoType)) {
           json(response, 400, { error: "Select a valid promotion type" });
@@ -3852,10 +3832,10 @@ export function createMonitorServer(
           json(response, 400, { error: "Enter valid maintenance copy and a valid support email" });
           return;
         }
-        const siteControlsWrite: CommerceSiteControlsWrite = {
+        const siteControlsWrite: IndependentSiteControlsWrite = {
           promo: {
             enabled: Boolean(promo.enabled),
-            type: promoType as CommerceSiteControlsWrite["promo"]["type"],
+            type: promoType as IndependentSiteControlsWrite["promo"]["type"],
             productId: integer(promo.productId, 0, Number.MAX_SAFE_INTEGER),
             salePrice: Math.max(0, Number(promo.salePrice) || 0),
             sitewideLabel: cleanText(promo.sitewideLabel, 80),
@@ -3891,28 +3871,47 @@ export function createMonitorServer(
               }
             : null;
           const current = await independentSiteControls();
-          const stored = await store.saveIndependentSiteControls(
-            buildIndependentSiteControls(
-              siteControlsWrite,
-              current,
-              product,
-              `${currentUser.displayName} (${currentUser.username})`,
-            ),
+          if (expectedRevision !== undefined && expectedRevision !== Number(current.revision || 0)) {
+            throw new SiteControlRepositoryError(
+              "Site Controls changed in another session. Reload the current state before publishing.",
+              "revision_conflict",
+            );
+          }
+          const next = buildIndependentSiteControls(
+            siteControlsWrite,
+            current,
+            product,
+            `${currentUser.displayName} (${currentUser.username})`,
           );
+          const stored = siteControlRepository
+            ? await siteControlRepository.save(next, expectedRevision)
+            : await store.saveIndependentSiteControls(next);
           const siteControls = stored as IndependentSiteControls;
+          await store.cacheIndependentSiteControls(siteControls).catch((error: unknown) => {
+            console.warn("Could not refresh the Redis Site Controls cache", error);
+          });
           extensionsCache = undefined;
-          const wordpressSync = await mirrorSiteControlsToWordPress(siteControlsWrite);
           await store.addNotification({
             type: "system",
             severity: siteControls.maintenance.enabled ? "warning" : "success",
             title: siteControls.maintenance.enabled ? "Storefront maintenance activated" : "Site Controls updated",
-            message: `${currentUser.displayName} published revision ${siteControls.revision}. WordPress mirror: ${wordpressSync}.`,
+            message: `${currentUser.displayName} published revision ${siteControls.revision} directly to the Phase One storefront.`,
             actionView: "site-controls",
           });
-          json(response, 200, { siteControls, wordpressSync, source: "operations-control-plane" });
+          json(response, 200, {
+            siteControls,
+            source: "operations-control-plane",
+            storage: siteControlRepository ? "postgresql" : "redis-fallback",
+            storefrontDelivery: "research-peptides-direct",
+          });
         } catch (error: unknown) {
           console.error("Site Controls update failed", error);
-          json(response, 500, { error: "Site Controls could not be saved to the independent control plane." });
+          const conflict = error instanceof SiteControlRepositoryError && error.code === "revision_conflict";
+          json(response, conflict ? 409 : 500, {
+            error: conflict
+              ? error.message
+              : "Site Controls could not be saved to the independent control plane.",
+          });
         }
         return;
       }
