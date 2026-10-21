@@ -22,6 +22,8 @@ export interface CommerceProductAttribute {
 export interface CommerceProduct {
   id: number;
   name: string;
+  slug?: string;
+  permalink?: string;
   sku: string;
   type: string;
   status: string;
@@ -30,6 +32,8 @@ export interface CommerceProduct {
   price: number;
   regularPrice: number;
   salePrice: number | null;
+  saleStartsAt: string | null;
+  saleEndsAt: string | null;
   stockQuantity: number | null;
   stockStatus: string;
   category: string;
@@ -68,6 +72,12 @@ export interface CommerceProductWrite {
     stock: number;
     imageId?: number;
   }>;
+}
+
+export interface CommerceProductSaleWrite {
+  salePrice: number | null;
+  startsAt: string | null;
+  endsAt: string | null;
 }
 
 export interface CommerceOrderLineItem {
@@ -722,8 +732,10 @@ function mapProduct(value: unknown, thumbnails = new Map<number, string>()): Com
   const catalogVisibility = text(product.catalog_visibility) || "visible";
   return {
     id, name: decodedText(product.name) || `Product #${id}`, sku: text(product.sku), type: text(product.type) || "simple",
+    slug: text(product.slug), permalink: text(product.permalink),
     status, catalogVisibility, visibility: visibilityFor(status, catalogVisibility), price: number(product.price),
     regularPrice: number(product.regular_price), salePrice: text(product.sale_price) ? number(product.sale_price) : null,
+    saleStartsAt: isoDate(product.date_on_sale_from_gmt), saleEndsAt: isoDate(product.date_on_sale_to_gmt),
     stockQuantity: nullableNumber(product.stock_quantity), stockStatus: text(product.stock_status) || "instock",
     category: decodedText(record(categories[0]).name) || "Uncategorized", imageUrl: images[0]?.src || null,
     thumbnailUrl: images[0]?.thumbnailUrl || null, images,
@@ -1709,7 +1721,7 @@ export class WooCommerceGateway {
     const [payload, thumbnails] = await Promise.all([
       this.request("products", { parameters: {
         per_page: "100", page: "1", orderby: "modified", order: "desc", status: "any",
-        _fields: "id,name,sku,type,status,catalog_visibility,price,regular_price,sale_price,stock_quantity,stock_status,categories,images,variations,attributes,date_modified_gmt",
+        _fields: "id,name,slug,permalink,sku,type,status,catalog_visibility,price,regular_price,sale_price,date_on_sale_from_gmt,date_on_sale_to_gmt,stock_quantity,stock_status,categories,images,variations,attributes,date_modified_gmt",
       } }),
       this.listPublicThumbnails().catch(() => new Map<number, string>()),
     ]);
@@ -1754,6 +1766,28 @@ export class WooCommerceGateway {
       });
     }
     return saved;
+  }
+
+  async setProductSale(productId: number, input: CommerceProductSaleWrite): Promise<CommerceProduct> {
+    if (!Number.isSafeInteger(productId) || productId <= 0) throw new Error("A valid product id is required");
+    const salePrice = input.salePrice;
+    if (salePrice !== null && (!Number.isFinite(salePrice) || salePrice <= 0)) {
+      throw new Error("A valid promotional price is required");
+    }
+    const commerceDate = (value: string | null) => {
+      if (!value) return "";
+      const parsed = new Date(value);
+      if (!Number.isFinite(parsed.getTime())) throw new Error("A valid promotion schedule is required");
+      return parsed.toISOString().replace(/\.\d{3}Z$/, "");
+    };
+    return mapProduct(await this.request(`products/${productId}`, {
+      method: "PUT",
+      body: {
+        sale_price: salePrice === null ? "" : salePrice.toFixed(2),
+        date_on_sale_from_gmt: salePrice === null ? "" : commerceDate(input.startsAt),
+        date_on_sale_to_gmt: salePrice === null ? "" : commerceDate(input.endsAt),
+      },
+    }));
   }
 
   async trashProduct(productId: number): Promise<CommerceProduct> {

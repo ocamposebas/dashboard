@@ -164,7 +164,10 @@ export function shouldIncludeFulfillmentOrder(
   session: FulfillmentSession | null,
 ): boolean {
   if (normalized(order.status) === "processing") return true;
-  return session?.state === "open" || session?.state === "paused";
+  // Keep an active exception visible so the operator can safely release the
+  // workstation. Once paused, a non-processing order leaves the operational
+  // queue while its progress and audit trail stay durable in PostgreSQL.
+  return session?.state === "open";
 }
 
 export function compareFulfillmentQueueEntries(
@@ -239,7 +242,11 @@ export function buildFulfillmentQueueEntry(input: {
     };
   });
 
-  if (session && session.sourceModifiedAt !== order.modifiedAt) {
+  if (
+    session &&
+    normalized(order.status) === "processing" &&
+    session.sourceModifiedAt !== order.modifiedAt
+  ) {
     reasons.push({
       code: "source_order_changed",
       message: "The live order changed after this fulfillment session started. Review it before continuing.",

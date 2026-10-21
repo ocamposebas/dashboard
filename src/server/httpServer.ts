@@ -181,12 +181,12 @@ interface AttemptState {
 function securityHeaders(
   response: ServerResponse,
   nonce?: string,
-  commerceImageOrigin?: string,
+  trustedImageOrigins: Iterable<string> = [],
 ): void {
   const styleSource = nonce ? `'self' 'nonce-${nonce}'` : "'self'";
   const scriptSource = nonce ? `'self' 'nonce-${nonce}'` : "'self'";
-  const imageSource = ["'self'", "data:", "blob:", commerceImageOrigin]
-    .filter(Boolean)
+  const imageSource = ["'self'", "data:", "blob:", ...new Set(trustedImageOrigins)]
+    .filter((source) => Boolean(source))
     .join(" ");
   response.setHeader(
     "Content-Security-Policy",
@@ -398,6 +398,10 @@ export function createMonitorServer(
   const commerceImageOrigin = commerceConfig
     ? new URL(commerceConfig.baseUrl).origin
     : undefined;
+  const trustedImageOrigins = [
+    ...config.trackerOrigins,
+    ...(commerceImageOrigin ? [commerceImageOrigin] : []),
+  ];
   const searchConsole = config.googleSearchConsole
     ? new SearchConsoleGateway(config.googleSearchConsole, store, config.sessionSecret)
     : undefined;
@@ -521,6 +525,9 @@ export function createMonitorServer(
   const productDetailCache = new Map<number, { payload: Record<string, unknown>; updatedAt: number }>();
   const orderDetailCache = new Map<number, { payload: Record<string, unknown>; updatedAt: number }>();
   const salesReportCache = new Map<string, { orders: CommerceOrder[]; updatedAt: number }>();
+  let reconciledProductCampaign: { revision: number; controls: IndependentSiteControls } | undefined;
+  let productCampaignReconciliation: Promise<IndependentSiteControls> | undefined;
+  let productCampaignRetryAt = 0;
 
   async function independentSiteControls(): Promise<IndependentSiteControls> {
     const durable = await siteControlRepository?.get().catch((error: unknown) => {
@@ -532,6 +539,65 @@ export function createMonitorServer(
     return stored
       ? stored as IndependentSiteControls
       : defaultIndependentSiteControls();
+  }
+
+  async function reconcilePublishedProductCampaign(controls: IndependentSiteControls): Promise<IndependentSiteControls> {
+    const campaignProduct = controls.promo.type === "product" ? controls.promo.product : null;
+    if (!commerce || !campaignProduct) return controls;
+    if (reconciledProductCampaign?.revision === controls.revision) return reconciledProductCampaign.controls;
+    if (productCampaignReconciliation) return productCampaignReconciliation;
+    if (Date.now() < productCampaignRetryAt) return controls;
+
+    productCampaignReconciliation = (async () => {
+      const authoritative = await commerce.getProduct(campaignProduct.id);
+      const slug = String(authoritative.slug || campaignProduct.slug || "").trim();
+      const url = slug ? `/product/${encodeURIComponent(slug)}/` : "/research-peptides/";
+      const endsAt = controls.promo.endsAt ? Date.parse(controls.promo.endsAt) : 0;
+      const active = Boolean(
+        controls.promo.enabled &&
+        campaignProduct.salePriceActive &&
+        campaignProduct.promoPrice > 0 &&
+        endsAt > Date.now()
+      );
+      const endMatches = Boolean(
+        authoritative.saleEndsAt &&
+        Math.abs(Date.parse(authoritative.saleEndsAt) - endsAt) < 2_000
+      );
+      const priceMatches = Math.abs((authoritative.salePrice || 0) - campaignProduct.promoPrice) < 0.005;
+
+      if (active && (!priceMatches || !endMatches)) {
+        await commerce.setProductSale(authoritative.id, {
+          salePrice: campaignProduct.promoPrice,
+          startsAt: new Date().toISOString(),
+          endsAt: controls.promo.endsAt,
+        });
+        await invalidateCommerceCache();
+      }
+
+      const reconciled: IndependentSiteControls = {
+        ...controls,
+        promo: {
+          ...controls.promo,
+          ctaUrl: url,
+          product: {
+            ...campaignProduct,
+            slug,
+            url,
+            salePriceActive: active,
+          },
+        },
+      };
+      reconciledProductCampaign = { revision: controls.revision, controls: reconciled };
+      return reconciled;
+    })().catch((error: unknown) => {
+      productCampaignRetryAt = Date.now() + 30_000;
+      console.error("Published product campaign reconciliation failed", error);
+      return controls;
+    }).finally(() => {
+      productCampaignReconciliation = undefined;
+    });
+
+    return productCampaignReconciliation;
   }
 
   async function ensureCustomCoaHistory(): Promise<void> {
@@ -1223,7 +1289,7 @@ export function createMonitorServer(
     void (async () => {
       const url = new URL(request.url || "/", config.dashboardOrigin);
       const nonce = randomBytes(16).toString("base64");
-      securityHeaders(response, nonce, commerceImageOrigin);
+      securityHeaders(response, nonce, trustedImageOrigins);
 
       if (url.pathname === "/health" && request.method === "GET") {
         const redisHealthy = await store.ping().catch(() => false);
@@ -1240,7 +1306,14 @@ export function createMonitorServer(
           response.setHeader("Access-Control-Allow-Origin", normalizedOrigin);
           response.setHeader("Access-Control-Allow-Methods", "GET");
         }
-        const controls = publicSiteControls(await independentSiteControls());
+        const storedControls = await independentSiteControls();
+        const deliveryControls = reconciledProductCampaign?.revision === storedControls.revision
+          ? reconciledProductCampaign.controls
+          : storedControls;
+        if (deliveryControls === storedControls) {
+          void reconcilePublishedProductCampaign(storedControls);
+        }
+        const controls = publicSiteControls(deliveryControls);
         const body = Buffer.from(JSON.stringify(controls));
         const etag = `\"${createHash("sha256").update(body).digest("base64url")}\"`;
         response.setHeader("Cache-Control", "public, max-age=5, stale-while-revalidate=30, stale-if-error=86400");
@@ -1433,13 +1506,29 @@ export function createMonitorServer(
               confirmPaidAdsApproval: true,
             },
           });
-          await store.addNotification({
-            type: "system", severity: "info",
-            title: `New affiliate application from ${application.displayName}`,
-            message: `${application.source === "account_form" ? "Account" : "Public"} application requesting ${application.preferredCoupon}.`,
-            actionView: "affiliates",
+          let notificationCreated = true;
+          try {
+            await store.addNotification({
+              type: "system", severity: "info",
+              title: `New affiliate application from ${application.displayName}`,
+              message: `${application.source === "account_form" ? "Account" : "Public"} application requesting ${application.preferredCoupon}.`,
+              actionView: "affiliates",
+            });
+          } catch (notificationError: unknown) {
+            notificationCreated = false;
+            console.error("Affiliate application notification failed", {
+              applicationId: application.id,
+              source: application.source,
+              error: notificationError instanceof Error ? notificationError.message : "unknown_error",
+            });
+          }
+          console.info("Affiliate application stored", {
+            applicationId: application.id,
+            source: application.source,
+            status: application.status,
+            notificationCreated,
           });
-          json(response, 201, { saved: true, application });
+          json(response, 201, { saved: true, notificationCreated, application });
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : "";
           json(response, message === "affiliate_already_exists" ? 409 : 400, {
@@ -3861,15 +3950,6 @@ export function createMonitorServer(
           return;
         }
         try {
-          const product: SiteControlProductSnapshot | null = siteControlsWrite.promo.type === "product"
-            ? {
-                id: siteControlsWrite.promo.productId,
-                name: cleanText(productInput.name, 140) || `Product ${siteControlsWrite.promo.productId}`,
-                sku: cleanText(productInput.sku, 120),
-                image: cleanText(productInput.image, 1_000),
-                originalPrice: Math.max(0, Number(productInput.originalPrice) || 0),
-              }
-            : null;
           const current = await independentSiteControls();
           if (expectedRevision !== undefined && expectedRevision !== Number(current.revision || 0)) {
             throw new SiteControlRepositoryError(
@@ -3877,16 +3957,106 @@ export function createMonitorServer(
               "revision_conflict",
             );
           }
+          let authoritativeProduct: CommerceProduct | null = null;
+          let product: SiteControlProductSnapshot | null = null;
+          if (siteControlsWrite.promo.type === "product" && siteControlsWrite.promo.productId > 0) {
+            if (!commerce || !config.wooCommerce) {
+              throw new Error("The live catalog must be connected before publishing a product campaign.");
+            }
+            authoritativeProduct = await commerce.getProduct(siteControlsWrite.promo.productId);
+            const catalogPrice = authoritativeProduct.regularPrice || authoritativeProduct.price;
+            if (authoritativeProduct.type !== "simple") {
+              throw new Error("This product has multiple presentations. Choose an exact presentation before assigning one promotional price.");
+            }
+            if (siteControlsWrite.promo.enabled && (
+              catalogPrice <= 0 ||
+              siteControlsWrite.promo.salePrice >= catalogPrice
+            )) {
+              throw new Error("The promotional price must be lower than the current catalog price.");
+            }
+            const existingCampaignProduct = current.promo.type === "product" && current.promo.product?.id === authoritativeProduct.id
+              ? current.promo.product
+              : null;
+            const storefrontSlug = String(authoritativeProduct.slug || "").trim();
+            const storefrontUrl = storefrontSlug
+              ? `/product/${encodeURIComponent(storefrontSlug)}/`
+              : "/research-peptides/";
+            siteControlsWrite.promo.ctaUrl = storefrontUrl;
+            const existingSaleIsControlled = Boolean(
+              existingCampaignProduct &&
+              Math.abs((authoritativeProduct.salePrice || 0) - existingCampaignProduct.promoPrice) < 0.005,
+            );
+            product = {
+              id: authoritativeProduct.id,
+              name: authoritativeProduct.name,
+              slug: storefrontSlug,
+              url: storefrontUrl,
+              sku: authoritativeProduct.sku,
+              image: authoritativeProduct.thumbnailUrl || authoritativeProduct.imageUrl || cleanText(productInput.image, 1_000),
+              originalPrice: catalogPrice,
+              previousSalePrice: existingCampaignProduct && existingSaleIsControlled
+                ? existingCampaignProduct.previousSalePrice ?? null
+                : authoritativeProduct.salePrice,
+              previousSaleStartsAt: existingCampaignProduct && existingSaleIsControlled
+                ? existingCampaignProduct.previousSaleStartsAt ?? null
+                : authoritativeProduct.saleStartsAt,
+              previousSaleEndsAt: existingCampaignProduct && existingSaleIsControlled
+                ? existingCampaignProduct.previousSaleEndsAt ?? null
+                : authoritativeProduct.saleEndsAt,
+            };
+          }
+          const now = new Date();
           const next = buildIndependentSiteControls(
             siteControlsWrite,
             current,
             product,
             `${currentUser.displayName} (${currentUser.username})`,
+            now,
           );
-          const stored = siteControlRepository
-            ? await siteControlRepository.save(next, expectedRevision)
-            : await store.saveIndependentSiteControls(next);
-          const siteControls = stored as IndependentSiteControls;
+          const priceRollbacks: CommerceProduct[] = [];
+          const currentProduct = current.promo.type === "product" ? current.promo.product : null;
+          const nextProductActive = next.promo.enabled && next.promo.type === "product" && next.promo.product;
+          let stored: IndependentSiteControls;
+          try {
+            if (commerce && currentProduct && (!nextProductActive || currentProduct.id !== nextProductActive.id)) {
+              const existing = await commerce.getProduct(currentProduct.id);
+              const controlledPrice = Math.abs((existing.salePrice || 0) - currentProduct.promoPrice) < 0.005;
+              if (controlledPrice) {
+                priceRollbacks.push(existing);
+                await commerce.setProductSale(existing.id, {
+                  salePrice: currentProduct.previousSalePrice ?? null,
+                  startsAt: currentProduct.previousSaleStartsAt ?? null,
+                  endsAt: currentProduct.previousSaleEndsAt ?? null,
+                });
+              }
+            }
+            if (commerce && nextProductActive && authoritativeProduct) {
+              priceRollbacks.push(authoritativeProduct);
+              await commerce.setProductSale(authoritativeProduct.id, {
+                salePrice: nextProductActive.promoPrice,
+                startsAt: now.toISOString(),
+                endsAt: next.promo.endsAt,
+              });
+            }
+            stored = (siteControlRepository
+              ? await siteControlRepository.save(next, expectedRevision)
+              : await store.saveIndependentSiteControls(next)) as IndependentSiteControls;
+          } catch (error: unknown) {
+            if (commerce) {
+              for (const snapshot of priceRollbacks.reverse()) {
+                await commerce.setProductSale(snapshot.id, {
+                  salePrice: snapshot.salePrice,
+                  startsAt: snapshot.saleStartsAt,
+                  endsAt: snapshot.saleEndsAt,
+                }).catch((rollbackError: unknown) => console.error("Promotion price rollback failed", rollbackError));
+              }
+            }
+            throw error;
+          }
+          const siteControls = stored;
+          reconciledProductCampaign = undefined;
+          productCampaignRetryAt = 0;
+          await invalidateCommerceCache();
           await store.cacheIndependentSiteControls(siteControls).catch((error: unknown) => {
             console.warn("Could not refresh the Redis Site Controls cache", error);
           });
@@ -3903,14 +4073,19 @@ export function createMonitorServer(
             source: "operations-control-plane",
             storage: siteControlRepository ? "postgresql" : "redis-fallback",
             storefrontDelivery: "research-peptides-direct",
+            commercePricing: nextProductActive ? "woocommerce-sale-synchronized" : "no-active-product-sale",
           });
         } catch (error: unknown) {
           console.error("Site Controls update failed", error);
           const conflict = error instanceof SiteControlRepositoryError && error.code === "revision_conflict";
-          json(response, conflict ? 409 : 500, {
+          const message = error instanceof Error ? error.message : "Site Controls could not be published to the independent control plane.";
+          const invalidCampaign = message.includes("promotional price") || message.includes("multiple presentations") || message.includes("live catalog");
+          json(response, conflict ? 409 : invalidCampaign ? 400 : 500, {
             error: conflict
               ? error.message
-              : "Site Controls could not be saved to the independent control plane.",
+              : invalidCampaign
+                ? message
+                : "Site Controls could not be saved to the independent control plane.",
           });
         }
         return;
@@ -4573,7 +4748,7 @@ export function createMonitorServer(
     })().catch((error: unknown) => {
       console.error("HTTP request failed", error);
       if (!response.headersSent) {
-        securityHeaders(response, undefined, commerceImageOrigin);
+        securityHeaders(response, undefined, trustedImageOrigins);
         response.statusCode = 500;
         response.setHeader("Content-Type", "text/plain; charset=utf-8");
       }

@@ -62,13 +62,61 @@ test("a control-plane write does not require a WordPress response", () => {
   assert.equal(value.source, "operations-control-plane");
 });
 
+test("a product campaign replaces an old CTA with the exact selected product URL", () => {
+  const write = writeInput();
+  write.promo.enabled = true;
+  write.promo.type = "product";
+  write.promo.productId = 22;
+  write.promo.salePrice = 40;
+  write.promo.ctaUrl = "/product/old-campaign/";
+  const value = buildIndependentSiteControls(
+    write,
+    defaultIndependentSiteControls(),
+    {
+      id: 22,
+      name: "Test compound",
+      slug: "test-compound",
+      url: "/product/test-compound/",
+      sku: "TEST-22",
+      image: "",
+      originalPrice: 65,
+    },
+    "Operations Admin",
+    new Date("2026-10-21T17:00:00.000Z"),
+  );
+
+  assert.equal(value.promo.ctaUrl, "/product/test-compound/");
+  assert.equal(value.promo.product?.promoPrice, 40);
+});
+
 test("public Site Controls excludes the internal editor identity", () => {
+  const value = defaultIndependentSiteControls();
+  value.promo.product = {
+    id: 22,
+    name: "Test compound",
+    slug: "test-compound",
+    url: "/product/test-compound/",
+    sku: "TEST-22",
+    image: "",
+    originalPrice: 65,
+    promoPrice: 40,
+    salePriceActive: true,
+    previousSalePrice: 55,
+    previousSaleStartsAt: "2026-10-01T00:00:00.000Z",
+    previousSaleEndsAt: "2026-10-31T00:00:00.000Z",
+  };
   const payload = publicSiteControls({
-    ...defaultIndependentSiteControls(),
+    ...value,
     updatedBy: "Private Administrator",
   });
   assert.equal(payload.source, "operations-control-plane");
   assert.equal("updatedBy" in payload, false);
+  const publicPromo = payload.promo as Record<string, unknown>;
+  const publicProduct = publicPromo.product as Record<string, unknown>;
+  assert.equal(publicPromo.ctaUrl, "/research-peptides/");
+  assert.equal(publicProduct.url, "/product/test-compound/");
+  assert.equal(publicProduct.slug, "test-compound");
+  assert.equal("previousSalePrice" in publicProduct, false);
 });
 
 test("independent Site Controls reject stale editor revisions", () => {

@@ -127,6 +127,54 @@ test("moves products to recoverable Trash instead of permanently deleting them",
   assert.deepEqual(request, { method: "DELETE", force: "false" });
 });
 
+test("synchronizes a scheduled product promotion with WooCommerce checkout pricing", async () => {
+  const requests: Array<{ method: string; path: string; body: Record<string, unknown> | null }> = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
+    requests.push({ method: init?.method || "GET", path: url.pathname, body });
+    return new Response(JSON.stringify({
+      id: 22,
+      name: "Eloralintide + PL-RT Blend",
+      sku: "ELORALINTIDE-AND-PL-RT-BLEND",
+      type: "simple",
+      status: "publish",
+      catalog_visibility: "visible",
+      price: body?.sale_price || "65.00",
+      regular_price: "65.00",
+      sale_price: body?.sale_price || "",
+      date_on_sale_from_gmt: body?.date_on_sale_from_gmt || null,
+      date_on_sale_to_gmt: body?.date_on_sale_to_gmt || null,
+      stock_quantity: 10,
+      stock_status: "instock",
+      categories: [],
+      images: [],
+      variations: [],
+      attributes: [],
+    }), { status: 200 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example",
+    consumerKey: "ck_test",
+    consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  const saved = await gateway.setProductSale(22, {
+    salePrice: 40,
+    startsAt: "2026-10-21T18:00:00.000Z",
+    endsAt: "2026-10-22T18:00:00.000Z",
+  });
+
+  assert.equal(saved.salePrice, 40);
+  assert.equal(requests[0]?.method, "PUT");
+  assert.equal(requests[0]?.path, "/wp-json/wc/v3/products/22");
+  assert.deepEqual(requests[0]?.body, {
+    sale_price: "40.00",
+    date_on_sale_from_gmt: "2026-10-21T18:00:00",
+    date_on_sale_to_gmt: "2026-10-22T18:00:00",
+  });
+});
+
 test("approving a manual payment records both the paid time and approval metadata", async () => {
   let body: Record<string, unknown> | undefined;
   const fetchImpl: typeof fetch = async (_input, init) => {

@@ -171,7 +171,7 @@ test("packed sessions are read-only even after the commerce status changes", () 
   assert.equal(entry.primaryAction, "open");
 });
 
-test("the queue admits new processing orders only and preserves in-progress exceptions", () => {
+test("the queue admits processing orders and only keeps active non-processing exceptions", () => {
   assert.equal(shouldIncludeFulfillmentOrder(order({ status: "processing" }), null), true);
   assert.equal(shouldIncludeFulfillmentOrder(order({ status: "pending" }), null), false);
   assert.equal(shouldIncludeFulfillmentOrder(order({ status: "on-hold" }), null), false);
@@ -180,6 +180,29 @@ test("the queue admits new processing orders only and preserves in-progress exce
     order({ status: "cancelled" }),
     { state: "open" } as FulfillmentSession,
   ), true);
+  assert.equal(shouldIncludeFulfillmentOrder(
+    order({ status: "cancelled" }),
+    { state: "paused" } as FulfillmentSession,
+  ), false);
+});
+
+test("a non-processing changed order shows one actionable status blocker", () => {
+  const session = {
+    id: "43fb47a8-2884-45d9-bbab-89a76b967e11",
+    orderId: 1201,
+    orderNumber: "1201",
+    state: "open",
+    sourceModifiedAt: "2026-10-15T10:05:00.000Z",
+    progress: {},
+  } as FulfillmentSession;
+  const entry = build(order({
+    status: "completed",
+    modifiedAt: "2026-10-15T11:00:00.000Z",
+  }), { session });
+
+  assert.equal(entry.queueStatus, "blocked");
+  assert.ok(entry.reasons.some((reason) => reason.code === "order_not_processing"));
+  assert.equal(entry.reasons.some((reason) => reason.code === "source_order_changed"), false);
 });
 
 test("orders with the same queue status are processed oldest first", () => {

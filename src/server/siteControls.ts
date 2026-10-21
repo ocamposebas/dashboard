@@ -1,9 +1,14 @@
 export interface SiteControlProductSnapshot {
   id: number;
   name: string;
+  slug?: string | undefined;
+  url?: string | undefined;
   sku: string;
   image: string;
   originalPrice: number;
+  previousSalePrice?: number | null | undefined;
+  previousSaleStartsAt?: string | null | undefined;
+  previousSaleEndsAt?: string | null | undefined;
 }
 
 export interface IndependentSiteControls {
@@ -25,11 +30,16 @@ export interface IndependentSiteControls {
     product: {
       id: number;
       name: string;
+      slug?: string | undefined;
+      url?: string | undefined;
       sku: string;
       image: string;
       originalPrice: number;
       promoPrice: number;
       salePriceActive: boolean;
+      previousSalePrice?: number | null | undefined;
+      previousSaleStartsAt?: string | null | undefined;
+      previousSaleEndsAt?: string | null | undefined;
     } | null;
     simpleGifts?: unknown;
   };
@@ -130,9 +140,14 @@ export function buildIndependentSiteControls(
       ? {
           id: currentProduct.id,
           name: currentProduct.name,
+          slug: currentProduct.slug,
+          url: currentProduct.url,
           sku: currentProduct.sku,
           image: currentProduct.image,
           originalPrice: currentProduct.originalPrice,
+          previousSalePrice: currentProduct.previousSalePrice,
+          previousSaleStartsAt: currentProduct.previousSaleStartsAt,
+          previousSaleEndsAt: currentProduct.previousSaleEndsAt,
         }
       : null)
     : null;
@@ -152,7 +167,9 @@ export function buildIndependentSiteControls(
       info: write.promo.info,
       endsAt,
       ctaLabel: write.promo.ctaLabel,
-      ctaUrl: write.promo.ctaUrl,
+      ctaUrl: write.promo.type === "product" && productSnapshot?.url
+        ? productSnapshot.url
+        : write.promo.ctaUrl,
       product: productSnapshot
         ? {
             ...productSnapshot,
@@ -175,13 +192,26 @@ export function buildIndependentSiteControls(
 }
 
 export function publicSiteControls(value: IndependentSiteControls): Record<string, unknown> {
+  const publicProduct = value.promo.product
+    ? {
+        id: value.promo.product.id,
+        name: value.promo.product.name,
+        slug: value.promo.product.slug,
+        url: value.promo.product.url,
+        sku: value.promo.product.sku,
+        image: value.promo.product.image,
+        originalPrice: value.promo.product.originalPrice,
+        promoPrice: value.promo.product.promoPrice,
+        salePriceActive: value.promo.product.salePriceActive,
+      }
+    : null;
   return {
     configured: true,
     version: value.version,
     source: value.source,
     revision: value.revision,
     updatedAt: value.updatedAt,
-    promo: value.promo,
+    promo: { ...value.promo, product: publicProduct },
     maintenance: value.maintenance,
   };
 }

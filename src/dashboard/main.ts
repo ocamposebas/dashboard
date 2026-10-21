@@ -6,6 +6,11 @@ import "./clean-ui.css";
 import { initAffiliateAdmin, loadAffiliateAdmin } from "./affiliates-admin";
 import type { AffiliateCommissionSummary } from "../shared/affiliates";
 import { calculateProductProfitability } from "../shared/productProfitability";
+import {
+  initialSiteControlsDraftState,
+  markSiteControlsDraftDirty,
+  reconcileSiteControlsDraft,
+} from "../shared/siteControlsDraft";
 import type { DecodeHintType as ZXingDecodeHintType } from "@zxing/library";
 import type {
   BarcodeLabel,
@@ -116,6 +121,8 @@ interface CommerceVariation {
 interface CommerceProduct {
   id: number;
   name: string;
+  slug?: string;
+  permalink?: string;
   sku: string;
   type: string;
   status: string;
@@ -598,6 +605,8 @@ interface SiteControls {
     product: {
       id: number;
       name: string;
+      slug?: string;
+      url?: string;
       sku: string;
       image: string;
       originalPrice: number;
@@ -867,6 +876,7 @@ let customerSort = "recent";
 let customerPage = 1;
 let extensionsData: ExtensionsPayload | undefined;
 let selectedPromoType: "general" | "product" | "simple_gifts" = "general";
+let siteControlsDraft = initialSiteControlsDraftState();
 let orderStatusFilter = "all";
 let orderSearch = "";
 let orderDateFilter: "today" | "7" | "30" | "all" | "custom" = "today";
@@ -1544,12 +1554,9 @@ function renderMarketing(snapshot: DashboardSnapshot): void {
           .map((item) => `${item.quantity}× ${item.name}`)
           .join(" · ");
         const remainingProducts = Math.max(0, cart.items.length - 3);
-        const thumbnails = cart.items.slice(0, 3).map((item) => {
-          const fallback = escapeHtml((item.name.trim()[0] || "P").toUpperCase());
-          return item.imageUrl
-            ? `<span class="marketing-cart-thumb"><img src="${escapeHtml(item.imageUrl)}" alt="" loading="lazy" decoding="async"></span>`
-            : `<span class="marketing-cart-thumb">${fallback}</span>`;
-        }).join("");
+        const thumbnails = cart.items.slice(0, 3)
+          .map((item) => marketingCartImageMarkup(item, "marketing-cart-thumb"))
+          .join("");
         return `<article class="marketing-cart-row"><div class="marketing-cart-main"><div class="marketing-cart-thumbs" aria-hidden="true">${thumbnails}</div><div class="marketing-cart-copy"><div class="marketing-cart-heading"><strong>${escapeHtml(identity)}</strong><span class="marketing-cart-state marketing-cart-state--${cart.status}">${cartStatusLabels[cart.status] || cart.status}</span></div><small>${escapeHtml(identityDetail)}</small><span class="marketing-cart-products">${escapeHtml(productSummary)}${remainingProducts ? ` · +${remainingProducts} more` : ""}</span></div></div><div class="marketing-cart-value"><strong>${formatCurrency(cart.total)}</strong><small>${formatNumber(cart.itemCount)} item${cart.itemCount === 1 ? "" : "s"} · ${relativeDate(cart.updatedAt)}</small></div></article>`;
       }).join("")
     : `<div class="marketing-empty"><i>◇</i><strong>${marketingCartFilter === "abandoned" ? "No abandoned carts" : "No cart activity in this view"}</strong><p>${marketingCartFilter === "abandoned" ? "That is good news. Carts that remain inactive for 30 minutes will appear here." : "As customers add products, their carts will appear here automatically."}</p></div>`;
@@ -1596,6 +1603,39 @@ function monitorCartIdentity(cart: NonNullable<DashboardAnalytics["marketing"]>[
     (cart.visitorNumber ? `Visitor #${cart.visitorNumber}` : "Anonymous visitor");
 }
 
+type MarketingCartItem = NonNullable<DashboardAnalytics["marketing"]>["carts"][number]["items"][number];
+
+function marketingCartProduct(item: MarketingCartItem): CommerceProduct | undefined {
+  const normalizedSku = item.sku.trim().toLowerCase();
+  return commerceData?.products.find((product) =>
+    product.id === item.productId ||
+    (normalizedSku !== "" && product.sku.trim().toLowerCase() === normalizedSku),
+  );
+}
+
+function normalizeStorefrontImageUrl(value: string): string {
+  const candidate = value.trim();
+  if (!candidate) return "";
+  try {
+    return new URL(candidate, "https://phaseonelabz.com").toString();
+  } catch {
+    return "";
+  }
+}
+
+function marketingCartImageUrl(item: MarketingCartItem): string {
+  const product = marketingCartProduct(item);
+  return normalizeStorefrontImageUrl(
+    product?.thumbnailUrl || product?.imageUrl || item.imageUrl,
+  );
+}
+
+function marketingCartImageMarkup(item: MarketingCartItem, className: string): string {
+  const imageUrl = marketingCartImageUrl(item);
+  const fallback = escapeHtml((item.name.trim()[0] || "P").toUpperCase());
+  return `<span class="${className} cart-product-visual" data-cart-product-visual><i aria-hidden="true">${fallback}</i>${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="" loading="lazy" decoding="async" data-cart-product-image />` : ""}</span>`;
+}
+
 function renderMonitorIntent(snapshot: DashboardSnapshot): void {
   const marketing = snapshot.analytics.marketing;
   if (!marketing) {
@@ -1621,7 +1661,7 @@ function renderMonitorIntent(snapshot: DashboardSnapshot): void {
   monitorCartCount.textContent = `${formatNumber(carts.length)} cart${carts.length === 1 ? "" : "s"}`;
   monitorCartStream.innerHTML = carts.length
     ? carts.slice(0, 8).map((cart) => {
-        const items = cart.items.slice(0, 4).map((item) => `<li><span>${item.imageUrl ? `<img src="${escapeHtml(item.imageUrl)}" alt="" loading="lazy" decoding="async" />` : escapeHtml((item.name[0] || "P").toUpperCase())}</span><div><strong>${formatNumber(item.quantity)}× ${escapeHtml(item.name)}</strong><small>${escapeHtml(item.sku || (item.variationId ? `Variation ${item.variationId}` : `Product ${item.productId}`))}</small></div><b>${escapeHtml(formatCurrency(item.price * item.quantity))}</b></li>`).join("");
+        const items = cart.items.slice(0, 4).map((item) => `<li>${marketingCartImageMarkup(item, "monitor-cart-product-image")}<div><strong>${formatNumber(item.quantity)}× ${escapeHtml(item.name)}</strong><small>${escapeHtml(item.sku || (item.variationId ? `Variation ${item.variationId}` : `Product ${item.productId}`))}</small></div><b>${escapeHtml(formatCurrency(item.price * item.quantity))}</b></li>`).join("");
         return `<article class="monitor-cart-card"><header><div><strong>${escapeHtml(monitorCartIdentity(cart))}</strong><small>${relativeDate(cart.updatedAt)} · ${escapeHtml(pageLabel(cart.path))}</small></div><span class="marketing-cart-state marketing-cart-state--${cart.status}">${escapeHtml(displayLabel(cart.status))}</span></header><ul>${items}</ul><footer><span>${formatNumber(cart.itemCount)} item${cart.itemCount === 1 ? "" : "s"}</span><strong>${escapeHtml(formatCurrency(cart.total))}</strong></footer></article>`;
       }).join("")
     : '<div class="monitor-intent-empty"><span>◇</span><div><strong>No cart activity in this period</strong><p>Product additions will appear here with their SKU, quantity and value.</p></div></div>';
@@ -3277,6 +3317,7 @@ async function loadCommerce(): Promise<void> {
     };
   }
   renderCommerce();
+  if (latestSnapshot) renderMarketing(latestSnapshot);
 }
 
 function directProductLocation(productId: number, variationId = 0): ProductLocation | undefined {
@@ -3791,8 +3832,8 @@ const fulfillmentStatusCopy: Record<FulfillmentQueueEntry["queueStatus"], {
 
 const fulfillmentReasonGuidance: Record<string, { title: string; next: string }> = {
   order_not_processing: {
-    title: "Order status is not ready",
-    next: "Confirm the order is ready and change its source status to Processing.",
+    title: "This order left the picking queue",
+    next: "If the status change was intentional, remove this old session from the working queue. Otherwise return the source order to Processing.",
   },
   payment_not_approved: {
     title: "Payment approval is required",
@@ -3835,8 +3876,8 @@ const fulfillmentReasonGuidance: Record<string, { title: string; next: string }>
     next: "Reconnect the order line to the exact purchased variation.",
   },
   source_order_changed: {
-    title: "The live order changed",
-    next: "Review the updated products and quantities before continuing this session.",
+    title: "Review the updated order",
+    next: "The order changed after picking began. Review its products and quantities before continuing.",
   },
   fulfillment_cancelled: {
     title: "Fulfillment session was cancelled",
@@ -4741,7 +4782,13 @@ function renderFulfillmentDetail(order: FulfillmentQueueEntry): void {
   } else if (order.queueStatus === "active" && order.session) {
     action = `<div class="fulfillment-detail-action"><div><strong>Picking session secured</strong><p>Progress is durable. Barcode scanning will be added in Phase 4.</p></div><button class="button button--secondary" type="button" data-pause-fulfillment="${escapeHtml(order.session.id)}" data-version="${order.session.version}"${canOperate ? "" : " disabled"}>Pause order</button></div>`;
   } else if (order.queueStatus === "blocked" && order.session?.state === "open") {
-    action = `<div class="fulfillment-detail-action"><div><strong>This active session needs attention</strong><p>Pause it to release the workstation while the source issue is corrected.</p></div><button class="button button--secondary" type="button" data-pause-fulfillment="${escapeHtml(order.session.id)}" data-version="${order.session.version}"${canOperate ? "" : " disabled"}>Pause order</button></div>`;
+    const leftProcessing = order.orderStatus.trim().toLowerCase() !== "processing";
+    const actionTitle = leftProcessing ? "Remove this old session from the working queue" : "This active session needs attention";
+    const actionCopy = leftProcessing
+      ? "Its scans and audit history stay saved. It will only return here if the source order is changed back to Processing."
+      : "Pause it to release the workstation while the source issue is corrected.";
+    const actionLabel = leftProcessing ? "Remove from queue" : "Pause order";
+    action = `<div class="fulfillment-detail-action"><div><strong>${escapeHtml(actionTitle)}</strong><p>${escapeHtml(actionCopy)}</p></div><button class="button button--secondary" type="button" data-pause-fulfillment="${escapeHtml(order.session.id)}" data-version="${order.session.version}"${canOperate ? "" : " disabled"}>${escapeHtml(actionLabel)}</button></div>`;
   } else if (order.queueStatus === "packed") {
     action = '<div class="fulfillment-complete-note"><span>✓</span><p><strong>Packed locally</strong>This fulfillment record is read-only.</p></div>';
   }
@@ -4915,7 +4962,7 @@ async function pauseFulfillment(fulfillmentId: string, expectedVersion: number):
     fulfillmentScanQueue.length = 0;
     fulfillmentQueueFilter = "paused";
     await loadFulfillmentQueue(true);
-    showToast("Order paused", "Its durable progress is preserved and another order may now be started.");
+    showToast("Order removed from the working queue", "Its durable progress and audit history are still preserved.");
   } catch (error) {
     showToast("Order not paused", error instanceof Error ? error.message : "Refresh and try again.", false);
   }
@@ -5923,12 +5970,46 @@ function updatePromoProductPreview(): void {
   const originalPrice = product?.regularPrice || product?.price || matchingLive?.originalPrice || 0;
   const salePriceInput = requiredElement<HTMLInputElement>("#promo-sale-price-input");
   const salePrice = Number(salePriceInput.value) || matchingLive?.promoPrice || 0;
+  const validPrice = originalPrice > 0 && salePrice > 0 && salePrice < originalPrice;
+  const activeUntil = extensionsData?.siteControls?.promo.endsAt;
+  const liveNow = Boolean(
+    matchingLive?.salePriceActive &&
+    extensionsData?.siteControls?.promo.enabled &&
+    activeUntil &&
+    Date.parse(activeUntil) > Date.now(),
+  );
   requiredElement<HTMLElement>("#promo-product-name").textContent = name;
   requiredElement<HTMLElement>("#promo-product-sku").textContent = sku;
-  requiredElement<HTMLInputElement>("#promo-current-price").value = originalPrice > 0 ? formatCurrency(originalPrice) : "—";
+  requiredElement<HTMLElement>("#promo-current-price").textContent = originalPrice > 0 ? formatCurrency(originalPrice) : "—";
   requiredElement<HTMLElement>("#promo-original-price").textContent = originalPrice > 0 ? formatCurrency(originalPrice) : "—";
   requiredElement<HTMLElement>("#promo-sale-price").textContent = salePrice > 0 ? formatCurrency(salePrice) : "—";
-  requiredElement<HTMLElement>("#promo-price-state").textContent = matchingLive?.salePriceActive ? "Sale price active" : selectedId ? "Ready to publish" : "Not scheduled";
+  requiredElement<HTMLElement>("#promo-price-state").textContent = liveNow ? "Live in store + checkout" : validPrice ? "Ready to publish" : selectedId ? "Needs a valid price" : "Not scheduled";
+  const discountSummary = requiredElement<HTMLElement>("#promo-discount-summary");
+  const commerceStatus = requiredElement<HTMLElement>("#promo-commerce-status");
+  salePriceInput.setAttribute("aria-invalid", String(Boolean(salePrice > 0 && !validPrice)));
+  commerceStatus.classList.toggle("is-ready", validPrice);
+  commerceStatus.classList.toggle("is-warning", Boolean(selectedId && salePrice > 0 && !validPrice));
+  if (!selectedId) {
+    discountSummary.textContent = "Select a product to prepare its real selling price.";
+    commerceStatus.querySelector("strong")!.textContent = "Choose a product first";
+    commerceStatus.querySelector("small")!.textContent = "The catalog price and checkout validation will appear automatically.";
+  } else if (validPrice) {
+    const savings = originalPrice - salePrice;
+    const percentage = Math.round((savings / originalPrice) * 100);
+    discountSummary.textContent = `${percentage}% off · customers save ${formatCurrency(savings)}`;
+    commerceStatus.querySelector("strong")!.textContent = liveNow ? "Promotion synchronized" : "One price everywhere";
+    commerceStatus.querySelector("small")!.textContent = liveNow
+      ? "The storefront, cart and checkout are using this promotional price."
+      : "Saving publishes this exact price to the storefront, cart and checkout.";
+  } else if (salePrice > 0) {
+    discountSummary.textContent = "The promotional price must be lower than the normal price.";
+    commerceStatus.querySelector("strong")!.textContent = "Price needs attention";
+    commerceStatus.querySelector("small")!.textContent = "Use an amount below the normal catalog price before publishing.";
+  } else {
+    discountSummary.textContent = "Enter the price customers will actually pay.";
+    commerceStatus.querySelector("strong")!.textContent = "Set the customer price";
+    commerceStatus.querySelector("small")!.textContent = "It will be synchronized with the storefront and checkout when saved.";
+  }
   const media = requiredElement<HTMLElement>("#featured-promo-media");
   const image = product?.thumbnailUrl || product?.imageUrl || matchingLive?.image || "";
   media.innerHTML = image ? `<img src="${escapeHtml(image)}" alt="" loading="lazy" decoding="async" />` : "<span>P1</span>";
@@ -5944,14 +6025,31 @@ function updateMaintenancePreview(): void {
   requiredElement<HTMLElement>("#maintenance-state").textContent = enabled ? "ACTIVE" : "STANDBY";
 }
 
-function renderSiteControls(): void {
+function updateSiteControlsDraftState(): void {
+  const indicator = requiredElement<HTMLElement>("#site-controls-draft-state");
+  indicator.hidden = !siteControlsDraft.dirty;
+  indicator.classList.toggle("has-remote-update", siteControlsDraft.remoteChanged);
+  indicator.querySelector("strong")!.textContent = siteControlsDraft.remoteChanged
+    ? "Draft protected"
+    : "Unsaved changes";
+  indicator.querySelector("small")!.textContent = siteControlsDraft.remoteChanged
+    ? "The published version changed, but your entries were not replaced. Save to apply your draft or reload to discard it."
+    : "Your entries are protected from automatic refreshes.";
+}
+
+function markSiteControlsDirty(): void {
+  siteControlsDraft = markSiteControlsDraftDirty(siteControlsDraft);
+  updateSiteControlsDraftState();
+}
+
+function renderSiteControls(options: { force?: boolean } = {}): void {
   const controls = extensionsData?.siteControls;
   const save = requiredElement<HTMLButtonElement>("#site-controls-save");
   const writable = Boolean(workspaceSession?.permissions.operate);
   save.disabled = !writable || !controls;
   save.textContent = writable ? "Save storefront controls" : "Read-only access";
   requiredElement<HTMLElement>("#site-controls-write-status").textContent = writable
-    ? "Direct storefront control · WordPress is not used by this module"
+    ? "Independent control state · product campaigns synchronize the real checkout price"
     : "Your role can review controls but cannot publish changes.";
   if (!controls) {
     requiredElement<HTMLElement>("#site-controls-version").textContent = "Control service unavailable";
@@ -5960,6 +6058,10 @@ function renderSiteControls(): void {
   requiredElement<HTMLElement>("#site-controls-version").textContent = controls.revision
     ? `Independent control · revision ${controls.revision}`
     : `Independent control · v${controls.version || "2.0"}`;
+  const decision = reconcileSiteControlsDraft(siteControlsDraft, Number(controls.revision || 0), options.force === true);
+  siteControlsDraft = decision.state;
+  updateSiteControlsDraftState();
+  if (!decision.hydrate) return;
   selectedPromoType = normalizePromoType(controls.promo.type);
   requiredElement<HTMLInputElement>("#promo-enabled").checked = controls.promo.enabled;
   requiredElement<HTMLElement>("#promo-state").textContent = controls.promo.enabled ? "ACTIVE" : "OFF";
@@ -6024,7 +6126,7 @@ async function loadExtensions(): Promise<void> {
   updateRelativeTime();
 }
 
-async function loadIndependentSiteControls(): Promise<void> {
+async function loadIndependentSiteControls(forceRender = false): Promise<void> {
   try {
     const response = await fetch("/api/site-controls", {
       credentials: "same-origin",
@@ -6043,7 +6145,7 @@ async function loadIndependentSiteControls(): Promise<void> {
       siteControlsStorage: typeof payload.storage === "string" ? payload.storage : "independent",
       storefrontDelivery: typeof payload.storefrontDelivery === "string" ? payload.storefrontDelivery : "research-peptides-direct",
     };
-    renderSiteControls();
+    renderSiteControls({ force: forceRender });
   } catch {
     if (!extensionsData?.siteControls) {
       requiredElement<HTMLElement>("#site-controls-version").textContent = "Independent control service unavailable";
@@ -6056,17 +6158,36 @@ async function saveSiteControls(): Promise<void> {
     showToast("Read-only access", "An operations or administrator role is required to change the storefront.", false);
     return;
   }
+  const promotionEnabled = requiredElement<HTMLInputElement>("#promo-enabled").checked;
+  const selectedProduct = siteControlProduct();
+  const requestedSalePrice = Number(requiredElement<HTMLInputElement>("#promo-sale-price-input").value) || 0;
+  if (promotionEnabled && selectedPromoType === "product") {
+    const catalogPrice = selectedProduct?.regularPrice || selectedProduct?.price || 0;
+    if (!selectedProduct) {
+      showToast("Choose a product", "Select the exact product that should receive the promotion.", false);
+      requiredElement<HTMLSelectElement>("#promo-product-select").focus();
+      return;
+    }
+    if (selectedProduct.type !== "simple") {
+      showToast("Choose an exact presentation", "This product has multiple options, so one shared price could charge the wrong amount.", false);
+      return;
+    }
+    if (requestedSalePrice <= 0 || requestedSalePrice >= catalogPrice) {
+      showToast("Check the promotional price", "Enter an amount lower than the normal catalog price.", false);
+      requiredElement<HTMLInputElement>("#promo-sale-price-input").focus();
+      return;
+    }
+  }
   const save = requiredElement<HTMLButtonElement>("#site-controls-save");
   save.disabled = true;
   save.textContent = "Securing change…";
-  const selectedProduct = siteControlProduct();
   const payload = {
     expectedRevision: Number(extensionsData?.siteControls?.revision || 0),
     promo: {
-      enabled: requiredElement<HTMLInputElement>("#promo-enabled").checked,
+      enabled: promotionEnabled,
       type: selectedPromoType,
       productId: Number(requiredElement<HTMLSelectElement>("#promo-product-select").value) || 0,
-      salePrice: Number(requiredElement<HTMLInputElement>("#promo-sale-price-input").value) || 0,
+      salePrice: requestedSalePrice,
       sitewideLabel: requiredElement<HTMLInputElement>("#promo-sitewide-label").value.trim(),
       eyebrow: requiredElement<HTMLInputElement>("#promo-eyebrow").value.trim(),
       title: requiredElement<HTMLInputElement>("#promo-title").value.trim(),
@@ -6107,13 +6228,15 @@ async function saveSiteControls(): Promise<void> {
         siteControlsWriteEnabled: true,
         siteControlsSource: "operations-control-plane",
       };
-      renderSiteControls();
+      renderSiteControls({ force: true });
     } else {
       await loadExtensions();
     }
     showToast(
-      "Storefront controls published",
-      "research-peptides is now reading this revision directly. WordPress was not contacted.",
+      promotionEnabled && selectedPromoType === "product" ? "Promotion is live" : "Storefront controls published",
+      promotionEnabled && selectedPromoType === "product"
+        ? "The promotional price is synchronized with the product, cart and checkout."
+        : "research-peptides is now reading this revision directly.",
     );
   } catch (error) {
     if (error instanceof Error && error.message.includes("another session")) {
@@ -8333,15 +8456,29 @@ requiredElement<HTMLButtonElement>("#print-barcode-label").addEventListener("cli
 for (const option of document.querySelectorAll<HTMLButtonElement>("[data-promo-option]")) {
   option.addEventListener("click", () => {
     selectedPromoType = normalizePromoType(option.dataset.promoOption || "general");
+    markSiteControlsDirty();
     renderPromoEditorMode();
   });
 }
+requiredElement<HTMLElement>("[data-view-panel='site-controls']").addEventListener("input", (event) => {
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) {
+    markSiteControlsDirty();
+  }
+});
+requiredElement<HTMLElement>("[data-view-panel='site-controls']").addEventListener("change", (event) => {
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) {
+    markSiteControlsDirty();
+  }
+});
 requiredElement<HTMLInputElement>("#promo-enabled").addEventListener("change", (event) => {
   requiredElement<HTMLElement>("#promo-state").textContent = (event.currentTarget as HTMLInputElement).checked ? "READY" : "OFF";
 });
 requiredElement<HTMLSelectElement>("#promo-product-select").addEventListener("change", () => {
   const product = siteControlProduct();
   requiredElement<HTMLInputElement>("#promo-sale-price-input").value = product?.salePrice ? String(product.salePrice) : "";
+  if (product?.slug) {
+    requiredElement<HTMLInputElement>("#promo-cta-url").value = `/product/${encodeURIComponent(product.slug)}/`;
+  }
   updatePromoProductPreview();
 });
 requiredElement<HTMLInputElement>("#promo-sale-price-input").addEventListener("input", updatePromoProductPreview);
@@ -8350,7 +8487,7 @@ requiredElement<HTMLInputElement>("#maintenance-title").addEventListener("input"
 requiredElement<HTMLTextAreaElement>("#maintenance-message").addEventListener("input", updateMaintenancePreview);
 requiredElement<HTMLButtonElement>("#site-controls-save").addEventListener("click", () => void saveSiteControls());
 requiredElement<HTMLButtonElement>("#site-controls-refresh").addEventListener("click", () => {
-  void loadIndependentSiteControls().then(() => showToast("Control state reloaded", "Site Controls now shows the latest independent storefront decision."));
+  void loadIndependentSiteControls(true).then(() => showToast("Control state reloaded", "Site Controls now shows the latest independent storefront decision."));
 });
 function showLoyaltySection(section: string): void {
   const next = ["overview", "settings", "customers", "history"].includes(section) ? section : "overview";
@@ -9628,6 +9765,12 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) closeFulfillmentCamera(false);
   if (!document.hidden) void loadLiveOrders();
 });
+document.addEventListener("error", (event) => {
+  const image = event.target;
+  if (!(image instanceof HTMLImageElement) || !image.matches("[data-cart-product-image]")) return;
+  image.hidden = true;
+  image.closest<HTMLElement>("[data-cart-product-visual]")?.classList.add("is-image-unavailable");
+}, true);
 window.addEventListener("pagehide", stopFulfillmentCamera);
 
 connect();

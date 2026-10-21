@@ -5,6 +5,8 @@ let directory: AffiliateAdminDirectory | null = null;
 let initialized = false;
 let activeTab: "directory" | "commissions" | "applications" | "payouts" | "program" = "directory";
 let managedAffiliateId: string | null = null;
+let loading = false;
+const AFFILIATE_INBOX_REFRESH_MS = 20_000;
 
 const find = <T extends HTMLElement>(selector: string): T | null => document.querySelector<T>(selector);
 const required = <T extends HTMLElement>(selector: string): T => {
@@ -329,20 +331,32 @@ async function updatePayout(id: string, status: string): Promise<void> {
 }
 
 export async function loadAffiliateAdmin(force = false): Promise<void> {
+  if (loading) return;
+  loading = true;
   const sync = required("#affiliate-sync-state");
-  sync.classList.remove("is-ready");
-  sync.querySelector("b")!.textContent = "Synchronizing affiliates";
-  sync.querySelector("small")!.textContent = "Reading the migration bridge";
-  const response = await fetch(`/api/affiliates${force ? "?refresh=1" : ""}`, { credentials: "same-origin", cache: "no-store" });
-  const payload = await response.json() as AffiliateAdminDirectory & { error?: string };
-  if (!response.ok || !payload.affiliates) {
-    sync.querySelector("b")!.textContent = "Affiliate service unavailable";
-    sync.querySelector("small")!.textContent = payload.error || "Try again";
-    required("#affiliate-admin-body").innerHTML = `<tr><td colspan="8"><div class="affiliate-admin-empty is-error"><strong>Affiliate data could not be loaded</strong><p>${escapeHtml(payload.error || "The platform is temporarily unavailable.")}</p></div></td></tr>`;
-    return;
+  if (!directory || force) {
+    sync.classList.remove("is-ready");
+    sync.querySelector("b")!.textContent = "Synchronizing affiliates";
+    sync.querySelector("small")!.textContent = "Reading the migration bridge";
   }
-  directory = payload;
-  renderMetrics(); renderDirectory(); renderCommissions(); renderApplications(); renderPayouts();
+  try {
+    const response = await fetch(`/api/affiliates${force ? "?refresh=1" : ""}`, { credentials: "same-origin", cache: "no-store" });
+    const payload = await response.json() as AffiliateAdminDirectory & { error?: string };
+    if (!response.ok || !payload.affiliates) {
+      sync.querySelector("b")!.textContent = "Affiliate service unavailable";
+      sync.querySelector("small")!.textContent = payload.error || "Try again";
+      required("#affiliate-admin-body").innerHTML = `<tr><td colspan="8"><div class="affiliate-admin-empty is-error"><strong>Affiliate data could not be loaded</strong><p>${escapeHtml(payload.error || "The platform is temporarily unavailable.")}</p></div></td></tr>`;
+      return;
+    }
+    directory = payload;
+    renderMetrics(); renderDirectory(); renderCommissions(); renderApplications(); renderPayouts();
+  } catch (error: unknown) {
+    sync.querySelector("b")!.textContent = "Affiliate service unavailable";
+    sync.querySelector("small")!.textContent = "The inbox will retry automatically";
+    console.error("Affiliate administration refresh failed", error);
+  } finally {
+    loading = false;
+  }
 }
 
 export function initAffiliateAdmin(): void {
@@ -408,5 +422,17 @@ export function initAffiliateAdmin(): void {
     }
     const action = target.closest<HTMLElement>("[data-payout-action]");
     if (action?.dataset.payoutAction && action.dataset.payoutId) void updatePayout(action.dataset.payoutId, action.dataset.payoutAction).catch((error: unknown) => alert(error instanceof Error ? error.message : "Payout update failed"));
+  });
+  window.setInterval(() => {
+    const panel = find<HTMLElement>("[data-view-panel='affiliates']");
+    if (document.visibilityState === "visible" && panel?.classList.contains("is-active")) {
+      void loadAffiliateAdmin();
+    }
+  }, AFFILIATE_INBOX_REFRESH_MS);
+  document.addEventListener("visibilitychange", () => {
+    const panel = find<HTMLElement>("[data-view-panel='affiliates']");
+    if (document.visibilityState === "visible" && panel?.classList.contains("is-active")) {
+      void loadAffiliateAdmin();
+    }
   });
 }
