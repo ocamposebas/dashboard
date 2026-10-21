@@ -4,7 +4,7 @@ import type { QueryResultRow } from "pg";
 
 import type { Database, SqlExecutor } from "./database.js";
 import type { CommerceCoa, CommerceCoaWrite } from "./wooCommerceGateway.js";
-import { analyzeCoaPdf, type CoaDocumentAnalysis } from "./coaDocumentIntelligence.js";
+import { analyzeCoaPdf, type CoaDocumentAnalysis } from "./coaDocumentAnalysis.js";
 import {
   coaLaboratoryFromLink,
   coaSourceFingerprint,

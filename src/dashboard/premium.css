@@ -625,7 +625,7 @@ tbody tr:hover td { background: var(--surface-hover); }
 .module-tabs button { color: var(--muted); font-size: 10px; }
 .module-tabs button:hover { background: var(--surface-soft); color: var(--ink); }
 .module-tabs button.is-active { background: var(--ink); color: var(--surface); }
-.module-icon, .command-results button > span, .intake-pipeline > div > span, .intelligence-cards article > span, .module-placeholder > span:first-child,
+.module-icon, .command-results button > span, .intake-pipeline > div > span, .review-cards article > span, .module-placeholder > span:first-child,
 .coa-family-mark, .site-control-card > header > span, .settings-section-label > span {
   background: var(--surface-hover);
   color: var(--ink);
@@ -761,7 +761,7 @@ tbody tr:hover td { background: var(--surface-hover); }
 .new-order-signal { background: #fff; box-shadow: 0 0 0 6px rgba(255,255,255,.12); }
 .new-order-banner small, .new-order-banner strong, .new-order-banner p { color: #fff; }
 
-/* Growth intelligence, notifications and identity access */
+/* Growth reports, notifications and identity access */
 .seo-connection,
 .access-command {
   display: flex;
@@ -1558,7 +1558,7 @@ html[data-theme="dark"] .loyalty-simulator-summary span { color: #626267; }
 @media(max-width:1100px){.operations-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.inventory-layout,.reconciliation-layout{grid-template-columns:1fr}.inventory-layout .restock-program{order:-1}}
 @media(max-width:760px){.workspace-switcher{grid-template-columns:1fr}.workspace-switcher--compact{grid-template-columns:1fr 1fr}.workspace-switcher button{min-height:60px}.operations-kpi-grid{grid-template-columns:1fr 1fr}.order-workspace-tabs{top:66px;overflow-x:auto}.order-workspace-tabs button{flex:0 0 auto}.payment-review-hero{grid-template-columns:1fr}.payment-review-hero>div:nth-child(2){padding:12px 0 0;border-top:1px solid var(--line);border-left:0}.document-toolbar,.coa-workspace-head,.timeline-head{align-items:flex-start;flex-direction:column}.document-toolbar form{width:100%;flex-wrap:wrap}.evidence-grid{grid-template-columns:1fr}.agreement-card{grid-template-columns:42px 1fr}.agreement-card .button{grid-column:1/-1}.coa-line form{grid-template-columns:1fr 90px}.coa-line form .button{grid-column:1/-1}.shipping-status-grid{grid-template-columns:1fr}.inventory-command{align-items:flex-start;flex-direction:column}}
 
-/* Consolidated intelligence: sales, live customer intent and SKU stock */
+/* Consolidated reporting: sales, live customer intent and SKU stock */
 .overview-sales-panel { margin: 16px 0; overflow: hidden; }
 .overview-sales-head { align-items: center; padding: 20px 22px; border-bottom: 1px solid var(--line); }
 .overview-sales-head h2, .monitor-section-title h2 { margin: 0; color: var(--ink); font-size: 17px; letter-spacing: -.025em; }

@@ -119,7 +119,7 @@ disabled, while Coupon Affiliates remains the affiliate balance authority.
 9. Connect Search Console and perform ShipStation read-only rate validation.
 10. Approve affiliate cutover and real ShipStation purchasing as separate changes.
 
-## Current release: independent Site Controls and customer intelligence
+## Current release: independent Site Controls and customer activity reporting
 
 ### Before deployment
 

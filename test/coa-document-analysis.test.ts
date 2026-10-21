@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { PDFDocument, StandardFonts } from "pdf-lib";
 
-import { analyzeCoaPdf, detectCoaAssays, detectCoaDate, detectCoaFields } from "../src/server/coaDocumentIntelligence.js";
+import { analyzeCoaPdf, detectCoaAssays, detectCoaDate, detectCoaFields } from "../src/server/coaDocumentAnalysis.js";
 
 test("detects the operational fields used to review a certificate", () => {
   const fields = detectCoaFields(`

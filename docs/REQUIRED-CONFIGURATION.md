@@ -131,7 +131,7 @@ needed for store operations. It must never be exposed to the browser.
 - [ ] Set `GOOGLE_SEARCH_CONSOLE_SITE_URL=sc-domain:phaseonelabz.com`.
 - [ ] Confirm the Google account used by the operator has access to that verified
   Search Console property.
-- [ ] Complete the OAuth connection from **SEO intelligence** after deployment and
+- [ ] Complete the OAuth connection from **SEO reports** after deployment and
   verify that the read-only sync returns queries, pages, devices and sitemaps.
 
 ## 5. ShipStation

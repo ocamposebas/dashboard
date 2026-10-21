@@ -119,7 +119,7 @@ el servicio funciona como receptor independiente con su propio Redis.
 
 ## SEO y Google Search Console
 
-El módulo **SEO intelligence** usa OAuth 2.0 y solicita únicamente el permiso
+El módulo **SEO reports** usa OAuth 2.0 y solicita únicamente el permiso
 de lectura de Search Console. En Google Cloud crea un cliente OAuth de tipo
 aplicación web y registra esta URL de redirección local:
 
@@ -136,7 +136,7 @@ GOOGLE_SEARCH_CONSOLE_REDIRECT_URI=http://localhost:8080/api/seo/callback
 GOOGLE_SEARCH_CONSOLE_SITE_URL=sc-domain:phaseonelabz.com
 ```
 
-Reconstruye con `docker compose up -d --build`, abre **SEO intelligence** y
+Reconstruye con `docker compose up -d --build`, abre **SEO reports** y
 pulsa **Connect search data**. Los tokens se guardan cifrados en Redis; el
 navegador nunca recibe el secreto del cliente ni el token de actualización.
 

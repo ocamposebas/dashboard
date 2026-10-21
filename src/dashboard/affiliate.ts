@@ -1,5 +1,6 @@
 import "./affiliate.css";
 import "./affiliate-hidden.css";
+import "./clean-ui.css";
 import logoUrl from "./phase-one-labz-logo.webp";
 import type { AffiliatePortalDashboard } from "../shared/affiliates";
 

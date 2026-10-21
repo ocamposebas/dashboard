@@ -122,7 +122,7 @@ Status: **completed and approved locally**
 - [x] Render scanner-compatible Code 128 labels with product, SKU, variation, lot/batch, COA, and effective location.
 - [x] Add exact 2×1-inch and 3×1-inch browser print layouts, 1–50 copies, preview, copy, and reprint actions.
 - [x] Replace the original all-in-one interface with three focused responsive light/dark views: **Print Labels**, **Storage Locations**, and **Registered Labels**.
-- [x] Make Print Labels the default workflow with deliberate product selection, smart variation/batch defaults, automatic effective-location lookup, and advanced print settings hidden by default.
+- [x] Make Print Labels the default workflow with deliberate product selection, practical variation/batch defaults, automatic effective-location lookup, and advanced print settings hidden by default.
 - [x] Limit location editing to one selected product at a time, including clear primary-location and inherited variation states.
 - [x] Show only persisted barcode registry records in Registered Labels; do not represent them as physical print history.
 - [x] Enforce existing role permissions: Owner/Administrator manage locations; Operations can print; Analyst is read-only.

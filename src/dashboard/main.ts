@@ -2,6 +2,7 @@ import "./styles.css";
 import "./premium.css";
 import "./labels.css";
 import "./fulfillment.css";
+import "./clean-ui.css";
 import { initAffiliateAdmin, loadAffiliateAdmin } from "./affiliates-admin";
 import type { AffiliateCommissionSummary } from "../shared/affiliates";
 import type { DecodeHintType as ZXingDecodeHintType } from "@zxing/library";
@@ -1949,7 +1950,7 @@ async function loadCompleteSalesRange(range = salesInsightRange): Promise<boolea
   if (salesInsightLoading) return false;
   if (salesInsightComplete?.range === range) return true;
   salesInsightLoading = true;
-  renderSalesIntelligence();
+  renderSalesPerformance();
   try {
     const after = new Date(salesRangeStart(range) - 1_000).toISOString();
     const before = new Date(Date.now() + 60_000).toISOString();
@@ -1969,7 +1970,7 @@ async function loadCompleteSalesRange(range = salesInsightRange): Promise<boolea
     return false;
   } finally {
     salesInsightLoading = false;
-    renderSalesIntelligence();
+    renderSalesPerformance();
   }
 }
 
@@ -2001,7 +2002,7 @@ function productSales(range = salesInsightRange): ProductSalesSummary[] {
   );
 }
 
-function renderSalesIntelligence(): void {
+function renderSalesPerformance(): void {
   const container = document.querySelector<HTMLElement>("#overview-top-products");
   const summary = document.querySelector<HTMLElement>("#overview-sales-summary");
   if (!container || !summary) return;
@@ -2096,7 +2097,7 @@ function renderOrders(): void {
     ? allOrders.slice(0, 6).map((order) => orderRow(order, true)).join("")
     : '<tr><td colspan="6"><div class="table-loading">No orders are available yet.</div></td></tr>';
   renderMonitorOrders();
-  renderSalesIntelligence();
+  renderSalesPerformance();
   renderPaymentReview();
   renderReconciliation();
   renderOrdersWorkspace();
@@ -2642,7 +2643,7 @@ function renderCustomerDetail(customer: CustomerProfile): void {
     </div>
     <section class="customer-detail-section"><div class="customer-section-heading"><div><p class="section-kicker">Contact & fulfillment</p><h3>Saved customer information</h3></div><span>Protected session</span></div><div class="customer-address-grid">${customerAddressCard("Billing profile", customer.billing)}${customerAddressCard("Shipping profile", customer.shipping)}</div></section>
     <section class="customer-detail-section"><div class="customer-section-heading"><div><p class="section-kicker">Loyalty ledger</p><h3>Points activity</h3></div><span>${customerDirectory?.rewardsLive ? "Live balance + audit history" : "Order-earned points preserved"}</span></div><div class="reward-activity-list">${rewardActivityRows(customer)}</div></section>
-    <section class="customer-detail-section"><div class="customer-section-heading"><div><p class="section-kicker">Purchase intelligence</p><h3>Top products</h3></div><span>${formatNumber(customer.topProducts.length)} products</span></div><div class="customer-products-list">${products}</div></section>
+    <section class="customer-detail-section"><div class="customer-section-heading"><div><p class="section-kicker">Purchase history</p><h3>Top products</h3></div><span>${formatNumber(customer.topProducts.length)} products</span></div><div class="customer-products-list">${products}</div></section>
     <section class="customer-detail-section customer-orders-section"><div class="customer-section-heading"><div><p class="section-kicker">Complete order history</p><h3>Every order</h3></div><span>${formatNumber(customer.orderCount)} total</span></div><div class="customer-order-history">${orders}</div></section>`;
 }
 
@@ -6904,7 +6905,7 @@ const viewNames: Record<string, string> = {
   customers: "Customers",
   affiliates: "Affiliates",
   loyalty: "Loyalty control",
-  seo: "SEO intelligence",
+  seo: "SEO reports",
   marketing: "Marketing",
   coa: "COA Manager",
   "site-controls": "Site Controls",
@@ -8575,7 +8576,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-sales-r
       item.classList.toggle("is-active", active);
       item.setAttribute("aria-pressed", String(active));
     }
-    renderSalesIntelligence();
+    renderSalesPerformance();
     void loadCompleteSalesRange(range);
   });
 }
