@@ -45,6 +45,7 @@ const product = {
   name: "PL-TZ",
   sku: "PL-TZ",
   type: "variable",
+  status: "publish",
 } as CommerceProduct;
 
 const variations = [
@@ -68,4 +69,10 @@ test("automatic publication stays closed for ambiguous strengths and unconfirmed
       dateDetection: { confidence: "fallback" },
     },
   }), false);
+});
+
+test("one published product wins over stale draft or trashed duplicates", () => {
+  const draft = { ...product, id: 700, status: "draft" };
+  const trashed = { ...product, id: 701, status: "trash" };
+  assert.equal(exactAutomaticCoaProduct(coa, [draft, trashed, product])?.id, 533);
 });

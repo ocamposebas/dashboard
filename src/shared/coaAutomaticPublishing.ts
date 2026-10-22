@@ -41,6 +41,7 @@ export function exactAutomaticCoaProduct(
   );
   const skuIdentities = new Set((coa.skus || []).map(skuIdentity).filter(Boolean));
   const matches = products.filter((product) => {
+    if (product.status === "trash") return false;
     const productName = automaticCoaProductIdentity(product.name);
     const productSku = skuIdentity(product.sku || "");
     return Boolean(
@@ -48,6 +49,8 @@ export function exactAutomaticCoaProduct(
       (productSku && skuIdentities.has(productSku)),
     );
   });
+  const publishedMatches = matches.filter((product) => product.status === "publish");
+  if (publishedMatches.length === 1) return publishedMatches[0]!;
   return matches.length === 1 ? matches[0]! : null;
 }
 

@@ -182,12 +182,13 @@ function rowToCoa(row: CoaRow, publicOrigin: string): CustomCoa {
   const current = record(row.current_coa);
   const storedHistory = history(row.history);
   const storedIntakeAnalysis = record(row.intake_analysis);
-  const intakeAnalysis = Object.keys(storedIntakeAnalysis).length
+  const legacySuggestCurrent = row.status === "Review" && row.current_shipping_lot;
+  const intakeAnalysis = Object.keys(storedIntakeAnalysis).length || legacySuggestCurrent
     ? {
         ...storedIntakeAnalysis,
         suggestCurrent: Boolean(
           storedIntakeAnalysis.suggestCurrent ||
-          (row.status === "Review" && row.current_shipping_lot),
+          legacySuggestCurrent,
         ),
       } as unknown as CoaDocumentAnalysis
     : null;
