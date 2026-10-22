@@ -558,6 +558,8 @@ export function createMonitorServer(
         status: coa.status,
         currentShippingLot: coa.currentShippingLot,
         suggestCurrent: coa.intakeAnalysis?.suggestCurrent === true,
+        analysisStatus: coa.intakeAnalysis?.status || "not-recorded",
+        dateConfidence: coa.intakeAnalysis?.dateDetection?.confidence || "not-recorded",
         productName: coa.productName,
         familyName: coa.familyName,
         strength: coa.strength,
