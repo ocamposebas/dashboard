@@ -76,3 +76,12 @@ test("one published product wins over stale draft or trashed duplicates", () => 
   const trashed = { ...product, id: 701, status: "trash" };
   assert.equal(exactAutomaticCoaProduct(coa, [draft, trashed, product])?.id, 533);
 });
+
+test("an already available current lot is repaired when its catalog mapping is missing", () => {
+  assert.equal(canAutomaticallyPublishCoa({
+    ...coa,
+    status: "Available",
+    currentShippingLot: true,
+    intakeAnalysis: null,
+  }), true);
+});

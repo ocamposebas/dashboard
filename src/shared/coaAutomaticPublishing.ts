@@ -66,6 +66,7 @@ export function exactAutomaticCoaVariation(
 
 export function canAutomaticallyPublishCoa(coa: CommerceCoa & {
   source?: string;
+  currentShippingLot?: boolean;
   intakeAnalysis?: {
     status?: string;
     suggestCurrent?: boolean;
@@ -76,10 +77,12 @@ export function canAutomaticallyPublishCoa(coa: CommerceCoa & {
   const hasDocument = Boolean(String(coa.fileUrl || coa.verifyUrl || "").trim());
   const finalNumber = String(coa.coaNumber || "").trim();
   const dateConfidence = coa.intakeAnalysis?.dateDetection?.confidence;
+  const publicationRequested =
+    (coa.status === "Review" && coa.intakeAnalysis?.suggestCurrent === true) ||
+    (coa.status === "Available" && coa.currentShippingLot === true);
   return Boolean(
     coa.source === "custom" &&
-    coa.status === "Review" &&
-    coa.intakeAnalysis?.suggestCurrent === true &&
+    publicationRequested &&
     coa.intakeAnalysis?.status !== "failed" &&
     dateConfidence !== "fallback" &&
     dateConfidence !== "missing" &&
