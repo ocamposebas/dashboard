@@ -171,11 +171,9 @@ export class FulfillmentShippingWorkflow {
 
 export function sourceShippingBlocksPurchase(source: BeginShippingLabelInput["sourceShipping"]): string | null {
   if (source.trackingNumber) return "This order already has a tracking number.";
-  if (source.shipmentIds.length) return "This order already references a ShipStation shipment.";
-  if (source.shippedItemCount > 0) return "This order already contains shipped items.";
-  if (source.exported) {
-    return "This order is already synchronized to ShipStation. Link or reconcile that record before native label purchase.";
-  }
+  // WooCommerce's ShipStation bridge marks exports, shipment references and
+  // item counts before a label is necessarily purchased. Those are discovery
+  // signals, not proof of postage. The live API preflight is authoritative.
   return null;
 }
 
@@ -185,3 +183,4 @@ export function purchaseModeFor(
 ): "mock_only" | "live_disabled" | "live_enabled" {
   return dataMode === "mock" ? "mock_only" : livePurchaseEnabled ? "live_enabled" : "live_disabled";
 }
+

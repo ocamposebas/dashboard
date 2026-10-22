@@ -231,6 +231,22 @@ function labelList(value: unknown): ShipStationLabelResult[] {
   return items.map(labelResult);
 }
 
+function shipmentList(value: unknown): Array<{ shipmentId: string; shipmentNumber: string; status: string }> {
+  const root = record(value);
+  const items = Array.isArray(value) ? value : root?.shipments;
+  if (!Array.isArray(items)) {
+    throw new ShipStationGatewayError("ShipStation returned an invalid shipment list", "invalid_response");
+  }
+  return items.flatMap((item) => {
+    const source = record(item);
+    if (!source) return [];
+    const shipmentId = textValue(source.shipment_id);
+    const shipmentNumber = textValue(source.shipment_number);
+    const status = textValue(source.shipment_status).toLowerCase();
+    return shipmentId ? [{ shipmentId, shipmentNumber, status }] : [];
+  });
+}
+
 function mockCarriers(): ShippingCarrier[] {
   return [
     {
@@ -637,6 +653,22 @@ export class ShipStationGateway {
     ));
   }
 
+  async findPurchasedLabelsByOrderNumber(orderNumber: string): Promise<ShipStationLabelResult[]> {
+    if (this.config.rateMode !== "live") return [];
+    const normalized = orderNumber.trim().replace(/^#/, "");
+    if (!normalized || normalized.length > 50) {
+      throw new ShipStationGatewayError("The order number is invalid for ShipStation reconciliation", "invalid_response");
+    }
+    const shipments = shipmentList(await this.request(
+      `/shipments?shipment_number=${encodeURIComponent(normalized)}&page_size=25&sort_dir=desc&sort_by=modified_at`,
+    )).filter((shipment) => shipment.shipmentNumber.replace(/^#/, "") === normalized);
+    const purchased = shipments.filter((shipment) => shipment.status === "label_purchased");
+    const labels = await Promise.all(purchased.map((shipment) => this.request(
+      `/labels?shipment_id=${encodeURIComponent(shipment.shipmentId)}&page_size=10&sort_dir=desc&sort_by=created_at`,
+    ).then(labelList)));
+    return labels.flat().filter((label) => label.status === "completed" || label.status === "processing");
+  }
+
   async getLabelById(labelId: string): Promise<ShipStationLabelResult> {
     const normalized = labelId.trim();
     if (!normalized || normalized.length > 160 || !/^[a-zA-Z0-9_-]+$/.test(normalized)) {
@@ -700,3 +732,4 @@ export class ShipStationGateway {
     return bytes;
   }
 }
+

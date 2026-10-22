@@ -167,6 +167,64 @@ test("prepared label creation and reconciliation use only the documented endpoin
   assert.match(requests[3]?.url || "", /\/labels\/se-label-20\/void$/);
 });
 
+test("exported orders reconcile purchased labels by exact ShipStation order number", async () => {
+  const requests: string[] = [];
+  const labelResponse = {
+    label_id: "se-label-existing",
+    shipment_id: "se-shipment-existing",
+    status: "completed",
+    tracking_number: "TRACK-EXISTING",
+    carrier_id: "se-fedex",
+    carrier_code: "fedex",
+    service_code: "fedex_ground",
+    shipment_cost: { amount: 12.5, currency: "usd" },
+    label_download: { pdf: "https://api.shipstation.com/v2/downloads/existing.pdf" },
+  };
+  const gateway = new ShipStationGateway({
+    apiKey: "server-only-key", rateMode: "live", labelPurchaseEnabled: true,
+  }, async (input) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.includes("/shipments?")) {
+      return new Response(JSON.stringify({ shipments: [{
+        shipment_id: "se-shipment-existing",
+        shipment_number: "3145",
+        shipment_status: "label_purchased",
+      }, {
+        shipment_id: "se-other",
+        shipment_number: "13145",
+        shipment_status: "label_purchased",
+      }] }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ labels: [labelResponse] }), { status: 200 });
+  }, "https://shipstation.example/v2");
+
+  const labels = await gateway.findPurchasedLabelsByOrderNumber("#3145");
+  assert.equal(labels.length, 1);
+  assert.equal(labels[0]?.trackingNumber, "TRACK-EXISTING");
+  assert.match(requests[0] || "", /shipment_number=3145/);
+  assert.equal(requests.filter((url) => url.includes("/labels?")).length, 1);
+});
+
+test("an exported pending shipment does not pretend postage was purchased", async () => {
+  const requests: string[] = [];
+  const gateway = new ShipStationGateway({
+    apiKey: "server-only-key", rateMode: "live", labelPurchaseEnabled: true,
+  }, async (input) => {
+    const url = String(input);
+    requests.push(url);
+    return new Response(JSON.stringify({ shipments: [{
+      shipment_id: "se-shipment-pending",
+      shipment_number: "3145",
+      shipment_status: "pending",
+    }] }), { status: 200 });
+  }, "https://shipstation.example/v2");
+
+  assert.deepEqual(await gateway.findPurchasedLabelsByOrderNumber("3145"), []);
+  assert.equal(requests.length, 1);
+  assert.equal(requests.some((url) => url.includes("/labels?")), false);
+});
+
 test("live label PDFs are proxied only from the trusted ShipStation download host", async () => {
   let requests = 0;
   const gateway = new ShipStationGateway({
@@ -228,3 +286,4 @@ test("local mock rates never call ShipStation and remain clearly identified", as
   assert.ok(rates.every((rate) => rate.rateId.startsWith("mock-rate-") && rate.isEstimate));
   assert.equal(requested, false);
 });
+

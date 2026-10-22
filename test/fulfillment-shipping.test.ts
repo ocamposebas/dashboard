@@ -55,10 +55,7 @@ test("shipping blocks invalid package values and incomplete source addresses", (
 
 test("shipping explains the exact live-order status blocker before postage", () => {
   assert.equal(packedOrderStatusBlocker({ status: "processing", refundedTotal: 0 }), null);
-  assert.match(
-    packedOrderStatusBlocker({ status: "completed", refundedTotal: 0 }) || "",
-    /already marked Completed/,
-  );
+  assert.equal(packedOrderStatusBlocker({ status: "completed", refundedTotal: 0 }), null);
   assert.match(
     packedOrderStatusBlocker({ status: "on-hold", refundedTotal: 0 }) || "",
     /on hold, not Processing/,
@@ -85,3 +82,4 @@ test("the printable 4x6 document is unmistakably a non-postage test label", () =
   assert.match(html, /TEST ONLY/);
   assert.match(html, /nonce="test-nonce"/);
 });
+

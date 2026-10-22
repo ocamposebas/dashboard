@@ -8,31 +8,31 @@ import {
   sourceShippingBlocksPurchase,
 } from "../src/server/fulfillmentShippingWorkflow.js";
 
-test("existing WooCommerce and ShipStation shipment signals block duplicate creation", () => {
+test("only definitive WooCommerce tracking blocks duplicate creation before live reconciliation", () => {
   assert.match(sourceShippingBlocksPurchase({
     exported: false,
     shippedItemCount: 0,
     shipmentIds: [],
     trackingNumber: "1ZEXISTING",
   }) || "", /tracking number/);
-  assert.match(sourceShippingBlocksPurchase({
+  assert.equal(sourceShippingBlocksPurchase({
     exported: false,
     shippedItemCount: 0,
     shipmentIds: ["se-shipment-existing"],
     trackingNumber: "",
-  }) || "", /ShipStation shipment/);
-  assert.match(sourceShippingBlocksPurchase({
+  }), null);
+  assert.equal(sourceShippingBlocksPurchase({
     exported: false,
     shippedItemCount: 2,
     shipmentIds: [],
     trackingNumber: "",
-  }) || "", /shipped items/);
-  assert.match(sourceShippingBlocksPurchase({
+  }), null);
+  assert.equal(sourceShippingBlocksPurchase({
     exported: true,
     shippedItemCount: 0,
     shipmentIds: [],
     trackingNumber: "",
-  }) || "", /already synchronized/);
+  }), null);
 });
 
 test("a clean source order can enter the protected label workflow", () => {
@@ -146,3 +146,4 @@ test("voiding performs a read-before-write check and persists one terminal state
   assert.equal(voidCalls, 1);
   assert.equal(persisted, 1);
 });
+
