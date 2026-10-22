@@ -220,9 +220,66 @@ test("an exported pending shipment does not pretend postage was purchased", asyn
     }] }), { status: 200 });
   }, "https://shipstation.example/v2");
 
-  assert.deepEqual(await gateway.findPurchasedLabelsByOrderNumber("3145"), []);
+  const reconciliation = await gateway.reconcileOrderByNumber("3145");
+  assert.deepEqual(reconciliation.purchasedLabels, []);
+  assert.equal(reconciliation.protectedShipmentFound, false);
+  assert.equal(reconciliation.reusableShipmentId, "se-shipment-pending");
   assert.equal(requests.length, 1);
   assert.equal(requests.some((url) => url.includes("/labels?")), false);
+});
+
+test("rate shopping updates and reuses one exported pending shipment", async () => {
+  const requests: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
+  const gateway = new ShipStationGateway({
+    apiKey: "server-only-key", rateMode: "live", warehouseId: "se-origin", labelPurchaseEnabled: true,
+  }, async (input, init) => {
+    const url = String(input);
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
+    requests.push({ url, method: init?.method || "GET", body });
+    if (url.includes("/carriers")) {
+      return new Response(JSON.stringify({ carriers: [{
+        carrier_id: "se-ups", carrier_code: "ups", friendly_name: "UPS",
+        services: [{ service_code: "ups_ground", name: "UPS Ground" }],
+      }] }), { status: 200 });
+    }
+    if (url.includes("/warehouses")) {
+      return new Response(JSON.stringify({ warehouses: [{
+        warehouse_id: "se-origin", name: "Main warehouse",
+        origin_address: { city_locality: "Miami", state_province: "FL", postal_code: "33101", country_code: "US" },
+      }] }), { status: 200 });
+    }
+    if (url.endsWith("/shipments/se-shipment-pending")) {
+      return new Response(JSON.stringify({ shipment_id: "se-shipment-pending" }), { status: 200 });
+    }
+    return new Response(JSON.stringify({
+      shipment_id: "se-shipment-pending",
+      rate_response: { rates: [{
+        rate_id: "se-rate-reused", carrier_id: "se-ups", carrier_code: "ups",
+        service_code: "ups_ground", service_type: "UPS Ground",
+        shipping_amount: { amount: 9.5, currency: "USD" },
+      }] },
+    }), { status: 200 });
+  }, "https://shipstation.example/v2");
+
+  const rates = await gateway.rates({
+    carrierIds: ["se-ups"],
+    package: { weightOz: 16, lengthIn: 8, widthIn: 6, heightIn: 4 },
+    destination: {
+      name: "Test Customer", address1: "100 Test Street", city: "Orlando", state: "FL",
+      postalCode: "32801", countryCode: "US",
+    },
+    externalShipmentId: "p1-fulfillment-id",
+    orderNumber: "3145",
+    existingShipmentId: "se-shipment-pending",
+  });
+
+  assert.equal(rates[0]?.shipmentId, "se-shipment-pending");
+  const update = requests.find((request) => request.url.endsWith("/shipments/se-shipment-pending"));
+  assert.equal(update?.method, "PUT");
+  assert.equal((update?.body.packages as Array<Record<string, unknown>>)[0]?.package_code, "package");
+  const rate = requests.find((request) => request.url.endsWith("/rates"));
+  assert.equal(rate?.body.shipment_id, "se-shipment-pending");
+  assert.equal("shipment" in (rate?.body || {}), false);
 });
 
 test("live label PDFs are proxied only from the trusted ShipStation download host", async () => {

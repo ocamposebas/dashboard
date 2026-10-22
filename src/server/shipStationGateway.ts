@@ -41,6 +41,7 @@ export interface ShipStationRateInput {
   destination: ShipStationAddress;
   externalShipmentId: string;
   orderNumber: string;
+  existingShipmentId?: string | null;
 }
 
 export interface ShipStationRate {
@@ -70,6 +71,12 @@ export interface ShipStationLabelResult {
   amount: number;
   currency: string;
   labelDownloadUrl: string | null;
+}
+
+export interface ShipStationOrderReconciliation {
+  purchasedLabels: ShipStationLabelResult[];
+  protectedShipmentFound: boolean;
+  reusableShipmentId: string | null;
 }
 
 export interface ShipStationVoidResult {
@@ -522,49 +529,68 @@ export class ShipStationGateway {
     if (!externalShipmentId || externalShipmentId.length > 50) {
       throw new ShipStationGatewayError("The external shipment identifier is invalid", "invalid_response");
     }
+    const rateOptions = {
+      carrier_ids: input.carrierIds,
+      preferred_currency: "USD",
+      rate_type: "shipment",
+    };
+    const shipmentDetails = {
+      validate_address: "validate_only",
+      warehouse_id: origin.id,
+      confirmation: "none",
+      ship_to: {
+        name: input.destination.name || input.destination.company || "Customer",
+        company_name: input.destination.company || "",
+        phone: input.destination.phone || "",
+        address_line1: input.destination.address1 || "",
+        address_line2: input.destination.address2 || null,
+        city_locality: input.destination.city,
+        state_province: input.destination.state,
+        postal_code: input.destination.postalCode,
+        country_code: input.destination.countryCode,
+        address_residential_indicator: "unknown",
+      },
+      packages: [{
+        package_code: "package",
+        weight: { value: input.package.weightOz, unit: "ounce" },
+        dimensions: {
+          unit: "inch",
+          length: input.package.lengthIn,
+          width: input.package.widthIn,
+          height: input.package.heightIn,
+        },
+      }],
+    };
+    const existingShipmentId = input.existingShipmentId?.trim() || "";
+    if (existingShipmentId && !/^se-[a-z0-9-]+$/.test(existingShipmentId)) {
+      throw new ShipStationGatewayError("The existing ShipStation shipment identifier is invalid", "invalid_response");
+    }
+    if (existingShipmentId) {
+      await this.request(`/shipments/${encodeURIComponent(existingShipmentId)}`, {
+        method: "PUT",
+        body: JSON.stringify(shipmentDetails),
+      });
+    }
+    const shipmentForRate = existingShipmentId
+      ? { shipment_id: existingShipmentId }
+      : {
+          shipment: {
+            ...shipmentDetails,
+            external_shipment_id: externalShipmentId,
+            shipment_number: input.orderNumber.trim().slice(0, 50) || externalShipmentId,
+          },
+        };
     const payload = await this.request("/rates", {
       method: "POST",
       body: JSON.stringify({
-        rate_options: {
-          carrier_ids: input.carrierIds,
-          preferred_currency: "USD",
-          rate_type: "shipment",
-        },
-        shipment: {
-          validate_address: "validate_only",
-          external_shipment_id: externalShipmentId,
-          shipment_number: input.orderNumber.trim().slice(0, 50) || externalShipmentId,
-          warehouse_id: origin.id,
-          confirmation: "none",
-          ship_to: {
-            name: input.destination.name || input.destination.company || "Customer",
-            company_name: input.destination.company || "",
-            phone: input.destination.phone || "",
-            address_line1: input.destination.address1 || "",
-            address_line2: input.destination.address2 || null,
-            city_locality: input.destination.city,
-            state_province: input.destination.state,
-            postal_code: input.destination.postalCode,
-            country_code: input.destination.countryCode,
-            address_residential_indicator: "unknown",
-          },
-          packages: [{
-            package_code: "package",
-            weight: { value: input.package.weightOz, unit: "ounce" },
-            dimensions: {
-              unit: "inch",
-              length: input.package.lengthIn,
-              width: input.package.widthIn,
-              height: input.package.heightIn,
-            },
-          }],
-        },
+        rate_options: rateOptions,
+        ...shipmentForRate,
       }),
     });
     const root = record(payload);
     const rateResponse = record(root?.rate_response);
     const rateItems = rateResponse?.rates;
-    const shipmentId = textValue(root?.shipment_id || rateResponse?.shipment_id) || null;
+    const shipmentId = textValue(root?.shipment_id || rateResponse?.shipment_id) || existingShipmentId || null;
     if (!Array.isArray(rateItems) || !shipmentId) {
       throw new ShipStationGatewayError("ShipStation returned an invalid rate list", "invalid_response");
     }
@@ -653,8 +679,10 @@ export class ShipStationGateway {
     ));
   }
 
-  async findPurchasedLabelsByOrderNumber(orderNumber: string): Promise<ShipStationLabelResult[]> {
-    if (this.config.rateMode !== "live") return [];
+  async reconcileOrderByNumber(orderNumber: string): Promise<ShipStationOrderReconciliation> {
+    if (this.config.rateMode !== "live") {
+      return { purchasedLabels: [], protectedShipmentFound: false, reusableShipmentId: null };
+    }
     const normalized = orderNumber.trim().replace(/^#/, "");
     if (!normalized || normalized.length > 50) {
       throw new ShipStationGatewayError("The order number is invalid for ShipStation reconciliation", "invalid_response");
@@ -666,7 +694,22 @@ export class ShipStationGateway {
     const labels = await Promise.all(purchased.map((shipment) => this.request(
       `/labels?shipment_id=${encodeURIComponent(shipment.shipmentId)}&page_size=10&sort_dir=desc&sort_by=created_at`,
     ).then(labelList)));
-    return labels.flat().filter((label) => label.status === "completed" || label.status === "processing");
+    const pending = shipments.filter((shipment) => shipment.status === "pending");
+    if (pending.length > 1) {
+      throw new ShipStationGatewayError(
+        "ShipStation has multiple pending shipments for this order. Reconcile them before buying postage.",
+        "invalid_response",
+      );
+    }
+    return {
+      purchasedLabels: labels.flat().filter((label) => label.status === "completed" || label.status === "processing"),
+      protectedShipmentFound: purchased.length > 0 || shipments.some((shipment) => shipment.status === "processing"),
+      reusableShipmentId: pending[0]?.shipmentId || null,
+    };
+  }
+
+  async findPurchasedLabelsByOrderNumber(orderNumber: string): Promise<ShipStationLabelResult[]> {
+    return (await this.reconcileOrderByNumber(orderNumber)).purchasedLabels;
   }
 
   async getLabelById(labelId: string): Promise<ShipStationLabelResult> {

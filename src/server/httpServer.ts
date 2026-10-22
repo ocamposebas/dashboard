@@ -2817,12 +2817,12 @@ export function createMonitorServer(
               capabilities.credentialConfigured ? "no_origin" : "not_configured",
             );
           }
-          const existingLabels = capabilities.dataMode === "live"
-            ? await shipStation.findPurchasedLabelsByOrderNumber(order.number)
-            : [];
-          if (existingLabels.length) {
+          const reconciliation = capabilities.dataMode === "live"
+            ? await shipStation.reconcileOrderByNumber(order.number)
+            : { purchasedLabels: [], protectedShipmentFound: false, reusableShipmentId: null };
+          if (reconciliation.protectedShipmentFound) {
             throw new FulfillmentShippingError(
-              "ShipStation already has a purchased label for this order. No new rate or label was created.",
+              "ShipStation already has a purchased or processing label for this order. No new rate or label was created.",
               "order_ineligible",
             );
           }
@@ -2832,6 +2832,7 @@ export function createMonitorServer(
             destination,
             externalShipmentId: shippingExternalShipmentKey(fulfillmentId),
             orderNumber: order.number,
+            existingShipmentId: reconciliation.reusableShipmentId,
           });
           const destinationHash = shippingDestinationHash(destination);
           const quotedRates: ShippingRateQuote[] = rates.map((rate) => ({
@@ -2906,10 +2907,10 @@ export function createMonitorServer(
             );
           }
           if (claims.dataMode === "live") {
-            const existingLabels = await shipStation.findPurchasedLabelsByOrderNumber(order.number);
-            if (existingLabels.length) {
+            const reconciliation = await shipStation.reconcileOrderByNumber(order.number);
+            if (reconciliation.protectedShipmentFound) {
               throw new FulfillmentShippingError(
-                "ShipStation already has a purchased label for this order. The existing tracking must be reconciled; no second label was purchased.",
+                "ShipStation already has a purchased or processing label for this order. The existing tracking must be reconciled; no second label was purchased.",
                 "order_ineligible",
               );
             }
