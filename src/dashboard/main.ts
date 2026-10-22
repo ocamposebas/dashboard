@@ -19,6 +19,12 @@ import type {
   ProductLocation,
 } from "../shared/barcodeFulfillment";
 import { cameraBarcodeCandidate } from "../shared/cameraBarcode";
+import {
+  cameraOptimizationLabel,
+  cameraOptimizationPlan,
+  type CameraTrackCapabilitiesLike,
+  type CameraTrackSettingsLike,
+} from "../shared/cameraOptimization";
 import type {
   FulfillmentQueueEntry,
   FulfillmentQueuePayload,
@@ -5368,6 +5374,42 @@ function cameraFailureMessage(error: unknown): { title: string; message: string 
   };
 }
 
+async function optimizeFulfillmentCamera(video: HTMLVideoElement): Promise<string> {
+  const stream = video.srcObject;
+  if (!(stream instanceof MediaStream)) return "";
+  const track = stream.getVideoTracks()[0];
+  if (!track) return "";
+
+  const capabilities = track.getCapabilities() as MediaTrackCapabilities & CameraTrackCapabilitiesLike;
+  const settings = track.getSettings() as MediaTrackSettings & CameraTrackSettingsLike;
+  const plan = cameraOptimizationPlan(capabilities, settings);
+  const constraints = plan as MediaTrackConstraintSet;
+  if (!Object.keys(constraints).length) return "";
+
+  try {
+    await track.applyConstraints({ advanced: [constraints] });
+  } catch {
+    // Some mobile browsers expose a control but reject a combined constraint.
+    // Retry independently so one unsupported option does not disable the other.
+    if (plan.focusMode) {
+      try {
+        await track.applyConstraints({ advanced: [{ focusMode: plan.focusMode } as MediaTrackConstraintSet] });
+      } catch {
+        delete plan.focusMode;
+      }
+    }
+    if (plan.zoom) {
+      try {
+        await track.applyConstraints({ advanced: [{ zoom: plan.zoom } as MediaTrackConstraintSet] });
+      } catch {
+        delete plan.zoom;
+      }
+    }
+  }
+
+  return cameraOptimizationLabel(plan);
+}
+
 async function startFulfillmentCamera(): Promise<void> {
   const order = selectedFulfillmentOrder();
   if (!order?.session || order.session.state !== "open" || order.verifiedUnits >= order.unitCount) {
@@ -5399,7 +5441,7 @@ async function startFulfillmentCamera(): Promise<void> {
     hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.QR_CODE, BarcodeFormat.CODE_128]);
     hints.set(DecodeHintType.TRY_HARDER, true);
     const reader = new BrowserMultiFormatReader(hints, {
-      delayBetweenScanAttempts: 90,
+      delayBetweenScanAttempts: 60,
       delayBetweenScanSuccess: 900,
       tryPlayVideoTimeout: 5_000,
     });
@@ -5408,8 +5450,9 @@ async function startFulfillmentCamera(): Promise<void> {
         audio: false,
         video: {
           facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30 },
         },
       },
       video,
@@ -5441,7 +5484,15 @@ async function startFulfillmentCamera(): Promise<void> {
       return;
     }
     fulfillmentCameraControls = controls;
-    setFulfillmentCameraStatus("scanning", "Camera ready", "Hold steady and center the complete vial QR inside the guide.");
+    const optimization = await optimizeFulfillmentCamera(video);
+    if (request !== fulfillmentCameraRequest || dialog.hidden || fulfillmentCameraCaptured) return;
+    setFulfillmentCameraStatus(
+      "scanning",
+      optimization ? "Tiny QR mode ready" : "Camera ready",
+      optimization
+        ? `${optimization}. Hold the vial 15–25 cm away and keep the complete QR inside the guide.`
+        : "Hold the vial 15–25 cm away and keep the complete QR inside the guide.",
+    );
   } catch (error) {
     if (request !== fulfillmentCameraRequest || dialog.hidden) return;
     stopFulfillmentCamera();
