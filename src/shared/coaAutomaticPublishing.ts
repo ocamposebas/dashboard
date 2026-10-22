@@ -70,13 +70,17 @@ export function canAutomaticallyPublishCoa(coa: CommerceCoa & {
   intakeAnalysis?: {
     status?: string;
     suggestCurrent?: boolean;
-    dateDetection?: { confidence?: string };
+    dateDetection?: { confidence?: string; source?: string };
   } | null;
 }): boolean {
   const lot = String(coa.lot || coa.batch || "").trim();
   const hasDocument = Boolean(String(coa.fileUrl || coa.verifyUrl || "").trim());
   const finalNumber = String(coa.coaNumber || "").trim();
   const dateConfidence = coa.intakeAnalysis?.dateDetection?.confidence;
+  const dateSource = coa.intakeAnalysis?.dateDetection?.source;
+  const dateIsPublishable =
+    dateConfidence !== "missing" &&
+    (dateConfidence !== "fallback" || dateSource === "reported" || dateSource === "certificate");
   const publicationRequested =
     (coa.status === "Review" && coa.intakeAnalysis?.suggestCurrent === true) ||
     (coa.status === "Available" && coa.currentShippingLot === true);
@@ -84,8 +88,7 @@ export function canAutomaticallyPublishCoa(coa: CommerceCoa & {
     coa.source === "custom" &&
     publicationRequested &&
     coa.intakeAnalysis?.status !== "failed" &&
-    dateConfidence !== "fallback" &&
-    dateConfidence !== "missing" &&
+    dateIsPublishable &&
     finalNumber &&
     !finalNumber.startsWith("DRAFT-") &&
     coa.productName !== "Needs product review" &&

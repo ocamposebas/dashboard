@@ -66,9 +66,20 @@ test("automatic publication stays closed for ambiguous strengths and unconfirmed
     ...coa,
     intakeAnalysis: {
       ...coa.intakeAnalysis,
-      dateDetection: { confidence: "fallback" },
+      dateDetection: { confidence: "fallback", source: "received" },
     },
   }), false);
+});
+
+test("a laboratory reported date can publish when no separate analysis date exists", () => {
+  assert.equal(canAutomaticallyPublishCoa({
+    ...coa,
+    intakeAnalysis: {
+      ...coa.intakeAnalysis,
+      status: "limited",
+      dateDetection: { confidence: "fallback", source: "reported" },
+    },
+  }), true);
 });
 
 test("one published product wins over stale draft or trashed duplicates", () => {
