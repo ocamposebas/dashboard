@@ -49,6 +49,9 @@ function ilsResponse(overrides: Record<string, unknown> = {}): Response {
     result: {
       data: {
         json: {
+          product: "Retatrutide",
+          lotNumber: "P1-10RT06",
+          concentration: "10mg",
           coaNumber: "COA-2026-GI8-SM",
           pdfUrl: "https://files.ils-lab.com/coa-pdfs/phase-one-labz-P1-10RT06-o_b3Th.pdf",
           ...overrides,
@@ -101,4 +104,77 @@ test("does not make network requests for unapproved QR hosts", async () => {
   });
   assert.equal(result, null);
   assert.equal(called, false);
+});
+
+test("Reta 20 resolves by exact lot, product and concentration when ILS changes its references", async () => {
+  const reta20 = coa({
+    id: "coa-2026-g3bydj",
+    matchedVariationId: 649,
+    coaNumber: "COA-2026-G3BYDJ",
+    productName: "PL-RT - 20MG",
+    compound: "Retatrutide",
+    familyName: "Retatrutide",
+    strength: "20 mg",
+    batch: "P1-20RT06",
+    lot: "P1-20RT06",
+    fileUrl: "https://phaseonelabz.is/api/public/v1/coas/coa-2026-g3bydj/document",
+    externalFileUrl: "https://staging.phaseonelabz.com/legacy/reta-20.pdf",
+    verifyUrl: "https://files.ils-lab.com/coa-pdfs/legacy-reta-20.pdf",
+  });
+  const result = await resolveExternalCoaQr({
+    rawValue: "https://portal.ils-lab.com/verify/reta20-token",
+    coas: [coa(), reta20],
+    fetchImpl: (async () => ilsResponse({
+      coaNumber: "",
+      pdfUrl: "https://files.ils-lab.com/coa-pdfs/new-provider-name.pdf",
+      product: "Retatrutide",
+      lotNumber: "P1-20RT06",
+      concentration: "20mg",
+    })) as typeof fetch,
+  });
+  assert.equal(result?.coaReference, "COA-2026-G3BYDJ");
+});
+
+test("Reta 20 can never fall through to another strength with a shared product family", async () => {
+  const result = await resolveExternalCoaQr({
+    rawValue: "https://portal.ils-lab.com/verify/reta20-token",
+    coas: [coa()],
+    fetchImpl: (async () => ilsResponse({
+      coaNumber: "",
+      pdfUrl: "",
+      product: "Retatrutide",
+      lotNumber: "P1-10RT06",
+      concentration: "20mg",
+    })) as typeof fetch,
+  });
+  assert.equal(result, null);
+});
+
+test("ILS transient failures retry once before rejecting a new vial QR", async () => {
+  let calls = 0;
+  const result = await resolveExternalCoaQr({
+    rawValue: "https://portal.ils-lab.com/verify/OvcWN_fh0ANZIlJe",
+    coas: [coa()],
+    fetchImpl: (async () => {
+      calls += 1;
+      return calls === 1 ? new Response("temporarily unavailable", { status: 503 }) : ilsResponse();
+    }) as typeof fetch,
+  });
+  assert.equal(calls, 2);
+  assert.equal(result?.coaReference, "COA-2026-GI8-SM");
+});
+
+test("ILS connection interruptions retry once before rejecting a new vial QR", async () => {
+  let calls = 0;
+  const result = await resolveExternalCoaQr({
+    rawValue: "https://portal.ils-lab.com/verify/OvcWN_fh0ANZIlJe",
+    coas: [coa()],
+    fetchImpl: (async () => {
+      calls += 1;
+      if (calls === 1) throw new TypeError("temporary network interruption");
+      return ilsResponse();
+    }) as typeof fetch,
+  });
+  assert.equal(calls, 2);
+  assert.equal(result?.coaReference, "COA-2026-GI8-SM");
 });
