@@ -60,6 +60,44 @@ test("maps WooCommerce products and orders without exposing credentials", async 
   assert.ok(requests.every((request) => !request.url.search.includes("ck_test")));
 });
 
+test("loads every catalog page so older products remain available for exact COA mapping", async () => {
+  const product = (id: number, name = `Product ${id}`) => ({
+    id,
+    name,
+    sku: name === "PL-TZ" ? "PL-TZ" : `SKU-${id}`,
+    type: name === "PL-TZ" ? "variable" : "simple",
+    status: "publish",
+    catalog_visibility: "visible",
+    price: "50.00",
+    regular_price: "50.00",
+    stock_status: "instock",
+    categories: [],
+    images: [],
+    variations: [],
+    attributes: [],
+  });
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    if (url.pathname.includes("/wc/store/")) return new Response("[]", { status: 200 });
+    const page = Number(url.searchParams.get("page") || 1);
+    const payload = page === 1
+      ? Array.from({ length: 100 }, (_, index) => product(index + 1))
+      : [product(533, "PL-TZ")];
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "x-wp-totalpages": "2" },
+    });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example", consumerKey: "ck_test", consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  const products = await gateway.listProducts();
+
+  assert.equal(products.length, 101);
+  assert.equal(products.find((item) => item.id === 533)?.name, "PL-TZ");
+});
+
 test("finds the next available SKU across products and variations", async () => {
   const requestedSkus: string[] = [];
   const fetchImpl: typeof fetch = async (input) => {

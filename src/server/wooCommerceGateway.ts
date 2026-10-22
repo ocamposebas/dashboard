@@ -1764,10 +1764,10 @@ export class WooCommerceGateway {
 
   async listProducts(): Promise<CommerceProduct[]> {
     const [payload, thumbnails] = await Promise.all([
-      this.request("products", { parameters: {
-        per_page: "100", page: "1", orderby: "modified", order: "desc", status: "any",
+      this.requestAllPages("products", {
+        orderby: "modified", order: "desc", status: "any",
         _fields: "id,name,slug,permalink,sku,type,status,catalog_visibility,price,regular_price,sale_price,date_on_sale_from_gmt,date_on_sale_to_gmt,stock_quantity,stock_status,categories,images,variations,attributes,date_modified_gmt",
-      } }),
+      }),
       this.listPublicThumbnails().catch(() => new Map<number, string>()),
     ]);
     if (!Array.isArray(payload)) throw new Error("Commerce products response was not an array");
