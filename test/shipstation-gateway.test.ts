@@ -286,4 +286,3 @@ test("local mock rates never call ShipStation and remain clearly identified", as
   assert.ok(rates.every((rate) => rate.rateId.startsWith("mock-rate-") && rate.isEstimate));
   assert.equal(requested, false);
 });
-

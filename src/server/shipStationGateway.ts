@@ -732,4 +732,3 @@ export class ShipStationGateway {
     return bytes;
   }
 }
-

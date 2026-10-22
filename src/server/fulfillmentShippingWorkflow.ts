@@ -183,4 +183,3 @@ export function purchaseModeFor(
 ): "mock_only" | "live_disabled" | "live_enabled" {
   return dataMode === "mock" ? "mock_only" : livePurchaseEnabled ? "live_enabled" : "live_disabled";
 }
-

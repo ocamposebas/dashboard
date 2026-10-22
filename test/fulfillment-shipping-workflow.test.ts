@@ -146,4 +146,3 @@ test("voiding performs a read-before-write check and persists one terminal state
   assert.equal(voidCalls, 1);
   assert.equal(persisted, 1);
 });
-

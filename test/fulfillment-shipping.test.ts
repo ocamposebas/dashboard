@@ -82,4 +82,3 @@ test("the printable 4x6 document is unmistakably a non-postage test label", () =
   assert.match(html, /TEST ONLY/);
   assert.match(html, /nonce="test-nonce"/);
 });
-
