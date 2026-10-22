@@ -37,6 +37,11 @@ import { CoaRepository, type CoaUpdateInput } from "./coaRepository.js";
 import { buildThermalLabelDocument } from "../shared/labelPrint.js";
 import { calculateProductProfitability, productCostForCatalogLine } from "../shared/productProfitability.js";
 import { coaNeedsExactVariation } from "../shared/coaCatalogMapping.js";
+import {
+  canAutomaticallyPublishCoa,
+  exactAutomaticCoaProduct,
+  exactAutomaticCoaVariation,
+} from "../shared/coaAutomaticPublishing.js";
 import { productVariantSku } from "../shared/productSku.js";
 import { fulfillmentAccessForRole } from "./fulfillmentAccess.js";
 import {
@@ -533,6 +538,71 @@ export function createMonitorServer(
   let extensionsRefresh: Promise<Record<string, unknown>> | undefined;
   let fulfillmentCoasCache: { coas: CommerceCoa[]; updatedAt: number } | undefined;
   let fulfillmentCoasRefresh: Promise<CommerceCoa[]> | undefined;
+
+  async function automaticallyPublishExactCoas(
+    candidates: Awaited<ReturnType<CoaRepository["list"]>>,
+    actorId: string,
+  ): Promise<Map<string, Awaited<ReturnType<CoaRepository["update"]>>>> {
+    const published = new Map<string, Awaited<ReturnType<CoaRepository["update"]>>>();
+    if (!customCoas || !commerce) return published;
+    const eligible = candidates.filter(canAutomaticallyPublishCoa);
+    if (!eligible.length) return published;
+
+    const products = await commerce.listProducts();
+    const variationsByProduct = new Map<number, CommerceVariation[]>();
+    for (const coa of eligible) {
+      const product = exactAutomaticCoaProduct(coa, products);
+      if (!product) continue;
+      let variation = null;
+      if (product.type === "variable") {
+        let variations = variationsByProduct.get(product.id);
+        if (!variations) {
+          variations = await commerce.listProductVariations(product.id);
+          variationsByProduct.set(product.id, variations);
+        }
+        variation = exactAutomaticCoaVariation(coa, product, variations);
+        if (!variation) continue;
+      }
+      const skus = [...new Set([...(coa.skus || []), product.sku, variation?.sku || ""].map((sku) => sku.trim()).filter(Boolean))];
+      try {
+        const updated = await customCoas.update({
+          id: coa.recordId || coa.id,
+          expectedRevision: coa.revision,
+          coaNumber: coa.coaNumber,
+          productName: coa.productName,
+          compound: coa.compound,
+          familyName: coa.familyName,
+          familyKey: coa.familyKey,
+          strength: coa.strength,
+          batch: coa.batch,
+          lot: coa.lot || coa.batch,
+          date: coa.date,
+          status: "Available",
+          purity: coa.purity,
+          laboratory: coa.laboratory,
+          method: coa.method,
+          tested: coa.tested,
+          currentShippingLot: true,
+          fileUrl: coa.externalFileUrl || "",
+          verifyUrl: coa.verifyUrl,
+          fileAttachmentId: coa.fileAttachmentId,
+          matchedProductId: product.id,
+          matchedVariationId: variation?.id || 0,
+          skus,
+          aliases: coa.aliases,
+          keywords: coa.keywords,
+          panelTypes: coa.panelTypes,
+        }, actorId);
+        published.set(coa.recordId || coa.id, updated);
+      } catch (error: unknown) {
+        console.error("Exact COA automatic publication failed", {
+          certificateId: coa.recordId || coa.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return published;
+  }
   let customCoaBootstrap: Promise<void> | undefined;
   let rewardsCache: { payload: CommerceRewardControl; updatedAt: number } | undefined;
   const productDetailCache = new Map<number, { payload: Record<string, unknown>; updatedAt: number }>();
@@ -986,7 +1056,15 @@ export function createMonitorServer(
       const siteControls = await independentSiteControls();
       const [coasResult, bridgeResult] = await Promise.allSettled([
         customCoas
-          ? ensureCustomCoaHistory().then(() => customCoas.list({ limit: 500 }))
+          ? ensureCustomCoaHistory().then(async () => {
+              let coas = await customCoas.list({ limit: 500 });
+              const automaticallyPublished = await automaticallyPublishExactCoas(coas, "system:exact-coa-publisher");
+              if (automaticallyPublished.size) {
+                fulfillmentCoasCache = undefined;
+                coas = await customCoas.list({ limit: 500 });
+              }
+              return coas;
+            })
           : commerce
             ? commerce.listCoas()
             : Promise.reject(new Error("COA storage is not configured")),
@@ -1325,6 +1403,21 @@ export function createMonitorServer(
     if (!force && Date.now() - affiliateLegacySyncAt < 60_000) return;
     await affiliates.importLegacy(await commerce.listLegacyAffiliateCoupons());
     affiliateLegacySyncAt = Date.now();
+  }
+
+  if (customCoas && commerce) {
+    void ensureCustomCoaHistory()
+      .then(() => customCoas.list({ limit: 500 }))
+      .then((coas) => automaticallyPublishExactCoas(coas, "system:exact-coa-publisher"))
+      .then((published) => {
+        if (!published.size) return;
+        extensionsCache = undefined;
+        fulfillmentCoasCache = undefined;
+        console.info("Exact COAs published automatically", { certificateIds: [...published.keys()] });
+      })
+      .catch((error: unknown) => {
+        console.error("Automatic COA startup reconciliation failed", error instanceof Error ? error.message : error);
+      });
   }
 
   return createServer((request, response) => {
@@ -3782,7 +3875,15 @@ export function createMonitorServer(
           return;
         }
         try {
-          const results = await customCoas.stageLinks(links, Boolean(input.suggestCurrent), currentUser.id);
+          const stagedResults = await customCoas.stageLinks(links, Boolean(input.suggestCurrent), currentUser.id);
+          const automaticallyPublished = await automaticallyPublishExactCoas(
+            stagedResults.map((item) => item.coa),
+            currentUser.id,
+          );
+          const results = stagedResults.map((item) => {
+            const published = automaticallyPublished.get(item.coa.recordId || item.coa.id);
+            return { ...item, coa: published || item.coa, automaticallyPublished: Boolean(published) };
+          });
           extensionsCache = undefined;
           fulfillmentCoasCache = undefined;
           json(response, 201, {
@@ -3807,12 +3908,19 @@ export function createMonitorServer(
         }
         try {
           const bytes = await readBodyBuffer(request, 12 * 1024 * 1024);
-          const result = await customCoas.stagePdf({
+          const stagedResult = await customCoas.stagePdf({
             fileName: firstHeaderValue(request.headers["x-coa-file-name"]) || "certificate.pdf",
             content: bytes,
             suggestCurrent: firstHeaderValue(request.headers["x-coa-current-lot"]) === "true",
             actorId: currentUser.id,
           });
+          const automaticallyPublished = await automaticallyPublishExactCoas([stagedResult.coa], currentUser.id);
+          const published = automaticallyPublished.get(stagedResult.coa.recordId || stagedResult.coa.id);
+          const result = {
+            ...stagedResult,
+            coa: published || stagedResult.coa,
+            automaticallyPublished: Boolean(published),
+          };
           extensionsCache = undefined;
           fulfillmentCoasCache = undefined;
           json(response, result.duplicate ? 200 : 201, result);

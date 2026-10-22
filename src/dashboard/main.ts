@@ -9533,7 +9533,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-coa-fil
 requiredElement<HTMLInputElement>("#coa-files").addEventListener("change", (event) => {
   const count = (event.currentTarget as HTMLInputElement).files?.length || 0;
   const label = requiredElement<HTMLElement>(".coa-dropzone small");
-  label.textContent = count ? `${count} PDF${count === 1 ? "" : "s"} staged for review` : "Choose up to 40 PDF documents";
+  label.textContent = count ? `${count} PDF${count === 1 ? "" : "s"} ready to upload` : "Choose up to 40 PDF documents";
 });
 requiredElement<HTMLButtonElement>("#coa-stage-batch").addEventListener("click", async () => {
   const fileInput = requiredElement<HTMLInputElement>("#coa-files");
@@ -9600,26 +9600,32 @@ requiredElement<HTMLButtonElement>("#coa-stage-batch").addEventListener("click",
         errors.push(error instanceof Error ? error.message : `${file.name} could not be staged`);
       }
     }
-    coaIntakeResults = reviewResults;
+    const automaticallyPublished = reviewResults.filter((item) => item.coa.status === "Available").length;
+    coaIntakeResults = reviewResults.filter((item) => item.coa.status !== "Available");
     await loadExtensions();
     fileInput.value = "";
     linkInput.value = "";
     requiredElement<HTMLElement>(".coa-dropzone small").textContent = "Choose up to 40 PDF documents";
     if (errors.length) {
       showToast("Batch saved with attention needed", `${staged} new · ${duplicates} already registered · ${errors.length} failed. ${errors[0]}`, false);
+    } else if (automaticallyPublished) {
+      showToast(
+        "COA published immediately",
+        `${automaticallyPublished} certificate${automaticallyPublished === 1 ? " is" : "s are"} live on the exact product. Storefront refresh takes about 5 seconds.`,
+      );
     } else {
       showToast(
-        duplicates && !staged ? "Certificate already registered" : "Certificates ready for review",
+        duplicates && !staged ? "Certificate already registered" : "Manual review needed",
         duplicates && !staged
           ? "The existing certificate is shown below. Open it to inspect or update it."
-          : `${staged} new certificate${staged === 1 ? "" : "s"} saved. Review the detected information below before publishing.`,
+          : `${staged} certificate${staged === 1 ? " needs" : "s need"} a product, strength or testing-date correction before publication.`,
       );
     }
   } catch (error) {
     showToast("COA intake failed", error instanceof Error ? error.message : "The review batch could not be saved.", false);
   } finally {
     button.disabled = false;
-    button.textContent = "Save review batch";
+    button.textContent = "Upload COAs";
   }
 });
 requiredElement<HTMLElement>("#coa-review-list").addEventListener("click", (event) => {

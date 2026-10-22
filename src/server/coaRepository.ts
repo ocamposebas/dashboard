@@ -181,6 +181,16 @@ function asIso(value: Date | string): string {
 function rowToCoa(row: CoaRow, publicOrigin: string): CustomCoa {
   const current = record(row.current_coa);
   const storedHistory = history(row.history);
+  const storedIntakeAnalysis = record(row.intake_analysis);
+  const intakeAnalysis = Object.keys(storedIntakeAnalysis).length
+    ? {
+        ...storedIntakeAnalysis,
+        suggestCurrent: Boolean(
+          storedIntakeAnalysis.suggestCurrent ||
+          (row.status === "Review" && row.current_shipping_lot),
+        ),
+      } as unknown as CoaDocumentAnalysis
+    : null;
   const documentUrl = row.document_id
     ? `${publicOrigin}/api/public/v1/coas/${encodeURIComponent(row.id)}/document`
     : row.external_file_url;
@@ -232,9 +242,7 @@ function rowToCoa(row: CoaRow, publicOrigin: string): CustomCoa {
     createdAt: asIso(row.created_at),
     updatedAt: asIso(row.updated_at),
     publishedAt: row.published_at ? asIso(row.published_at) : null,
-    intakeAnalysis: Object.keys(record(row.intake_analysis)).length
-      ? record(row.intake_analysis) as unknown as CoaDocumentAnalysis
-      : null,
+    intakeAnalysis,
   };
 }
 
