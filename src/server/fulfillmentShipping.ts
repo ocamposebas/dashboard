@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { ShippingPackageInput } from "../shared/shipping.js";
-import type { CommerceAddress } from "./wooCommerceGateway.js";
+import type { CommerceAddress, CommerceOrder } from "./wooCommerceGateway.js";
 
 export class FulfillmentShippingError extends Error {
   constructor(message: string, readonly code: "invalid_input" | "invalid_address" | "order_ineligible") {
@@ -20,6 +20,21 @@ export interface ShippingDestination {
   postalCode: string;
   countryCode: string;
   phone: string;
+}
+
+export function packedOrderStatusBlocker(
+  order: Pick<CommerceOrder, "status" | "refundedTotal">,
+): string | null {
+  if (order.refundedTotal > 0) {
+    return "This WooCommerce order contains a refund and requires review before buying postage.";
+  }
+  const status = order.status.trim().toLowerCase();
+  if (status === "processing") return null;
+  if (status === "completed") {
+    return "This WooCommerce order is already marked Completed.";
+  }
+  const label = status ? status.replaceAll("-", " ") : "unknown";
+  return `This WooCommerce order is ${label}, not Processing.`;
 }
 
 function finiteInRange(value: unknown, min: number, max: number): number | null {

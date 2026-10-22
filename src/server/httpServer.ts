@@ -65,6 +65,7 @@ import {
 import {
   buildMockShippingLabelDocument,
   FulfillmentShippingError,
+  packedOrderStatusBlocker,
   shippingDestination,
   shippingExternalShipmentKey,
   shippingDestinationHash,
@@ -1091,9 +1092,11 @@ export function createMonitorServer(
       throw new FulfillmentShippingError("Only packed orders can enter shipping", "order_ineligible");
     }
     const order = await commerce.getOrder(session.orderId);
-    if (order.status !== "processing" || order.refundedTotal > 0) {
+    const statusBlocker = packedOrderStatusBlocker(order);
+    if (statusBlocker) {
+      const existingShipment = sourceShippingBlocksPurchase(order.shippingOperations);
       throw new FulfillmentShippingError(
-        "The live order changed after packing. Review it before shipping.",
+        `${statusBlocker}${existingShipment ? ` ${existingShipment}` : ""} No new label was created.`,
         "order_ineligible",
       );
     }

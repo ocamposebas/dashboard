@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildMockShippingLabelDocument,
   FulfillmentShippingError,
+  packedOrderStatusBlocker,
   shippingDestination,
   shippingExternalShipmentKey,
   shippingDestinationHash,
@@ -49,6 +50,22 @@ test("shipping blocks invalid package values and incomplete source addresses", (
   assert.throws(
     () => shippingDestination(address({ address1: "" })),
     (error: unknown) => error instanceof FulfillmentShippingError && error.code === "invalid_address",
+  );
+});
+
+test("shipping explains the exact live-order status blocker before postage", () => {
+  assert.equal(packedOrderStatusBlocker({ status: "processing", refundedTotal: 0 }), null);
+  assert.match(
+    packedOrderStatusBlocker({ status: "completed", refundedTotal: 0 }) || "",
+    /already marked Completed/,
+  );
+  assert.match(
+    packedOrderStatusBlocker({ status: "on-hold", refundedTotal: 0 }) || "",
+    /on hold, not Processing/,
+  );
+  assert.match(
+    packedOrderStatusBlocker({ status: "processing", refundedTotal: 5 }) || "",
+    /contains a refund/,
   );
 });
 
