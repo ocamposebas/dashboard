@@ -6,6 +6,7 @@ import type {
 } from "../shared/fulfillment.js";
 import { evaluateFulfillmentEligibility } from "./fulfillmentEligibility.js";
 import {
+  coaMatchesCatalogLine,
   coaIsAvailableForVialScan,
   coaRequiresVialQrForLine,
 } from "./coaScanResolver.js";
@@ -122,10 +123,7 @@ function coaIsApproved(
 ): boolean {
   if (!coaIsAvailableForVialScan(coa)) return false;
   if (coa.id !== allocation.coaId || normalized(coa.lot || coa.batch) !== normalized(allocation.lot)) return false;
-  if (coa.matchedProductId > 0 && coa.matchedProductId !== line.productId) return false;
-  if (coa.matchedVariationId > 0 && coa.matchedVariationId !== line.variationId) return false;
-  if (coa.matchedProductId === line.productId) return true;
-  return coa.skus.some((sku) => normalized(sku) === normalized(line.sku));
+  return coaMatchesCatalogLine(coa, line);
 }
 
 export function buildPackingSnapshot(input: {

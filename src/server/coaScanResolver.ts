@@ -22,6 +22,27 @@ function normalized(value: string | null | undefined): string {
   return String(value || "").trim().toLocaleLowerCase("en");
 }
 
+function canonicalProductSku(value: string | null | undefined): string {
+  return normalized(value).replace(/[^a-z0-9]+/g, "");
+}
+
+export function coaMatchesCatalogLine(
+  coa: CommerceCoa,
+  line: { productId: number; variationId: number; sku: string },
+): boolean {
+  const lineSku = canonicalProductSku(line.sku);
+  const skuMatches = Boolean(
+    lineSku && coa.skus.some((sku) => canonicalProductSku(sku) === lineSku),
+  );
+  const productMatches = coa.matchedProductId <= 0 || coa.matchedProductId === line.productId;
+  const variationMatches = coa.matchedVariationId <= 0 || coa.matchedVariationId === line.variationId;
+
+  // Exact catalog IDs remain authoritative. The SKU fallback is deliberately
+  // strict after removing separators only, so legacy PLTZ-20-MG records can
+  // match PL-TZ-20-MG without ever allowing another strength or variation.
+  return (productMatches && variationMatches) || skuMatches;
+}
+
 export function canonicalizeCoaScanValue(rawValue: string): string | null {
   const value = rawValue.trim();
   if (!value || value.length > 2048) return null;
@@ -148,12 +169,7 @@ export function coaRequiresVialQrForLine(
   line: { productId: number; variationId: number; sku: string },
 ): boolean {
   if (!coaIsAvailableForVialScan(coa)) return false;
-  if (coa.matchedProductId > 0 && coa.matchedProductId !== line.productId) return false;
-  if (coa.matchedVariationId > 0 && coa.matchedVariationId !== line.variationId) return false;
-  if (coa.matchedProductId === line.productId) return true;
-  return Boolean(
-    line.sku.trim() && coa.skus.some((sku) => normalized(sku) === normalized(line.sku)),
-  );
+  return coaMatchesCatalogLine(coa, line);
 }
 
 /**

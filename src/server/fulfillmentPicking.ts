@@ -8,6 +8,7 @@ import type {
 } from "../shared/fulfillment.js";
 import { evaluateFulfillmentEligibility } from "./fulfillmentEligibility.js";
 import {
+  coaMatchesCatalogLine,
   coaIsAvailableForVialScan,
   coaRequiresVialQrForLine,
 } from "./coaScanResolver.js";
@@ -227,10 +228,7 @@ function coaIsApproved(coa: CommerceCoa, line: SnapshotLine, barcode: BarcodeReg
   if (coa.id !== barcode.coaId || normalized(coa.lot || coa.batch) !== normalized(barcode.lot)) {
     return false;
   }
-  if (coa.matchedProductId > 0 && coa.matchedProductId !== line.productId) return false;
-  if (coa.matchedVariationId > 0 && coa.matchedVariationId !== line.variationId) return false;
-  if (coa.matchedProductId === line.productId) return true;
-  return coa.skus.some((sku) => normalized(sku) === normalized(line.sku));
+  return coaMatchesCatalogLine(coa, line);
 }
 
 function liveLinesStillMatch(order: CommerceOrder, lines: SnapshotLine[]): boolean {
@@ -293,14 +291,25 @@ export function decideFulfillmentScan(input: {
     );
   }
 
-  const productLines = lines.filter((line) => line.productId === input.barcode?.productId);
+  const scannedCoa = input.barcode.type === "batch"
+    ? input.coas.find((candidate) => candidate.id === input.barcode?.coaId) || null
+    : null;
+  const barcodeMatchesCoaCatalog = Boolean(
+    scannedCoa &&
+    scannedCoa.matchedProductId === input.barcode.productId &&
+    scannedCoa.matchedVariationId === input.barcode.variationId
+  );
+  const migratedSkuLines = scannedCoa && barcodeMatchesCoaCatalog && coaIsAvailableForVialScan(scannedCoa)
+    ? lines.filter((line) => coaMatchesCatalogLine(scannedCoa, line))
+    : [];
+  const exactProductLines = lines.filter((line) => line.productId === input.barcode?.productId);
+  const productLines = exactProductLines.length ? exactProductLines : migratedSkuLines;
   if (!productLines.length) {
     const expectedLine = lines.find((line) => {
       const item = progress.lines.find((candidate) => candidate.orderItemId === line.orderItemId);
       return item && item.verifiedQuantity < item.requiredQuantity;
     }) || lines[0];
     const expectedItem = input.order.lineItems.find((item) => item.id === expectedLine?.orderItemId);
-    const scannedCoa = input.coas.find((candidate) => candidate.id === input.barcode?.coaId);
     return rejected(progress, "wrong_product", "This vial belongs to a different product. No quantity was added.", {
       barcode: input.barcode,
       scannedProductName: scannedCoa?.productName || scannedCoa?.compound || "Different product",
@@ -309,11 +318,13 @@ export function decideFulfillmentScan(input: {
       expectedSku: expectedLine?.sku || null,
     });
   }
-  const variationLines = productLines.filter((line) => line.variationId === input.barcode?.variationId);
+  const exactVariationLines = productLines.filter((line) => line.variationId === input.barcode?.variationId);
+  const variationLines = exactVariationLines.length
+    ? exactVariationLines
+    : productLines.filter((line) => migratedSkuLines.some((candidate) => candidate.orderItemId === line.orderItemId));
   if (!variationLines.length) {
     const expectedLine = productLines[0];
     const expectedItem = input.order.lineItems.find((item) => item.id === expectedLine?.orderItemId);
-    const scannedCoa = input.coas.find((candidate) => candidate.id === input.barcode?.coaId);
     return rejected(progress, "wrong_variation", "This is the wrong variation for the order.", {
       barcode: input.barcode,
       productName: expectedItem?.name,

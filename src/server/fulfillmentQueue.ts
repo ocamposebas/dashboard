@@ -7,6 +7,7 @@ import type {
   JsonValue,
 } from "../shared/fulfillment.js";
 import { evaluateFulfillmentEligibility } from "./fulfillmentEligibility.js";
+import { coaMatchesCatalogLine } from "./coaScanResolver.js";
 import type {
   CommerceCoa,
   CommerceOrder,
@@ -35,11 +36,7 @@ function effectiveLocation(
 }
 
 function coaMatchesLine(coa: CommerceCoa, line: CommerceOrderLineItem): boolean {
-  if (coa.matchedProductId > 0 && coa.matchedProductId !== line.productId) return false;
-  if (coa.matchedVariationId > 0 && coa.matchedVariationId !== line.variationId) return false;
-  if (coa.matchedProductId === line.productId) return true;
-  const sku = normalized(line.sku);
-  return Boolean(sku && coa.skus.some((item) => normalized(item) === sku));
+  return coaMatchesCatalogLine(coa, line);
 }
 
 function currentCoa(coas: CommerceCoa[], line: CommerceOrderLineItem): CommerceCoa | null {

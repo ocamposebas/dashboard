@@ -293,6 +293,51 @@ test("packing accepts an exact Available scanned COA without the current-shippin
   assert.equal(snapshot.lines[0]?.lot, "LOT-201");
 });
 
+test("packing preserves a legacy PLTZ lot after it was scanned for the current PL-TZ SKU", () => {
+  const legacyOrder = order({
+    lineItems: [{
+      id: 701,
+      productId: 533,
+      variationId: 3169,
+      name: "PL-TZ - 20 MG",
+      sku: "PL-TZ-20-MG",
+      quantity: 2,
+      imageUrl: null,
+    }] as CommerceOrder["lineItems"],
+  });
+  const legacySession = session({
+    sourceSnapshot: {
+      orderId: 1501,
+      lines: [{
+        orderItemId: 701,
+        productId: 533,
+        variationId: 3169,
+        sku: "PL-TZ-20-MG",
+        quantity: 2,
+        locationCode: null,
+        coaId: "coa-pltz-20",
+        lot: "PLTZ20",
+      }],
+    },
+  });
+  const snapshot = pack({
+    order: legacyOrder,
+    session: legacySession,
+    coas: [coa({
+      id: "coa-pltz-20",
+      matchedProductId: 533,
+      matchedVariationId: 652,
+      skus: ["PLTZ-20-MG", "PL-TZ"],
+      batch: "PLTZ20",
+      lot: "PLTZ20",
+    })],
+  });
+
+  assert.equal(snapshot.lines[0]?.coaId, "coa-pltz-20");
+  assert.equal(snapshot.lines[0]?.lot, "PLTZ20");
+  assert.equal(snapshot.lines[0]?.sku, "PL-TZ-20-MG");
+});
+
 test("packing requires the exact Available COA and lot", () => {
   for (const invalid of [
     coa({ status: "Archived" }),

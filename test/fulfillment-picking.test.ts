@@ -145,6 +145,111 @@ test("wrong product, wrong variation and an unknown COA never change quantity", 
   assert.match(feedbackOf(mismatch).message, /No quantity was added/i);
 });
 
+test("a legacy PLTZ vial QR matches the current PL-TZ variation by exact canonical SKU", () => {
+  const pltzOrder = order({
+    id: 3177,
+    number: "3177",
+    lineItems: [{
+      id: 9901,
+      productId: 533,
+      variationId: 3169,
+      name: "PL-TZ - 20 MG",
+      sku: "PL-TZ-20-MG",
+      quantity: 2,
+      imageUrl: null,
+    }] as CommerceOrder["lineItems"],
+  });
+  const pltzSession = session(0, {
+    orderId: 3177,
+    orderNumber: "3177",
+    sourceSnapshot: {
+      orderId: 3177,
+      lines: [{
+        orderItemId: 9901,
+        productId: 533,
+        variationId: 3169,
+        sku: "PL-TZ-20-MG",
+        quantity: 2,
+        locationCode: null,
+        coaId: "coa-pltz-20",
+        lot: "PLTZ20",
+      }],
+    },
+  });
+  const legacyCoa = coa({
+    id: "coa-pltz-20",
+    productName: "Tirzepatide 20mg",
+    matchedProductId: 533,
+    matchedVariationId: 652,
+    skus: ["PLTZ-20-MG", "PL-TZ"],
+    batch: "PLTZ20",
+    lot: "PLTZ20",
+  });
+  const decision = decideFulfillmentScan({
+    session: pltzSession,
+    barcode: barcode({
+      productId: 533,
+      variationId: 652,
+      coaId: "coa-pltz-20",
+      lot: "PLTZ20",
+    }),
+    order: pltzOrder,
+    coas: [legacyCoa],
+  });
+
+  assert.equal(decision.result, "accepted");
+  assert.equal(decision.quantityDelta, 1);
+  assert.equal(decision.orderItemId, 9901);
+  assert.equal(feedbackOf(decision).verifiedQuantity, 1);
+});
+
+test("the legacy SKU fallback never accepts a different PL-TZ strength", () => {
+  const pltzOrder = order({
+    lineItems: [{
+      id: 9901,
+      productId: 533,
+      variationId: 3169,
+      name: "PL-TZ - 20 MG",
+      sku: "PL-TZ-20-MG",
+      quantity: 2,
+      imageUrl: null,
+    }] as CommerceOrder["lineItems"],
+  });
+  const pltzSession = session(0, {
+    sourceSnapshot: {
+      orderId: 1401,
+      lines: [{
+        orderItemId: 9901,
+        productId: 533,
+        variationId: 3169,
+        sku: "PL-TZ-20-MG",
+        quantity: 2,
+        locationCode: null,
+        coaId: null,
+        lot: null,
+      }],
+    },
+  });
+  const decision = decideFulfillmentScan({
+    session: pltzSession,
+    barcode: barcode({ productId: 533, variationId: 651, coaId: "coa-pltz-10", lot: "PLTZ10" }),
+    order: pltzOrder,
+    coas: [coa({
+      id: "coa-pltz-10",
+      productName: "Tirzepatide 10mg",
+      matchedProductId: 533,
+      matchedVariationId: 651,
+      skus: ["PLTZ-10-MG"],
+      batch: "PLTZ10",
+      lot: "PLTZ10",
+    })],
+  });
+
+  assert.equal(decision.result, "rejected");
+  assert.equal(decision.reasonCode, "wrong_variation");
+  assert.equal(decision.quantityDelta, 0);
+});
+
 test("the scanned approved vial lot becomes the customer allocation even when it differs from the suggested lot", () => {
   const scanned = barcode({ coaId: "coa-202", lot: "LOT-202" });
   const decision = decideFulfillmentScan({
