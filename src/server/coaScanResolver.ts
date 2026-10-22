@@ -3,13 +3,17 @@ import type { CommerceCoa } from "./wooCommerceGateway.js";
 import type { CoaScanIdentifier } from "./coaScanIdentifierRepository.js";
 
 const SECURE_EQUIVALENT_HOSTS = new Set([
+  "bit.ly",
   "coas.freedomdiagnosticstesting.com",
+  "files.ils-lab.com",
   "portal.ils-lab.com",
   "koveralabs.com",
 ]);
 
 const LAB_HOST_ALIASES = new Map([
+  ["www.bit.ly", "bit.ly"],
   ["www.coas.freedomdiagnosticstesting.com", "coas.freedomdiagnosticstesting.com"],
+  ["www.files.ils-lab.com", "files.ils-lab.com"],
   ["www.portal.ils-lab.com", "portal.ils-lab.com"],
   ["www.koveralabs.com", "koveralabs.com"],
 ]);
@@ -40,6 +44,10 @@ export function canonicalizeCoaScanValue(rawValue: string): string | null {
   // identity. Marketing/tracking query parameters and harmless fragments must
   // not make a QR already printed on a vial appear to be a different code.
   if (parsed.hostname === "coas.freedomdiagnosticstesting.com" || parsed.hostname === "portal.ils-lab.com") {
+    parsed.search = "";
+    parsed.hash = "";
+  }
+  if (parsed.hostname === "bit.ly") {
     parsed.search = "";
     parsed.hash = "";
   }

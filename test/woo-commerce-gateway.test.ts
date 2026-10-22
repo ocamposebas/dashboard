@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { WooCommerceGateway } from "../src/server/wooCommerceGateway.js";
+import { CommerceServiceError, WooCommerceGateway } from "../src/server/wooCommerceGateway.js";
 
 test("maps WooCommerce products and orders without exposing credentials", async () => {
   const requests: Array<{ url: URL; authorization: string | null }> = [];
@@ -58,6 +58,125 @@ test("maps WooCommerce products and orders without exposing credentials", async 
   assert.ok(requests.filter((request) => request.url.pathname.includes("/wc/v3/")).every((request) => request.authorization?.startsWith("Basic ")));
   assert.equal(requests.find((request) => request.url.pathname.includes("/wc/store/"))?.authorization, null);
   assert.ok(requests.every((request) => !request.url.search.includes("ck_test")));
+});
+
+test("finds the next available SKU across products and variations", async () => {
+  const requestedSkus: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    const sku = url.searchParams.get("sku") || "";
+    requestedSkus.push(sku);
+    const payload = sku === "PL-TZ" ? [{
+      id: 653,
+      name: "PL-TZ - 10 MG",
+      sku: "PL-TZ",
+      type: "variation",
+      status: "publish",
+      catalog_visibility: "visible",
+      price: "50.00",
+      regular_price: "50.00",
+      stock_quantity: 4,
+      stock_status: "instock",
+      categories: [{ id: 16, name: "Research Peptides" }],
+      images: [],
+      variations: [],
+      attributes: [],
+    }] : [];
+    return new Response(JSON.stringify(payload), { status: 200 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example", consumerKey: "ck_test", consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  const sku = await gateway.suggestAvailableProductSku("PL TZ");
+
+  assert.equal(sku, "PL-TZ-1");
+  assert.deepEqual(requestedSkus, ["PL-TZ", "PL-TZ-1"]);
+});
+
+test("keeps generated variant SKUs unique inside one unsaved product", async () => {
+  const requestedSkus: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    requestedSkus.push(url.searchParams.get("sku") || "");
+    return new Response("[]", { status: 200 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example", consumerKey: "ck_test", consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  const sku = await gateway.suggestAvailableProductSku("KPV-10-MG", [], ["KPV-10-MG"]);
+
+  assert.equal(sku, "KPV-10-MG-1");
+  assert.deepEqual(requestedSkus, ["KPV-10-MG-1"]);
+});
+
+test("saves the selected catalog category with the generated product SKU", async () => {
+  let requestBody: Record<string, unknown> | undefined;
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      id: 701,
+      name: "KPV 30 MG",
+      sku: "KPV-30-MG",
+      type: "simple",
+      status: "publish",
+      catalog_visibility: "visible",
+      price: "55.00",
+      regular_price: "55.00",
+      stock_quantity: 12,
+      stock_status: "instock",
+      categories: [{ id: 16, name: "Research Peptides" }],
+      images: [],
+      variations: [],
+      attributes: [],
+    }), { status: 200 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example", consumerKey: "ck_test", consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  const saved = await gateway.saveProduct(null, {
+    name: "KPV 30 MG",
+    sku: "KPV-30-MG",
+    regularPrice: 55,
+    stockQuantity: 12,
+    categoryId: 16,
+    visibility: "public",
+    images: [],
+    variants: [],
+  });
+
+  assert.equal(saved.categoryId, 16);
+  assert.deepEqual(requestBody?.categories, [{ id: 16 }]);
+  assert.equal(requestBody?.sku, "KPV-30-MG");
+});
+
+test("preserves WooCommerce duplicate-SKU details as a safe catalog error", async () => {
+  const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({
+    code: "product_invalid_sku",
+    message: "Invalid or duplicated SKU.",
+    data: { status: 400, resource_id: 533, unique_sku: "PL-TZ-1" },
+  }), { status: 400 });
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example", consumerKey: "ck_test", consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  await assert.rejects(
+    gateway.saveProduct(null, {
+      name: "PL TZ",
+      sku: "PL-TZ",
+      regularPrice: 50,
+      stockQuantity: 1,
+      categoryId: 16,
+      visibility: "public",
+      images: [],
+      variants: [],
+    }),
+    (error: unknown) => error instanceof CommerceServiceError
+      && error.code === "product_invalid_sku"
+      && error.details.unique_sku === "PL-TZ-1",
+  );
 });
 
 test("loads a complete bounded sales period on demand", async () => {

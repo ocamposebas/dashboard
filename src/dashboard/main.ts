@@ -6,6 +6,7 @@ import "./clean-ui.css";
 import { initAffiliateAdmin, loadAffiliateAdmin } from "./affiliates-admin";
 import type { AffiliateCommissionSummary } from "../shared/affiliates";
 import { calculateProductProfitability } from "../shared/productProfitability";
+import { productSkuBase, productVariantSku } from "../shared/productSku";
 import {
   initialSiteControlsDraftState,
   markSiteControlsDraftDirty,
@@ -140,6 +141,7 @@ interface CommerceProduct {
   stockQuantity: number | null;
   stockStatus: string;
   category: string;
+  categoryId?: number;
   imageUrl: string | null;
   thumbnailUrl: string | null;
   images: CommerceMedia[];
@@ -149,6 +151,14 @@ interface CommerceProduct {
   estimatedProfit: number | null;
   margin: number | null;
   localDraft?: true;
+}
+
+interface CommerceProductCategory {
+  id: number;
+  name: string;
+  slug: string;
+  count: number;
+  parentId: number;
 }
 
 interface ProductDraftRecord {
@@ -490,6 +500,7 @@ interface CommercePayload {
   store?: string;
   message?: string;
   products: CommerceProduct[];
+  categories?: CommerceProductCategory[];
   orders: CommerceOrder[];
   affiliateCommissions?: AffiliateCommissionSummary[];
   media: CommerceMedia[];
@@ -7179,8 +7190,9 @@ const drawerBackdrop = requiredElement<HTMLButtonElement>("#drawer-backdrop");
 const productForm = requiredElement<HTMLFormElement>("#product-form");
 const productNameInput = requiredElement<HTMLInputElement>("#product-name-input");
 const productSkuInput = requiredElement<HTMLInputElement>("#product-sku-input");
+const productSkuStatus = requiredElement<HTMLElement>("#product-sku-status");
 const productStockInput = requiredElement<HTMLInputElement>("#product-stock-input");
-const productCategoryInput = requiredElement<HTMLInputElement>("#product-category-input");
+const productCategoryInput = requiredElement<HTMLSelectElement>("#product-category-input");
 const productStatusInput = requiredElement<HTMLSelectElement>("#product-status-input");
 const productCostInput = requiredElement<HTMLInputElement>("#product-cost-input");
 const productPriceInput = requiredElement<HTMLInputElement>("#product-price-input");
@@ -7208,6 +7220,8 @@ let productImageUrls: string[] = [];
 let selectedProductMedia: CommerceMedia[] = [];
 let mediaPickerVariantRow: HTMLElement | null = null;
 let toastTimer: number | undefined;
+let skuSuggestionTimer: number | undefined;
+let skuSuggestionSequence = 0;
 
 requiredElement<HTMLButtonElement>("#theme-toggle").addEventListener("click", () => {
   const nextTheme: ColorTheme = document.documentElement.dataset.theme === "dark"
@@ -8092,6 +8106,111 @@ function addProductImages(files: Iterable<File>): void {
   }
 }
 
+function productCategoryPath(category: CommerceProductCategory, categories: CommerceProductCategory[]): string {
+  const names = [category.name];
+  const visited = new Set<number>([category.id]);
+  let parentId = category.parentId;
+  while (parentId > 0 && !visited.has(parentId)) {
+    const parent = categories.find((item) => item.id === parentId);
+    if (!parent) break;
+    visited.add(parent.id);
+    names.unshift(parent.name);
+    parentId = parent.parentId;
+  }
+  return names.join(" › ");
+}
+
+function preferredProductCategoryId(): number {
+  const categories = commerceData?.categories || [];
+  return categories.find((category) => category.name.toLocaleLowerCase("en") === "research peptides")?.id
+    || categories.find((category) => category.name.toLocaleLowerCase("en") === "uncategorized")?.id
+    || categories[0]?.id
+    || 0;
+}
+
+function renderProductCategoryOptions(selectedId = 0, selectedName = ""): void {
+  const categories = commerceData?.categories || [];
+  const sorted = [...categories].sort((left, right) =>
+    productCategoryPath(left, categories).localeCompare(productCategoryPath(right, categories), "en", { sensitivity: "base" }),
+  );
+  const matchingName = selectedName
+    ? sorted.find((category) => category.name.toLocaleLowerCase("en") === selectedName.toLocaleLowerCase("en"))
+    : undefined;
+  const selected = selectedId > 0 ? selectedId : matchingName?.id || preferredProductCategoryId();
+  const missingCurrent = selectedId > 0 && !sorted.some((category) => category.id === selectedId);
+  productCategoryInput.innerHTML = [
+    '<option value="">Choose a catalog category</option>',
+    ...(missingCurrent && selectedName
+      ? [`<option value="${selectedId}">${escapeHtml(selectedName)} · current</option>`]
+      : []),
+    ...sorted.map((category) => `<option value="${category.id}">${escapeHtml(productCategoryPath(category, categories))} (${formatNumber(category.count)})</option>`),
+  ].join("");
+  productCategoryInput.value = selected > 0 ? String(selected) : "";
+}
+
+function setProductSkuStatus(message: string, state: "idle" | "checking" | "available" | "error"): void {
+  productSkuStatus.textContent = message;
+  productSkuStatus.dataset.state = state;
+}
+
+function refreshGeneratedVariantSkus(): void {
+  if (editingProductId) return;
+  const baseSku = productSkuInput.value.trim();
+  if (!baseSku) return;
+  for (const row of variantRows.querySelectorAll<HTMLElement>("[data-variant-row]")) {
+    const option = row.querySelector<HTMLInputElement>("[data-variant-option]")?.value || "";
+    const sku = row.querySelector<HTMLInputElement>("[data-variant-sku]");
+    if (sku) sku.value = productVariantSku(baseSku, option);
+  }
+}
+
+function scheduleAutomaticSkuSuggestion(immediate = false): void {
+  if (skuSuggestionTimer) window.clearTimeout(skuSuggestionTimer);
+  skuSuggestionSequence += 1;
+  const sequence = skuSuggestionSequence;
+  if (editingProductId) {
+    setProductSkuStatus("Existing SKU protected. It will remain unchanged when you save.", "available");
+    return;
+  }
+  const name = productNameInput.value.trim();
+  if (!name) {
+    productSkuInput.value = "";
+    setProductSkuStatus("Enter the product name and availability will be checked for you.", "idle");
+    return;
+  }
+  const provisional = productSkuBase(name);
+  productSkuInput.value = provisional;
+  refreshGeneratedVariantSkus();
+  setProductSkuStatus("Checking this SKU against the complete catalog…", "checking");
+  const verify = async (): Promise<void> => {
+    try {
+      const response = await fetch(`/api/commerce/product/sku-suggestion?name=${encodeURIComponent(name)}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok || !isRecord(payload) || typeof payload.sku !== "string") {
+        throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "Availability could not be checked");
+      }
+      if (sequence !== skuSuggestionSequence || productNameInput.value.trim() !== name || editingProductId) return;
+      productSkuInput.value = payload.sku;
+      refreshGeneratedVariantSkus();
+      setProductSkuStatus(
+        payload.sku === provisional
+          ? "Available · this SKU will be assigned automatically."
+          : `Available · ${payload.sku} was selected to avoid a duplicate.`,
+        "available",
+      );
+    } catch {
+      if (sequence !== skuSuggestionSequence || editingProductId) return;
+      productSkuInput.value = provisional;
+      setProductSkuStatus("A preview is ready. Availability will be checked again securely when you save.", "error");
+    }
+  };
+  skuSuggestionTimer = window.setTimeout(() => void verify(), immediate ? 0 : 450);
+}
+
 function resetVariantBuilder(): void {
   productVariantsToggle.checked = false;
   variantBuilder.hidden = true;
@@ -8115,8 +8234,7 @@ function generateVariantRows(): void {
   const price = Number(productPriceInput.value) || 0;
   const stock = Number(productStockInput.value) || 0;
   variantRows.innerHTML = options.map((option) => {
-    const suffix = option.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "");
-    return variantRowMarkup({ option, sku: `${baseSku}-${suffix || "OPTION"}`, price, stock });
+    return variantRowMarkup({ option, sku: productVariantSku(baseSku, option), price, stock });
   }).join("");
   variantTable.hidden = false;
 }
@@ -8125,7 +8243,7 @@ function variantRowMarkup(input: { id?: number; option: string; sku: string; pri
   const image = input.image
     ? `<img src="${escapeHtml(input.image.thumbnailUrl || input.image.src)}" alt="" loading="lazy" decoding="async" />`
     : "<span>+</span>";
-  return `<div class="variant-row" data-variant-row><button class="variant-image-button" type="button" data-choose-variant-image aria-label="Choose image for ${escapeHtml(input.option)}">${image}</button><strong>${escapeHtml(variantAttributeInput.value.trim() || "Option")}: ${escapeHtml(input.option)}</strong><input data-variant-sku type="text" value="${escapeHtml(input.sku)}" aria-label="SKU for ${escapeHtml(input.option)}" /><input data-variant-price type="number" min="0" step="0.01" value="${input.price}" aria-label="Price for ${escapeHtml(input.option)}" /><input data-variant-stock type="number" min="0" value="${input.stock}" aria-label="Stock for ${escapeHtml(input.option)}" /><input data-variant-option type="hidden" value="${escapeHtml(input.option)}" /><input data-variant-id type="hidden" value="${input.id || ""}" /><input data-variant-image-id type="hidden" value="${input.image?.id || ""}" /></div>`;
+  return `<div class="variant-row" data-variant-row><button class="variant-image-button" type="button" data-choose-variant-image aria-label="Choose image for ${escapeHtml(input.option)}">${image}</button><strong>${escapeHtml(variantAttributeInput.value.trim() || "Option")}: ${escapeHtml(input.option)}</strong><input data-variant-sku type="text" value="${escapeHtml(input.sku)}" aria-label="Automatically generated SKU for ${escapeHtml(input.option)}" title="Generated automatically" readonly /><input data-variant-price type="number" min="0" step="0.01" value="${input.price}" aria-label="Price for ${escapeHtml(input.option)}" /><input data-variant-stock type="number" min="0" value="${input.stock}" aria-label="Stock for ${escapeHtml(input.option)}" /><input data-variant-option type="hidden" value="${escapeHtml(input.option)}" /><input data-variant-id type="hidden" value="${input.id || ""}" /><input data-variant-image-id type="hidden" value="${input.image?.id || ""}" /></div>`;
 }
 
 function collectVariants(): Array<{ id?: number; option: string; sku: string; price: number; stock: number; imageId?: number }> {
@@ -8169,7 +8287,7 @@ function populateProductWorkspace(product: CommerceProduct, variations: Commerce
   productNameInput.value = product?.name || "";
   productSkuInput.value = product?.sku || "";
   productStockInput.value = String(product?.stockQuantity ?? 0);
-  productCategoryInput.value = product?.category || "";
+  renderProductCategoryOptions(product?.categoryId || 0, product?.category || "");
   productStatusInput.value = product?.visibility || "draft";
   productCostInput.value = String(product?.cost?.unitCost ?? 0);
   productPriceInput.value = String(product?.price ?? 0);
@@ -8196,6 +8314,7 @@ function populateProductWorkspace(product: CommerceProduct, variations: Commerce
     })).join("");
     variantTable.hidden = variations.length === 0;
   }
+  setProductSkuStatus("Existing SKU protected. It will remain unchanged when you save.", "available");
   calculateProductProfit();
 }
 
@@ -8232,7 +8351,7 @@ function openProductDrawer(product?: CommerceProduct): void {
   productNameInput.value = product?.name || "";
   productSkuInput.value = product?.sku || "";
   productStockInput.value = String(product?.stockQuantity ?? 0);
-  productCategoryInput.value = product?.category || "";
+  renderProductCategoryOptions(product?.categoryId || 0, product?.category || "");
   productStatusInput.value = product?.visibility || "draft";
   productCostInput.value = String(product?.cost?.unitCost ?? 0);
   productPriceInput.value = String(product?.regularPrice || product?.price || 0);
@@ -8243,7 +8362,9 @@ function openProductDrawer(product?: CommerceProduct): void {
   trashProductButton.classList.remove("is-confirming");
   trashProductButton.textContent = "Move to Trash";
   delete trashProductButton.dataset.confirming;
-  for (const input of [productNameInput, productSkuInput, productStockInput, productCategoryInput, productPriceInput]) input.readOnly = false;
+  for (const input of [productNameInput, productStockInput, productPriceInput]) input.readOnly = false;
+  productSkuInput.readOnly = true;
+  productCategoryInput.disabled = false;
   productStatusInput.disabled = false;
   const submitButton = productForm.querySelector<HTMLButtonElement>('button[type="submit"]');
   if (submitButton) submitButton.textContent = product ? "Save changes" : "Create product";
@@ -8252,6 +8373,8 @@ function openProductDrawer(product?: CommerceProduct): void {
   renderProductImages();
   resetVariantBuilder();
   calculateProductProfit();
+  if (product) setProductSkuStatus("Existing SKU protected. It will remain unchanged when you save.", "available");
+  else scheduleAutomaticSkuSuggestion(true);
   productDrawer.hidden = false;
   drawerBackdrop.hidden = false;
   document.body.classList.add("drawer-open");
@@ -8261,6 +8384,8 @@ function openProductDrawer(product?: CommerceProduct): void {
 }
 
 function closeProductDrawer(): void {
+  if (skuSuggestionTimer) window.clearTimeout(skuSuggestionTimer);
+  skuSuggestionSequence += 1;
   productDrawer.hidden = true;
   drawerBackdrop.hidden = true;
   document.body.classList.remove("drawer-open");
@@ -9062,6 +9187,7 @@ productVariantsToggle.addEventListener("change", () => {
   }
 });
 requiredElement<HTMLButtonElement>("#generate-variants").addEventListener("click", generateVariantRows);
+productNameInput.addEventListener("input", () => scheduleAutomaticSkuSuggestion());
 requiredElement<HTMLButtonElement>("#choose-product-media").addEventListener("click", () => openMediaPicker());
 requiredElement<HTMLButtonElement>("#close-media-picker").addEventListener("click", closeMediaPicker);
 mediaPickerBackdrop.addEventListener("click", closeMediaPicker);
@@ -9087,6 +9213,12 @@ productForm.addEventListener("submit", (event) => {
     if (submitButton) submitButton.disabled = false;
     return;
   }
+  if (!productCategoryInput.value) {
+    showToast("Category required", "Choose the catalog category for this product.", false);
+    productCategoryInput.focus();
+    if (submitButton) submitButton.disabled = false;
+    return;
+  }
   const operation = fetch("/api/commerce/product", {
     method: "POST",
     credentials: "same-origin",
@@ -9095,7 +9227,9 @@ productForm.addEventListener("submit", (event) => {
       productId: editingProductId,
       name: productNameInput.value.trim(),
       sku: productSkuInput.value.trim(),
+      skuMode: editingProductId ? "preserve" : "auto",
       stockQuantity: Number(productStockInput.value) || 0,
+      categoryId: Number(productCategoryInput.value) || 0,
       visibility: productStatusInput.value,
       regularPrice: Number(productPriceInput.value) || 0,
       unitCost: Number(productCostInput.value) || 0,
@@ -9110,7 +9244,12 @@ productForm.addEventListener("submit", (event) => {
     const payload: unknown = await response.json();
     if (!response.ok) throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The product could not be saved");
     await loadCommerce();
-    showToast(editingProductId ? "Product updated" : "Product created", "Visibility, media, inventory, pricing and variants are now synchronized.");
+    const warning = isRecord(payload) && typeof payload.warning === "string" ? payload.warning : "";
+    showToast(
+      editingProductId ? "Product updated" : "Product created",
+      warning || "SKU, category, visibility, inventory, pricing and variants are now synchronized.",
+      !warning,
+    );
   });
 
   void operation.then(() => closeProductDrawer())

@@ -178,3 +178,197 @@ test("ILS connection interruptions retry once before rejecting a new vial QR", a
   assert.equal(calls, 2);
   assert.equal(result?.coaReference, "COA-2026-GI8-SM");
 });
+
+test("resolves a Bitly vial QR only through an approved lab redirect and an exact governed COA", async () => {
+  const freedom = coa({
+    id: "phas2610050320",
+    coaNumber: "Phas2610050320",
+    productName: "KPV - 30MG",
+    matchedProductId: 548,
+    matchedVariationId: 0,
+    strength: "30 mg",
+    batch: "P1-30KPV06",
+    lot: "P1-30KPV06",
+    fileUrl: "https://coas.freedomdiagnosticstesting.com/Phas2610050320.pdf",
+    verifyUrl: "",
+  });
+  const result = await resolveExternalCoaQr({
+    rawValue: "http://bit.ly/4i91CFV?utm_source=printed-label",
+    coas: [freedom],
+    fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
+      assert.equal(init?.method, "HEAD");
+      assert.equal(init?.redirect, "manual");
+      assert.equal(String(url), "https://bit.ly/4i91CFV");
+      return new Response(null, {
+        status: 301,
+        headers: { location: "https://coas.freedomdiagnosticstesting.com/Phas2610050320.pdf" },
+      });
+    }) as typeof fetch,
+  });
+  assert.deepEqual(result, {
+    coaReference: "Phas2610050320",
+    provider: "bitly-freedom-diagnostics",
+    coaNumber: "Phas2610050320",
+    pdfUrl: "https://coas.freedomdiagnosticstesting.com/Phas2610050320.pdf",
+  });
+});
+
+test("recovers one incorrect Bitly letter case only when the approved destination is unique", async () => {
+  const reta20 = coa({
+    id: "coa-2026-g3bydj",
+    coaNumber: "COA-2026-G3BYDJ",
+    matchedVariationId: 649,
+    productName: "PL-RT - 20MG",
+    strength: "20 mg",
+    batch: "P1-20RT06",
+    lot: "P1-20RT06",
+    fileUrl: "https://files.ils-lab.com/coa-pdfs/phase-one-labz-P1-20RT06-tbQ2t3.pdf",
+    verifyUrl: "",
+  });
+  const requested: string[] = [];
+  const result = await resolveExternalCoaQr({
+    rawValue: "https://bit.ly/4xaRDcr",
+    coas: [reta20],
+    fetchImpl: (async (url: string | URL | Request) => {
+      const value = String(url);
+      requested.push(value);
+      if (value === "https://bit.ly/4xarDcr") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: reta20.fileUrl },
+        });
+      }
+      return new Response(null, { status: 404 });
+    }) as typeof fetch,
+  });
+  assert.ok(requested.includes("https://bit.ly/4xaRDcr"));
+  assert.ok(requested.includes("https://bit.ly/4xarDcr"));
+  assert.equal(result?.coaReference, "COA-2026-G3BYDJ");
+  assert.equal(result?.provider, "bitly-external-lab");
+});
+
+test("fails closed when Bitly case recovery finds more than one approved destination", async () => {
+  const result = await resolveExternalCoaQr({
+    rawValue: "https://bit.ly/Abcd",
+    coas: [coa()],
+    fetchImpl: (async (url: string | URL | Request) => {
+      const value = String(url);
+      if (value === "https://bit.ly/abcd") {
+        return new Response(null, { status: 302, headers: { location: coa().fileUrl } });
+      }
+      if (value === "https://bit.ly/ABcd") {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://coas.freedomdiagnosticstesting.com/another.pdf" },
+        });
+      }
+      return new Response(null, { status: 404 });
+    }) as typeof fetch,
+  });
+  assert.equal(result, null);
+});
+
+test("never follows a Bitly redirect outside the approved laboratory allowlist", async () => {
+  let calls = 0;
+  const result = await resolveExternalCoaQr({
+    rawValue: "https://bit.ly/unsafe1",
+    coas: [coa()],
+    fetchImpl: (async () => {
+      calls += 1;
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://evil.example/phase-one.pdf" },
+      });
+    }) as typeof fetch,
+  });
+  assert.equal(calls, 1);
+  assert.equal(result, null);
+});
+
+test("a Bitly redirect to an ILS portal QR still requires the ILS public record to match locally", async () => {
+  const result = await resolveExternalCoaQr({
+    rawValue: "https://bit.ly/KlowQr1",
+    coas: [coa()],
+    fetchImpl: (async (url: string | URL | Request) => {
+      if (String(url).startsWith("https://bit.ly/")) {
+        return new Response(null, {
+          status: 301,
+          headers: { location: "https://portal.ils-lab.com/verify/OvcWN_fh0ANZIlJe" },
+        });
+      }
+      return ilsResponse();
+    }) as typeof fetch,
+  });
+  assert.equal(result?.coaReference, "COA-2026-GI8-SM");
+  assert.equal(result?.provider, "bitly-ils");
+});
+
+test("KLOW resolves by exact ILS certificate even when the provider reports concentration without units", async () => {
+  const klow = coa({
+    id: "coa-2026-_-jbhe",
+    coaNumber: "COA-2026-_-JBHE",
+    productName: "KLOW",
+    compound: "KLOW",
+    familyName: "KLOW",
+    matchedProductId: 543,
+    matchedVariationId: 0,
+    strength: "82.65 mg",
+    batch: "P1-80KLW06",
+    lot: "P1-80KLW06",
+    fileUrl: "https://files.ils-lab.com/coa-pdfs/phase-one-labz-P1-80KLW06-2PlSXg.pdf",
+    verifyUrl: "",
+  });
+  const result = await resolveExternalCoaQr({
+    rawValue: "https://portal.ils-lab.com/verify/DNTX5qKve5zHiJcA",
+    coas: [coa(), klow],
+    fetchImpl: (async () => ilsResponse({
+      product: "KLOW",
+      lotNumber: "P1-80KLW06",
+      concentration: "80",
+      coaNumber: "COA-2026-_-JBHE",
+      pdfUrl: klow.fileUrl,
+    })) as typeof fetch,
+  });
+  assert.equal(result?.coaReference, "COA-2026-_-JBHE");
+});
+
+test("SS-31 resolves the scanned lot and never another available SS-31 certificate", async () => {
+  const freedom = coa({
+    id: "phas2607310133",
+    coaNumber: "Phas2607310133",
+    productName: "SS-31",
+    compound: "SS-31",
+    familyName: "SS-31",
+    matchedProductId: 586,
+    matchedVariationId: 0,
+    strength: "10 mg",
+    batch: "P1-10SS07",
+    lot: "P1-10SS07",
+    fileUrl: "https://coas.freedomdiagnosticstesting.com/Phas2607310133.pdf",
+    verifyUrl: "",
+  });
+  const ils = coa({
+    id: "coa-2026-2dvylr",
+    coaNumber: "COA-2026-2DVYLR",
+    productName: "SS-31",
+    compound: "SS-31",
+    familyName: "SS-31",
+    matchedProductId: 586,
+    matchedVariationId: 0,
+    strength: "10 mg",
+    batch: "P1-SS-26",
+    lot: "P1-SS-26",
+    fileUrl: "https://files.ils-lab.com/coa-pdfs/phase-one-labz-P1-SS-26-y1Gmnq.pdf",
+    verifyUrl: "",
+  });
+  const result = await resolveExternalCoaQr({
+    rawValue: "https://bit.ly/Ss31Qr",
+    coas: [freedom, ils],
+    fetchImpl: (async () => new Response(null, {
+      status: 302,
+      headers: { location: freedom.fileUrl },
+    })) as typeof fetch,
+  });
+  assert.equal(result?.coaReference, "Phas2607310133");
+  assert.notEqual(result?.coaReference, "COA-2026-2DVYLR");
+});

@@ -79,6 +79,17 @@ test("canonicalizes known lab redirects without losing QR identity", () => {
   );
 });
 
+test("normalizes Bitly scheme and tracking variants while preserving its case-sensitive token", () => {
+  assert.equal(
+    coaScanIdentity("http://www.bit.ly/4xaRDcr?utm_source=vial#ignored"),
+    "url:https://bit.ly/4xaRDcr",
+  );
+  assert.notEqual(
+    coaScanIdentity("https://bit.ly/4xaRDcr"),
+    coaScanIdentity("https://bit.ly/4xarDcr"),
+  );
+});
+
 test("resolves a current COA URL directly from governed catalog data", () => {
   const koveraUrl = "https://koveralabs.com/#/verify?t=50b6901a3b56c532f05f2c1a";
   const result = resolveCoaQrScan({

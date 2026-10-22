@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 import type { LegacyAffiliateCoupon } from "../shared/affiliates.js";
+import { productSkuBase, skuCandidate } from "../shared/productSku.js";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -37,6 +38,7 @@ export interface CommerceProduct {
   stockQuantity: number | null;
   stockStatus: string;
   category: string;
+  categoryId: number;
   imageUrl: string | null;
   thumbnailUrl: string | null;
   images: CommerceImage[];
@@ -61,6 +63,7 @@ export interface CommerceProductWrite {
   sku: string;
   regularPrice: number;
   stockQuantity: number;
+  categoryId: number;
   visibility: "public" | "hidden" | "private" | "draft";
   images: Array<{ id?: number; src?: string }>;
   attributeName?: string;
@@ -72,6 +75,26 @@ export interface CommerceProductWrite {
     stock: number;
     imageId?: number;
   }>;
+}
+
+export interface CommerceProductCategory {
+  id: number;
+  name: string;
+  slug: string;
+  count: number;
+  parentId: number;
+}
+
+export class CommerceServiceError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    readonly serviceMessage: string,
+    readonly details: Record<string, unknown> = {},
+  ) {
+    super(`Commerce service returned ${status}${code ? ` (${code})` : ""}: ${serviceMessage}`);
+    this.name = "CommerceServiceError";
+  }
 }
 
 export interface CommerceProductSaleWrite {
@@ -672,6 +695,27 @@ function decodedText(value: unknown): string {
     });
 }
 
+function commerceServiceError(status: number, body: string): CommerceServiceError {
+  try {
+    const payload: unknown = JSON.parse(body);
+    const value = record(payload);
+    const code = text(value.code).slice(0, 100);
+    const message = decodedText(value.message)
+      .replace(/<[^>]*>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return new CommerceServiceError(
+      status,
+      code,
+      message || "The catalog rejected the request.",
+      record(value.data),
+    );
+  } catch {
+    const message = body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 240);
+    return new CommerceServiceError(status, "", message || "The catalog rejected the request.");
+  }
+}
+
 function number(value: unknown): number {
   const parsed = typeof value === "number" ? value : Number.parseFloat(text(value));
   return Number.isFinite(parsed) ? parsed : 0;
@@ -737,7 +781,8 @@ function mapProduct(value: unknown, thumbnails = new Map<number, string>()): Com
     regularPrice: number(product.regular_price), salePrice: text(product.sale_price) ? number(product.sale_price) : null,
     saleStartsAt: isoDate(product.date_on_sale_from_gmt), saleEndsAt: isoDate(product.date_on_sale_to_gmt),
     stockQuantity: nullableNumber(product.stock_quantity), stockStatus: text(product.stock_status) || "instock",
-    category: decodedText(record(categories[0]).name) || "Uncategorized", imageUrl: images[0]?.src || null,
+    category: decodedText(record(categories[0]).name) || "Uncategorized",
+    categoryId: Math.max(0, Math.trunc(number(record(categories[0]).id))), imageUrl: images[0]?.src || null,
     thumbnailUrl: images[0]?.thumbnailUrl || null, images,
     variationIds: Array.isArray(product.variations) ? product.variations.map(number).filter((value) => value > 0) : [],
     attributes, modifiedAt: isoDate(product.date_modified_gmt),
@@ -1731,6 +1776,61 @@ export class WooCommerceGateway {
       .filter((product) => product.status !== "trash");
   }
 
+  async listProductCategories(): Promise<CommerceProductCategory[]> {
+    const payload = await this.requestAllPages("products/categories", {
+      hide_empty: "false",
+      orderby: "name",
+      order: "asc",
+      _fields: "id,name,slug,count,parent",
+    });
+    return payload.flatMap((value) => {
+      const category = record(value);
+      const id = Math.trunc(number(category.id));
+      if (id <= 0) return [];
+      return [{
+        id,
+        name: decodedText(category.name) || `Category ${id}`,
+        slug: text(category.slug),
+        count: Math.max(0, Math.trunc(number(category.count))),
+        parentId: Math.max(0, Math.trunc(number(category.parent))),
+      }];
+    });
+  }
+
+  async findProductsBySku(sku: string): Promise<CommerceProduct[]> {
+    const normalized = sku.trim();
+    if (!normalized) return [];
+    const payload = await this.request("products", {
+      parameters: {
+        sku: normalized,
+        per_page: "100",
+        status: "any",
+        _fields: "id,name,slug,permalink,sku,type,status,catalog_visibility,price,regular_price,sale_price,date_on_sale_from_gmt,date_on_sale_to_gmt,stock_quantity,stock_status,categories,images,variations,attributes,date_modified_gmt",
+      },
+    });
+    if (!Array.isArray(payload)) return [];
+    return payload.flatMap((value) => {
+      try { return [mapProduct(value)]; } catch { return []; }
+    });
+  }
+
+  async suggestAvailableProductSku(
+    nameOrSku: string,
+    excludedIds: number[] = [],
+    reservedSkus: string[] = [],
+  ): Promise<string> {
+    const base = productSkuBase(nameOrSku);
+    const excluded = new Set(excludedIds.filter((id) => Number.isSafeInteger(id) && id > 0));
+    const reserved = new Set(reservedSkus.map((sku) => sku.trim().toLocaleUpperCase("en")).filter(Boolean));
+    for (let suffix = 0; suffix <= 99; suffix += 1) {
+      const candidate = skuCandidate(base, suffix);
+      if (reserved.has(candidate.toLocaleUpperCase("en"))) continue;
+      const matches = await this.findProductsBySku(candidate);
+      if (matches.every((product) => excluded.has(product.id))) return candidate;
+    }
+    throw new Error("No available SKU could be generated for this product name");
+  }
+
   async getProduct(productId: number): Promise<CommerceProduct> {
     return mapProduct(await this.request(`products/${productId}`));
   }
@@ -1745,7 +1845,9 @@ export class WooCommerceGateway {
     const variants = input.variants || [];
     const body: Record<string, unknown> = {
       name: input.name, sku: input.sku, regular_price: input.regularPrice.toFixed(2), manage_stock: true,
-      stock_quantity: Math.max(0, Math.floor(input.stockQuantity)), images: input.images, ...visibilityPayload(input.visibility),
+      stock_quantity: Math.max(0, Math.floor(input.stockQuantity)), images: input.images,
+      categories: input.categoryId > 0 ? [{ id: input.categoryId }] : [],
+      ...visibilityPayload(input.visibility),
     };
     if (variants.length) {
       body.type = "variable";
@@ -2369,8 +2471,8 @@ export class WooCommerceGateway {
       ...(requestBody ? { body: requestBody } : {}), signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!response.ok) {
-      const body = (await response.text()).slice(0, 300);
-      throw new Error(`Commerce service returned ${response.status}: ${body}`);
+      const body = (await response.text()).slice(0, 10_000);
+      throw commerceServiceError(response.status, body);
     }
     return response;
   }

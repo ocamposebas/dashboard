@@ -36,6 +36,7 @@ import { resolveCoaQrScan } from "./coaScanResolver.js";
 import { CoaRepository, type CoaUpdateInput } from "./coaRepository.js";
 import { buildThermalLabelDocument } from "../shared/labelPrint.js";
 import { calculateProductProfitability } from "../shared/productProfitability.js";
+import { productVariantSku } from "../shared/productSku.js";
 import { fulfillmentAccessForRole } from "./fulfillmentAccess.js";
 import {
   FulfillmentRepository,
@@ -121,6 +122,7 @@ import {
   SiteControlRepositoryError,
 } from "./siteControlRepository.js";
 import {
+  CommerceServiceError,
   WooCommerceGateway,
   type CommerceCoa,
   type CommerceOrder,
@@ -753,7 +755,11 @@ export function createMonitorServer(
     if (commerceRefresh) return commerceRefresh;
     commerceRefresh = (async () => {
       const previousOrders = commerceCache?.payload.orders;
-      const [products, orders] = await Promise.all([commerce.listProducts(), commerce.listOrders()]);
+      const [products, orders, categories] = await Promise.all([
+        commerce.listProducts(),
+        commerce.listOrders(),
+        commerce.listProductCategories(),
+      ]);
       const productIds = [
         ...products.map((product) => product.id),
         ...orders.flatMap((order) => order.lineItems.map((item) => item.productId)),
@@ -800,6 +806,7 @@ export function createMonitorServer(
         store: new URL(commerceConfig.baseUrl).hostname,
         syncIntervalSeconds: Math.round(commerceConfig.syncIntervalMs / 1_000),
         products: productsWithProfit,
+        categories,
         orders: ordersWithProfit,
         affiliateCommissions,
         media: [...mediaMap.values()],
@@ -4142,6 +4149,30 @@ export function createMonitorServer(
         return;
       }
 
+      if (url.pathname === "/api/commerce/product/sku-suggestion" && request.method === "GET") {
+        if (!commerce || !config.wooCommerce) {
+          json(response, 503, { error: "The live catalog service is not connected" });
+          return;
+        }
+        const name = (url.searchParams.get("name") || "").trim();
+        const excludeProductId = Number(url.searchParams.get("excludeProductId"));
+        if (!name || name.length > 200) {
+          json(response, 400, { error: "Enter a product name to generate its SKU" });
+          return;
+        }
+        try {
+          const sku = await commerce.suggestAvailableProductSku(
+            name,
+            Number.isSafeInteger(excludeProductId) && excludeProductId > 0 ? [excludeProductId] : [],
+          );
+          json(response, 200, { sku, available: true });
+        } catch (error: unknown) {
+          console.error("Product SKU suggestion failed", error);
+          json(response, 502, { error: "An available SKU could not be confirmed" });
+        }
+        return;
+      }
+
       if (url.pathname === "/api/commerce/product" && request.method === "POST") {
         if (!isLoginOriginAllowed(request, config)) {
           json(response, 403, { error: "Origin not allowed" });
@@ -4166,11 +4197,13 @@ export function createMonitorServer(
         const name = typeof input.name === "string" ? input.name.trim() : "";
         const regularPrice = Number(input.regularPrice);
         const stockQuantity = Number(input.stockQuantity);
+        const categoryId = Number(input.categoryId || 0);
         if (
           (productId !== null && (!Number.isSafeInteger(productId) || productId <= 0)) ||
           !name || name.length > 200 || !["public", "hidden", "private", "draft"].includes(visibility) ||
           !Number.isFinite(regularPrice) || regularPrice < 0 || regularPrice > 1_000_000_000 ||
-          !Number.isFinite(stockQuantity) || stockQuantity < 0 || stockQuantity > 1_000_000_000
+          !Number.isFinite(stockQuantity) || stockQuantity < 0 || stockQuantity > 1_000_000_000 ||
+          !Number.isSafeInteger(categoryId) || categoryId <= 0
         ) {
           json(response, 400, { error: "The product values are invalid" });
           return;
@@ -4184,7 +4217,7 @@ export function createMonitorServer(
           if (Number.isSafeInteger(id) && id > 0) images.push({ id });
           else if (src.startsWith("https://")) images.push({ src });
         }
-        const variants = Array.isArray(input.variants) ? input.variants.flatMap((value) => {
+        let variants = Array.isArray(input.variants) ? input.variants.flatMap((value) => {
           if (!value || typeof value !== "object") return [];
           const variant = value as Record<string, unknown>;
           const option = typeof variant.option === "string" ? variant.option.trim() : "";
@@ -4202,33 +4235,83 @@ export function createMonitorServer(
             ...(Number.isSafeInteger(imageId) && imageId > 0 ? { imageId } : {}),
           }];
         }).slice(0, 100) : [];
-        const write: CommerceProductWrite = {
-          name,
-          sku: typeof input.sku === "string" ? input.sku.trim().slice(0, 100) : "",
-          regularPrice,
-          stockQuantity,
-          visibility: visibility as CommerceProductWrite["visibility"],
-          images,
-          ...(typeof input.attributeName === "string"
-            ? { attributeName: input.attributeName.trim().slice(0, 100) }
-            : {}),
-          variants,
-        };
         try {
+          const automaticSku = productId === null;
+          const sku = automaticSku
+            ? await commerce.suggestAvailableProductSku(name)
+            : typeof input.sku === "string" ? input.sku.trim().slice(0, 100) : "";
+          if (automaticSku) {
+            const generated = [];
+            const reservedSkus = new Set<string>([sku.toLocaleUpperCase("en")]);
+            for (const variant of variants) {
+              const variantSku = await commerce.suggestAvailableProductSku(
+                productVariantSku(sku, variant.option),
+                [],
+                [...reservedSkus],
+              );
+              reservedSkus.add(variantSku.toLocaleUpperCase("en"));
+              generated.push({
+                ...variant,
+                sku: variantSku,
+              });
+            }
+            variants = generated;
+          }
+          const write: CommerceProductWrite = {
+            name,
+            sku,
+            regularPrice,
+            stockQuantity,
+            categoryId,
+            visibility: visibility as CommerceProductWrite["visibility"],
+            images,
+            ...(typeof input.attributeName === "string"
+              ? { attributeName: input.attributeName.trim().slice(0, 100) }
+              : {}),
+            variants,
+          };
           const saved = await commerce.saveProduct(productId, write);
-          await store.setProductCost(saved.id, {
-            unitCost: Math.max(0, Number(input.unitCost) || 0),
-            packagingCost: Math.max(0, Number(input.packagingCost) || 0),
-            feeRate: Math.min(100, Math.max(0, Number(input.feeRate) || 0)),
-            affiliateRate: Math.min(100, Math.max(0, Number(input.affiliateRate) || 0)),
-          });
+          let profitabilitySaved = true;
+          try {
+            await store.setProductCost(saved.id, {
+              unitCost: Math.max(0, Number(input.unitCost) || 0),
+              packagingCost: Math.max(0, Number(input.packagingCost) || 0),
+              feeRate: Math.min(100, Math.max(0, Number(input.feeRate) || 0)),
+              affiliateRate: Math.min(100, Math.max(0, Number(input.affiliateRate) || 0)),
+            });
+          } catch (costError: unknown) {
+            profitabilitySaved = false;
+            console.error("Product saved but profitability metadata could not be saved", costError);
+          }
           productDetailCache.delete(saved.id);
           await invalidateCommerceCache();
           void refreshCommerce().catch((error: unknown) => console.error("Commerce refresh after product save failed", error));
-          json(response, 200, { saved: true, product: saved });
+          json(response, 200, {
+            saved: true,
+            product: saved,
+            profitabilitySaved,
+            ...(profitabilitySaved ? {} : { warning: "The product was saved, but its internal cost details need to be saved again." }),
+          });
         } catch (error: unknown) {
           console.error("Product save failed", error);
-          json(response, 502, { error: "The product could not be saved" });
+          if (error instanceof CommerceServiceError && error.code === "product_invalid_sku") {
+            const suggestedSku = typeof error.details.unique_sku === "string" ? error.details.unique_sku : "";
+            const conflictingProductId = Number(error.details.resource_id);
+            json(response, 409, {
+              code: "duplicate_sku",
+              error: suggestedSku
+                ? `That SKU is already in use. Use the automatic suggestion ${suggestedSku}, or edit the existing product.`
+                : "That SKU is already in use. Let the dashboard generate another one, or edit the existing product.",
+              suggestedSku,
+              conflictingProductId: Number.isSafeInteger(conflictingProductId) && conflictingProductId > 0
+                ? conflictingProductId
+                : null,
+            });
+          } else if (error instanceof CommerceServiceError && error.status >= 400 && error.status < 500) {
+            json(response, 422, { code: error.code || "catalog_validation", error: error.serviceMessage });
+          } else {
+            json(response, 502, { error: "The catalog could not save this product. Try again in a moment." });
+          }
         }
         return;
       }
