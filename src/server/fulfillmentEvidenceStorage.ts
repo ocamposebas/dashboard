@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 
@@ -7,10 +7,22 @@ const IV_BYTES = 12;
 const TAG_BYTES = 16;
 
 export class FulfillmentEvidenceStorageError extends Error {
-  constructor(message: string, readonly code: "invalid_input" | "not_found" | "integrity_failed") {
-    super(message);
+  constructor(
+    message: string,
+    readonly code: "invalid_input" | "not_found" | "integrity_failed" | "unavailable",
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
     this.name = "FulfillmentEvidenceStorageError";
   }
+}
+
+function unavailable(error: unknown): FulfillmentEvidenceStorageError {
+  return new FulfillmentEvidenceStorageError(
+    "Private packaging-evidence storage is temporarily unavailable. No photo was saved.",
+    "unavailable",
+    { cause: error },
+  );
 }
 
 function storagePath(root: string, key: string): string {
@@ -38,19 +50,35 @@ export class FulfillmentEvidenceStorage {
     this.key = createHash("sha256").update(secret, "utf8").digest();
   }
 
+  async ensureReady(): Promise<void> {
+    const probe = resolve(this.root, `.phaseone-write-probe-${randomUUID()}`);
+    try {
+      await mkdir(this.root, { recursive: true, mode: 0o700 });
+      await writeFile(probe, randomBytes(32), { mode: 0o600, flag: "wx" });
+    } catch (error: unknown) {
+      throw unavailable(error);
+    } finally {
+      await rm(probe, { force: true }).catch(() => undefined);
+    }
+  }
+
   async save(id: string, plaintext: Buffer, now = new Date()): Promise<string> {
     if (!/^[0-9a-f-]{36}$/i.test(id) || plaintext.byteLength === 0) {
       throw new FulfillmentEvidenceStorageError("Evidence file input is invalid", "invalid_input");
     }
     const key = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${id}.p1ev`;
     const target = storagePath(this.root, key);
-    await mkdir(dirname(target), { recursive: true, mode: 0o700 });
-    const iv = randomBytes(IV_BYTES);
-    const cipher = createCipheriv("aes-256-gcm", this.key, iv);
-    cipher.setAAD(MAGIC);
-    const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-    const tag = cipher.getAuthTag();
-    await writeFile(target, Buffer.concat([MAGIC, iv, tag, encrypted]), { mode: 0o600, flag: "wx" });
+    try {
+      await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+      const iv = randomBytes(IV_BYTES);
+      const cipher = createCipheriv("aes-256-gcm", this.key, iv);
+      cipher.setAAD(MAGIC);
+      const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+      const tag = cipher.getAuthTag();
+      await writeFile(target, Buffer.concat([MAGIC, iv, tag, encrypted]), { mode: 0o600, flag: "wx" });
+    } catch (error: unknown) {
+      throw unavailable(error);
+    }
     return key;
   }
 

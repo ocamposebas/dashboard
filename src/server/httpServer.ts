@@ -1062,7 +1062,7 @@ export function createMonitorServer(
           ? 401
         : error.code === "forbidden" || error.code === "label_purchase_disabled"
             ? 403
-            : ["not_configured", "no_origin", "upstream_unavailable", "rate_limited"].includes(error.code)
+            : ["not_configured", "no_origin", "upstream_unavailable", "rate_limited", "unavailable"].includes(error.code)
               ? 503
         : ["conflict", "invalid_state", "order_ineligible", "active_conflict", "version_conflict", "idempotency_conflict", "purchase_unknown"].includes(error.code)
           ? 409

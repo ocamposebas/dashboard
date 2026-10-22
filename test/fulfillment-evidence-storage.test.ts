@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
@@ -21,6 +21,39 @@ test("evidence storage encrypts bytes at rest and restores the exact photo", asy
     const encrypted = await readFile(join(root, ...key.split("/")));
     assert.equal(encrypted.includes(Buffer.from("private-photo-payload")), false);
     assert.deepEqual(await storage.read(key), photo);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("evidence storage prepares a missing private directory and verifies it is writable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "phaseone-evidence-parent-"));
+  const nested = join(root, "private", "evidence");
+  try {
+    const storage = new FulfillmentEvidenceStorage(nested, secret);
+    await storage.ensureReady();
+    const key = await storage.save(
+      "8f934ca7-14d1-4f1f-a654-aa9ae28ca522",
+      Buffer.from([0xff, 0xd8, 0xff, 0xff, 0xd9]),
+      new Date("2026-10-21T12:00:00Z"),
+    );
+    assert.deepEqual(await storage.read(key), Buffer.from([0xff, 0xd8, 0xff, 0xff, 0xd9]));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("evidence storage reports an unavailable vault before accepting a photo", async () => {
+  const root = await mkdtemp(join(tmpdir(), "phaseone-evidence-blocked-"));
+  const blocked = join(root, "not-a-directory");
+  try {
+    await mkdir(root, { recursive: true });
+    await writeFile(blocked, "occupied");
+    const storage = new FulfillmentEvidenceStorage(blocked, secret);
+    await assert.rejects(
+      storage.ensureReady(),
+      (error: unknown) => error instanceof FulfillmentEvidenceStorageError && error.code === "unavailable",
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

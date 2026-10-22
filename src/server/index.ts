@@ -15,8 +15,17 @@ import { AffiliateRepository } from "./affiliateRepository.js";
 import { AffiliateShadowSync } from "./affiliateShadowSync.js";
 import { ShipStationGateway } from "./shipStationGateway.js";
 import { SiteControlRepository } from "./siteControlRepository.js";
+import { FulfillmentEvidenceStorage } from "./fulfillmentEvidenceStorage.js";
 
 const config = loadConfig();
+if (config.evidenceStorage) {
+  const evidenceStorage = new FulfillmentEvidenceStorage(
+    config.evidenceStorage.path,
+    config.evidenceStorage.encryptionSecret,
+  );
+  await evidenceStorage.ensureReady();
+  console.log("Private packaging-evidence storage is writable");
+}
 const fulfillmentDatabase = config.fulfillmentDatabase
   ? new Database(config.fulfillmentDatabase)
   : undefined;
