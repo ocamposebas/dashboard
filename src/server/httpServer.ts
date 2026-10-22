@@ -639,6 +639,31 @@ export function createMonitorServer(
     session: FulfillmentSession;
     coaSync: { state: "synced" | "pending" | "failed"; message: string; assignedUnits: number };
   }> {
+    const requiresCoaSync = snapshot.lines.some((line) =>
+      Boolean(line.allocations?.length || (line.coaId && line.lot)));
+    if (!requiresCoaSync && fulfillmentRepository) {
+      const updated = session.wordpressSyncState === "synced"
+        ? session
+        : await fulfillmentRepository.recordWordPressSync({
+            fulfillmentId: session.id,
+            actorId,
+            state: "synced",
+            details: {
+              orderId: snapshot.orderId,
+              clientEventId: snapshot.clientEventId,
+              assignedUnits: 0,
+              reason: "no_coa_required",
+            },
+          });
+      return {
+        session: updated,
+        coaSync: {
+          state: "synced",
+          message: "Product barcode verification is saved. No customer COA assignment is required.",
+          assignedUnits: 0,
+        },
+      };
+    }
     if (!commerce || !fulfillmentRepository || commerceConfig?.accessMode !== "read_write") {
       return {
         session,
@@ -1206,9 +1231,6 @@ export function createMonitorServer(
       throw new BarcodeLabelError("Select a valid variation", "invalid_input");
     }
     const effective = await productLocations.getEffective(productId, variationId);
-    if (!effective.location) {
-      throw new ProductLocationError("Assign a storage location before generating a label", "not_found");
-    }
     let coa: CommerceCoa | undefined;
     if (type === "batch") {
       const coaId = typeof input.coaId === "string" ? input.coaId.trim() : "";
@@ -1244,7 +1266,7 @@ export function createMonitorServer(
       productName: product.name,
       variantName: variation?.attributes.map((item) => item.option).filter(Boolean).join(" · ") || "",
       sku: variation?.sku || product.sku,
-      locationCode: effective.location.locationCode,
+      locationCode: effective.location?.locationCode || "STORAGE",
       coaNumber: coa?.coaNumber || "",
       size: input.size === "3x1" ? "3x1" : "2x1",
       copies: Number(input.copies),

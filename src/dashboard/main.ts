@@ -3351,29 +3351,8 @@ function effectiveProductLocation(productId: number, variationId = 0): {
   return { location: directProductLocation(productId, 0), inherited: true };
 }
 
-function labelProduct(): CommerceProduct | undefined {
-  return labelProductDetail?.product || commerceData?.products.find((product) =>
-    product.id === selectedLabelProductId);
-}
-
 function labelVariation(variationId = selectedLabelVariationId): CommerceVariation | undefined {
   return labelProductDetail?.variations.find((variation) => variation.id === variationId);
-}
-
-function labelCoaCandidates(variationId = selectedLabelVariationId): CommerceCoa[] {
-  const product = labelProduct();
-  if (!product) return [];
-  const variation = labelVariation(variationId);
-  const sku = (variation?.sku || product.sku).trim().toLocaleLowerCase("en");
-  return (extensionsData?.coas || []).filter((coa) => {
-    if (coa.matchedProductId > 0 && coa.matchedProductId !== product.id) return false;
-    if (coa.matchedVariationId > 0 && coa.matchedVariationId !== (variation?.id || 0)) return false;
-    if (coa.matchedProductId === product.id) return true;
-    return Boolean(sku && coa.skus.some((item) => item.trim().toLocaleLowerCase("en") === sku));
-  }).sort((left, right) => {
-    if (left.currentShippingLot !== right.currentShippingLot) return left.currentShippingLot ? -1 : 1;
-    return (right.date || "").localeCompare(left.date || "");
-  });
 }
 
 function renderLabelMetrics(): void {
@@ -3437,9 +3416,10 @@ function renderLabelProductList(): void {
   }).sort((left, right) => {
     if (labelProductSort === "stock-low") return labelStockRank(left) - labelStockRank(right) || left.name.localeCompare(right.name, "en");
     if (labelProductSort === "location") {
-      const leftLocation = directProductLocation(left.id)?.locationCode || "\uffff";
-      const rightLocation = directProductLocation(right.id)?.locationCode || "\uffff";
-      return leftLocation.localeCompare(rightLocation, "en", { numeric: true }) || left.name.localeCompare(right.name, "en");
+      const registered = fulfillmentLocations?.registeredLabels || [];
+      const leftReady = registered.some((record) => record.productId === left.id && record.type !== "batch") ? 0 : 1;
+      const rightReady = registered.some((record) => record.productId === right.id && record.type !== "batch") ? 0 : 1;
+      return leftReady - rightReady || left.name.localeCompare(right.name, "en");
     }
     return left.name.localeCompare(right.name, "en", { sensitivity: "base" });
   });
@@ -3457,7 +3437,8 @@ function renderLabelProductList(): void {
     return;
   }
   container.innerHTML = products.map((product) => {
-    const location = directProductLocation(product.id);
+    const registered = Boolean(fulfillmentLocations?.registeredLabels.some((record) =>
+      record.productId === product.id && record.type !== "batch"));
     const image = product.thumbnailUrl || product.imageUrl;
     const stock = labelStockCopy(product);
     const selected = product.id === selectedLabelProductId;
@@ -3468,7 +3449,7 @@ function renderLabelProductList(): void {
       <span class="label-product-thumb">${media}</span>
       <span class="label-product-copy"><span><strong>${escapeHtml(product.name)}</strong>${selected ? '<i aria-hidden="true">✓</i>' : ""}</span><small>SKU ${escapeHtml(product.sku || "required")}</small></span>
       <span class="label-product-meta"><span>${escapeHtml(product.category || "Uncategorized")}</span>${product.variationIds.length ? `<span>${product.variationIds.length} variant${product.variationIds.length === 1 ? "" : "s"}</span>` : ""}</span>
-      <span class="label-product-footer"><em class="is-${stock.tone}">${escapeHtml(stock.label)}</em><b class="label-location-chip${location ? "" : " is-missing"}">${escapeHtml(location?.locationCode || "Needs location")}</b></span>
+      <span class="label-product-footer"><em class="is-${stock.tone}">${escapeHtml(stock.label)}</em><b class="label-location-chip${registered ? "" : " is-missing"}">${registered ? "Barcode registered" : "Ready to generate"}</b></span>
     </button>`;
   }).join("");
 }
@@ -3649,23 +3630,16 @@ function renderLabelComposer(): void {
   const variationField = requiredElement<HTMLElement>("#label-variation-field");
   const batchSelect = requiredElement<HTMLSelectElement>("#label-batch-select");
   const batchField = requiredElement<HTMLElement>("#label-batch-field");
-  const knownSkus = new Set([product?.sku || "", ...variations.map((variation) => variation.sku)]
-    .map((sku) => sku.trim().toLocaleLowerCase("en"))
-    .filter(Boolean));
-  const hasBatches = Boolean(product && (extensionsData?.coas || []).some((coa) =>
-    coa.matchedProductId === product.id
-    || coa.skus.some((sku) => knownSkus.has(sku.trim().toLocaleLowerCase("en")))));
   if (selectedLabelType === "variation" && variations.length === 0) selectedLabelType = "product";
-  if (selectedLabelType === "batch" && !hasBatches) selectedLabelType = variations.length ? "variation" : "product";
-  typeSelect.innerHTML = `<option value="product">Product</option>${variations.length ? '<option value="variation">Specific variation</option>' : ""}${hasBatches ? '<option value="batch">Batch / COA</option>' : ""}`;
+  if (selectedLabelType === "batch") selectedLabelType = variations.length ? "variation" : "product";
+  typeSelect.innerHTML = variations.length
+    ? '<option value="variation">Exact variation</option>'
+    : '<option value="product">Product</option>';
   typeSelect.value = selectedLabelType;
   typeSelect.disabled = !product;
   if (selectedLabelType === "product") selectedLabelVariationId = 0;
   if (selectedLabelType === "variation" && !variations.some((item) => item.id === selectedLabelVariationId)) {
     selectedLabelVariationId = variations[0]?.id || 0;
-  }
-  if (selectedLabelType === "batch" && selectedLabelVariationId > 0 && !variations.some((item) => item.id === selectedLabelVariationId)) {
-    selectedLabelVariationId = 0;
   }
   const baseOption = selectedLabelType === "variation" ? "" : '<option value="0">Base product</option>';
   variationSelect.innerHTML = baseOption + variations.map((variation) => {
@@ -3675,11 +3649,9 @@ function renderLabelComposer(): void {
   variationSelect.value = String(selectedLabelVariationId);
   variationField.hidden = selectedLabelType === "product" || variations.length === 0;
   variationSelect.disabled = !product || selectedLabelType === "product" || (selectedLabelType === "variation" && variations.length === 0);
-  batchField.hidden = selectedLabelType !== "batch";
-  const coas = selectedLabelType === "batch" ? labelCoaCandidates() : [];
-  if (!coas.some((coa) => coa.id === selectedLabelCoaId)) selectedLabelCoaId = coas[0]?.id || "";
-  batchSelect.innerHTML = '<option value="">Select a verified batch</option>' + coas.map((coa) => `<option value="${escapeHtml(coa.id)}"${coa.id === selectedLabelCoaId ? " selected" : ""}>${escapeHtml(coa.lot || coa.batch || coa.coaNumber)}${coa.currentShippingLot ? " · Current" : ""}</option>`).join("");
-  batchSelect.value = selectedLabelCoaId;
+  batchField.hidden = true;
+  batchSelect.innerHTML = '<option value="">Not used for product barcodes</option>';
+  batchSelect.value = "";
   const variation = labelVariation();
   const sku = variation?.sku || product?.sku || "";
   const effective = product ? effectiveProductLocation(product.id, selectedLabelVariationId) : { location: undefined, inherited: false };
@@ -3695,20 +3667,19 @@ function renderLabelComposer(): void {
   const locationCard = requiredElement<HTMLElement>("#label-effective-location");
   if (!product) {
     locationCard.className = "label-effective-location";
-    locationCard.innerHTML = '<span>⌖</span><div><small>STORAGE LOCATION</small><strong>Select a product</strong><p>The assigned shelf will appear automatically.</p></div>';
+    locationCard.innerHTML = '<span>▤</span><div><small>DRAWER LABEL</small><strong>Select a product</strong><p>The large barcode will identify the exact catalog item.</p></div>';
   } else if (effective.location) {
     locationCard.className = "label-effective-location is-ready";
-    locationCard.innerHTML = `<span>⌖</span><div><small>STORAGE LOCATION</small><strong>${escapeHtml(effective.location.locationCode)}</strong><p>${effective.inherited ? "Inherited from the base product" : "Assigned directly to this item"}</p></div>`;
+    locationCard.innerHTML = `<span>▤</span><div><small>DRAWER LABEL</small><strong>${escapeHtml(effective.location.locationCode)}</strong><p>${effective.inherited ? "Uses the base product shelf" : "Shelf code included on the label"}</p></div>`;
   } else {
-    locationCard.className = "label-effective-location is-missing";
-    locationCard.innerHTML = `<span>!</span><div><small>STORAGE LOCATION REQUIRED</small><strong>No shelf assigned</strong><p>Assign a location before generating this label.</p></div><button class="button button--secondary label-location-shortcut" type="button" data-open-location-for-product="${product.id}">Assign location</button>`;
+    locationCard.className = "label-effective-location is-ready";
+    locationCard.innerHTML = '<span>▤</span><div><small>DRAWER LABEL</small><strong>Ready without a shelf code</strong><p>The barcode can be printed now and attached to any drawer or bin.</p></div>';
   }
   const canPrint = Boolean(fulfillmentLocations?.configured && fulfillmentLocations.permissions.printLabels);
   const targetValid = selectedLabelType !== "variation" || Boolean(variation);
-  const batchValid = selectedLabelType !== "batch" || Boolean(selectedLabelCoaId);
   const generate = requiredElement<HTMLButtonElement>("#generate-barcode-label");
-  generate.disabled = !product || !canPrint || !sku.trim() || !effective.location || !targetValid || !batchValid;
-  generate.title = !product ? "Choose a product" : !sku.trim() ? "This record needs an SKU" : !effective.location ? "Assign a storage location first" : !canPrint ? "Operations access and barcode configuration are required" : "Generate a server-validated Code 128 label";
+  generate.disabled = !product || !canPrint || !sku.trim() || !targetValid;
+  generate.title = !product ? "Choose a product" : !sku.trim() ? "This record needs an SKU" : !canPrint ? "Operations access and barcode configuration are required" : "Generate a server-validated Code 128 label";
   requiredElement<HTMLElement>("#label-preview-size").textContent = requiredElement<HTMLSelectElement>("#label-size-select").value === "3x1" ? "3 × 1" : "2 × 1";
   const previewCopies = document.querySelector<HTMLElement>("#label-preview-copies");
   const copyCount = Math.max(1, Number(requiredElement<HTMLInputElement>("#label-copy-count").value) || 1);
@@ -3730,10 +3701,10 @@ function renderLabelWorkspace(refreshDetail = true): void {
   const ready = Boolean(fulfillmentLocations && !fulfillmentLocations.error && fulfillmentLocations.configured);
   state.className = `label-service-state${ready ? " is-ready" : fulfillmentLocations?.error ? " is-error" : ""}`;
   const serviceCopy = fulfillmentLocationsLoading
-    ? "Refreshing warehouse data"
+    ? "Refreshing barcode data"
     : ready
-      ? "Locations synchronized"
-      : fulfillmentLocations?.error || "Warehouse data unavailable";
+      ? "Barcode printing ready"
+      : fulfillmentLocations?.error || "Barcode service unavailable";
   state.querySelector<HTMLElement>("b")!.textContent = serviceCopy;
   state.dataset.state = fulfillmentLocationsLoading ? "connecting" : ready ? "ready" : fulfillmentLocations?.error ? "error" : "unavailable";
   state.title = serviceCopy;
@@ -3743,7 +3714,7 @@ function renderLabelWorkspace(refreshDetail = true): void {
     contextService.querySelector<HTMLElement>("strong")!.textContent = fulfillmentLocationsLoading
       ? "Connecting…"
       : ready
-        ? "Locations synchronized"
+        ? "Secure barcodes ready"
         : "Service unavailable";
   }
   const previewService = document.querySelector<HTMLElement>("#label-preview-service");
@@ -3935,10 +3906,10 @@ function pickingProgressPercent(order: FulfillmentQueueEntry): number {
 
 function pickingFeedbackMarkup(): string {
   if (fulfillmentScanBusy && !fulfillmentScanFeedback) {
-    return '<div class="picking-feedback is-reading" role="status"><span class="picking-feedback-icon">···</span><div><strong>Checking vial QR</strong><p>Verifying the product, variation, batch, COA and live order.</p></div></div>';
+    return '<div class="picking-feedback is-reading" role="status"><span class="picking-feedback-icon">···</span><div><strong>Checking scanned code</strong><p>Verifying the exact product, variation, COA requirements and live order.</p></div></div>';
   }
   if (!fulfillmentScanFeedback) {
-    return '<div class="picking-feedback is-idle" role="status"><span class="picking-feedback-icon">⌁</span><div><strong>Ready for the first vial</strong><p>Scan the QR already printed on the vial. The registered COA and physical lot will be checked automatically.</p></div></div>';
+    return '<div class="picking-feedback is-idle" role="status"><span class="picking-feedback-icon">⌁</span><div><strong>Ready for the first item</strong><p>Scan its vial QR or its registered product barcode. The server will enforce the correct method automatically.</p></div></div>';
   }
   const feedback = fulfillmentScanFeedback;
   const mismatch = !feedback.accepted && ["wrong_product", "wrong_variation"].includes(feedback.reasonCode);
@@ -3947,7 +3918,7 @@ function pickingFeedbackMarkup(): string {
     : "";
   return `<div class="picking-feedback ${feedback.accepted ? "is-accepted" : "is-rejected"}" role="status" aria-live="assertive">
     <span class="picking-feedback-icon">${feedback.accepted ? "✓" : "!"}</span>
-    <div><small>${feedback.accepted ? "VIAL VERIFIED" : mismatch ? "WRONG PRODUCT — NOT ADDED" : "QR NOT ACCEPTED"}</small><strong>${escapeHtml(mismatch ? "This vial does not match the order" : feedback.productName || (feedback.accepted ? "Product verified" : "Check this vial QR"))}</strong><p>${escapeHtml(feedback.message)}</p>${mismatchMarkup}${feedback.accepted && feedback.requiredQuantity ? `<b>${feedback.verifiedQuantity} of ${feedback.requiredQuantity} verified</b>` : ""}</div>
+    <div><small>${feedback.accepted ? (feedback.lot ? "VIAL VERIFIED" : "PRODUCT VERIFIED") : mismatch ? "WRONG PRODUCT — NOT ADDED" : "CODE NOT ACCEPTED"}</small><strong>${escapeHtml(mismatch ? "This item does not match the order" : feedback.productName || (feedback.accepted ? "Product verified" : "Check this code"))}</strong><p>${escapeHtml(feedback.message)}</p>${mismatchMarkup}${feedback.accepted && feedback.requiredQuantity ? `<b>${feedback.verifiedQuantity} of ${feedback.requiredQuantity} verified</b>` : ""}</div>
   </div>`;
 }
 
@@ -3967,11 +3938,11 @@ function renderPickingStation(order: FulfillmentQueueEntry): string {
     const remaining = Math.max(0, line.quantity - line.verifiedQuantity);
     const capturedLots = line.verifiedLots.length
       ? line.verifiedLots.map((allocation) => `${allocation.lot} × ${allocation.quantity}`).join(" · ")
-      : "The vial QR selects the lot";
+      : "Scan the required code";
     return `<article class="picking-product-card${lineComplete ? " is-complete" : ""}${isNext ? " is-next" : ""}" data-picking-line="${line.orderItemId}">
       <div class="picking-product-image">${line.imageUrl ? `<img src="${escapeHtml(line.imageUrl)}" alt="" />` : '<span>P1</span>'}<i>${lineComplete ? "✓" : remaining}</i></div>
-      <div class="picking-product-copy"><div class="picking-product-state">${lineComplete ? "VERIFIED" : isNext ? "PICK THIS NOW" : "UP NEXT"}</div><h3>${escapeHtml(line.name)}</h3><p>SKU ${escapeHtml(line.sku)}${line.variationId ? ` · Variation ${line.variationId}` : ""}</p><div class="picking-product-tags"><span>Customer lot <b>${escapeHtml(capturedLots)}</b></span><span>Scan <b>vial QR</b></span></div></div>
-      <div class="picking-location"><small>VERIFY WITH</small><strong>Vial QR</strong><span>Product + exact lot</span></div>
+      <div class="picking-product-copy"><div class="picking-product-state">${lineComplete ? "VERIFIED" : isNext ? "PICK THIS NOW" : "UP NEXT"}</div><h3>${escapeHtml(line.name)}</h3><p>SKU ${escapeHtml(line.sku)}${line.variationId ? ` · Variation ${line.variationId}` : ""}</p><div class="picking-product-tags"><span>Verification <b>${escapeHtml(capturedLots)}</b></span><span>Scan <b>item code</b></span></div></div>
+      <div class="picking-location"><small>VERIFY WITH</small><strong>Item code</strong><span>Vial QR or product barcode</span></div>
       <div class="picking-quantity"><small>VERIFIED</small><strong>${line.verifiedQuantity}<span>/ ${line.quantity}</span></strong><p>${lineComplete ? "Complete" : `${remaining} remaining`}</p></div>
     </article>`;
   }).join("");
@@ -3984,21 +3955,21 @@ function renderPickingStation(order: FulfillmentQueueEntry): string {
         <span><strong>Scan with Camera</strong><small>iPhone or Android</small></span>
       </button>
       <form class="picking-scan-form" id="picking-scan-form">
-        <label for="picking-scan-input">Vial QR or verification link</label>
-        <div><span>⌁</span><input id="picking-scan-input" name="barcode" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" maxlength="2048" placeholder="Scan vial QR or paste its link" aria-describedby="picking-scan-help" /><button class="button button--primary" type="submit">${fulfillmentScanBusy ? "Queue scan" : "Verify"}</button></div>
+        <label for="picking-scan-input">Vial QR or product barcode</label>
+        <div><span>⌁</span><input id="picking-scan-input" name="barcode" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" maxlength="2048" placeholder="Scan QR, barcode or paste a COA link" aria-describedby="picking-scan-help" /><button class="button button--primary" type="submit">${fulfillmentScanBusy ? "Queue scan" : "Verify"}</button></div>
         <small id="picking-scan-help">USB/Bluetooth scanners submit with Enter. The lab website is not opened during picking.</small>
       </form>
       <div class="picking-control-actions"><button type="button" class="picking-sound-toggle" data-picking-sound aria-pressed="${fulfillmentScanSound}">${fulfillmentScanSound ? "Sound on" : "Sound off"}</button><button class="button button--secondary" type="button" data-pause-fulfillment="${escapeHtml(session.id)}" data-version="${session.version}">Pause</button></div>
     </div>`;
   return `<section class="picking-station${complete ? " is-complete" : ""}">
     <header class="picking-station-head">
-      <div><p class="section-kicker">Picking station · Order #${escapeHtml(order.orderNumber)}</p><h2>${complete ? "Ready for packing" : `Pick ${escapeHtml(nextLine?.name || "the next item")}`}</h2><p>${complete ? "Every required unit and customer lot has been verified." : "Scan the QR printed on the vial. The correct product and exact customer lot are validated instantly."}</p></div>
+      <div><p class="section-kicker">Picking station · Order #${escapeHtml(order.orderNumber)}</p><h2>${complete ? "Ready for packing" : `Pick ${escapeHtml(nextLine?.name || "the next item")}`}</h2><p>${complete ? "Every required unit has been verified." : "Scan the code on the item or drawer. Products with an Available COA still require the QR printed on the vial."}</p></div>
       <div class="picking-order-progress" aria-label="${percent}% complete"><strong>${percent}%</strong><span>${order.verifiedUnits} of ${order.unitCount} units</span><div><i style="--fulfillment-progress:${percent / 100}"></i></div></div>
     </header>
     ${complete ? '<div class="picking-ready-banner"><span>✓</span><div><strong>Picking complete</strong><p>The exact vial lots are saved and will be assigned to the customer order when packing is confirmed.</p></div></div>' : pickingFeedbackMarkup()}
     <div class="picking-product-list">${cards}</div>
     ${controls}
-    ${complete ? "" : '<p class="picking-limitation"><span>i</span> The vial QR identifies its product, COA and batch. If several vials share the same batch QR, the system cannot distinguish one vial scanned twice from two identical vials.</p>'}
+    ${complete ? "" : '<p class="picking-limitation"><span>i</span> Vials with an Available COA always require their lab QR. Registered product barcodes work only for items that do not use COA lots.</p>'}
   </section>`;
 }
 
@@ -4717,37 +4688,44 @@ function renderPackedFulfillment(order: FulfillmentQueueEntry): string {
   const lineMarkup = lines.length
     ? lines.map((line) => {
       const liveLine = order.lines.find((item) => item.orderItemId === line.orderItemId);
-      const allocations = line.allocations?.length ? line.allocations : [{
-        orderItemId: line.orderItemId,
-        coaId: line.coaId,
-        coaNumber: line.coaNumber,
-        lot: line.lot,
-        batch: line.batch,
-        quantity: line.verifiedQuantity,
-      }];
-      const allocationMarkup = allocations
+      const allocations = line.allocations?.length
+        ? line.allocations
+        : line.coaId && line.lot
+          ? [{
+              orderItemId: line.orderItemId,
+              coaId: line.coaId,
+              coaNumber: line.coaNumber,
+              lot: line.lot,
+              batch: line.batch,
+              quantity: line.verifiedQuantity,
+            }]
+          : [];
+      const allocationMarkup = allocations.length ? allocations
         .map((allocation) => `<small><b>${escapeHtml(allocation.lot)}</b> × ${allocation.quantity}${allocation.coaNumber ? ` · ${escapeHtml(allocation.coaNumber)}` : ""}</small>`)
-        .join("");
+        .join("") : "<small>Registered product barcode · no COA lot required</small>";
       return `<article class="fulfillment-line">
         <div class="fulfillment-line-image">${liveLine?.imageUrl ? `<img src="${escapeHtml(liveLine.imageUrl)}" alt="" />` : "P1"}</div>
         <div class="fulfillment-line-main"><strong>${escapeHtml(line.name)}</strong><p>SKU ${escapeHtml(line.sku)}${line.variationId ? ` · Variation ${line.variationId}` : ""}</p></div>
-        <div class="fulfillment-line-fact fulfillment-line-lots"><span>Customer lot${allocations.length === 1 ? "" : "s"}</span><strong>${allocations.length === 1 ? escapeHtml(allocations[0]!.lot) : `${allocations.length} verified lots`}</strong>${allocationMarkup}</div>
+        <div class="fulfillment-line-fact fulfillment-line-lots"><span>${allocations.length ? `Customer lot${allocations.length === 1 ? "" : "s"}` : "Verification"}</span><strong>${allocations.length === 1 ? escapeHtml(allocations[0]!.lot) : allocations.length ? `${allocations.length} verified lots` : "Product barcode"}</strong>${allocationMarkup}</div>
         <div class="fulfillment-line-quantity"><span>Packed</span><strong>${line.verifiedQuantity} / ${line.requiredQuantity}</strong></div>
       </article>`;
     }).join("")
     : '<div class="fulfillment-empty is-error"><span>!</span><strong>Packing record unavailable</strong><p>The local session is packed, but its completion snapshot cannot be displayed. The audit record has not been changed.</p></div>';
   const unitCount = snapshot?.totalUnits || order.unitCount;
-  const lotCount = lines.reduce((sum, line) => sum + (line.allocations?.length || 1), 0);
+  const lotCount = lines.reduce((sum, line) => sum + (line.allocations?.length || (line.coaId && line.lot ? 1 : 0)), 0);
+  const hasCoaAllocations = lotCount > 0;
   const evidenceState = fulfillmentEvidenceStates.get(session.id) || initialEvidenceState();
   const syncState = session.wordpressSyncState;
-  const syncMarkup = syncState === "synced"
+  const syncMarkup = !hasCoaAllocations
+    ? '<section class="packed-coa-sync is-synced"><span>✓</span><div><strong>Product barcode verification saved</strong><p>These items do not require a customer COA lot assignment.</p></div></section>'
+    : syncState === "synced"
     ? '<section class="packed-coa-sync is-synced"><span>✓</span><div><strong>Customer COAs assigned</strong><p>The exact lots scanned from the vials are now attached to this customer order.</p></div></section>'
     : `<section class="packed-coa-sync is-${escapeHtml(syncState)}"><span>!</span><div><strong>${syncState === "failed" ? "Customer COA assignment needs attention" : "Customer COA assignment pending"}</strong><p>${escapeHtml(session.wordpressLastError || "Packing is safe. The scanned lots still need to be mirrored to the order COA record.")}</p></div><button class="button button--secondary" type="button" data-sync-packed-coas${fulfillmentCoaSyncBusy ? " disabled" : ""}>${fulfillmentCoaSyncBusy ? "Checking…" : "Retry assignment"}</button></section>`;
   return `<article class="surface fulfillment-detail-card">
     <header class="fulfillment-detail-head"><div><p class="section-kicker">Order #${escapeHtml(order.orderNumber)}</p><h2>${escapeHtml(order.customer)}</h2><p>Immutable local fulfillment record</p></div><span class="fulfillment-status is-packed">Packed</span></header>
-    <section class="packed-record-hero"><span>✓</span><div><strong>Packing confirmed</strong><p>Products, quantities and verified COA batches are preserved below.</p></div><small>${formatCommerceTimestamp(session.packedAt || snapshot?.confirmedAt || null)}</small></section>
+    <section class="packed-record-hero"><span>✓</span><div><strong>Packing confirmed</strong><p>Products, quantities and every required COA batch are preserved below.</p></div><small>${formatCommerceTimestamp(session.packedAt || snapshot?.confirmedAt || null)}</small></section>
     ${syncMarkup}
-    <section class="fulfillment-review"><div class="fulfillment-review-title"><div><p class="section-kicker">Packing record</p><h3>${unitCount} verified unit${unitCount === 1 ? "" : "s"}</h3></div><span>${lotCount} lot record${lotCount === 1 ? "" : "s"}</span></div>${lineMarkup}</section>
+    <section class="fulfillment-review"><div class="fulfillment-review-title"><div><p class="section-kicker">Packing record</p><h3>${unitCount} verified unit${unitCount === 1 ? "" : "s"}</h3></div><span>${lotCount ? `${lotCount} lot record${lotCount === 1 ? "" : "s"}` : "Product barcode verified"}</span></div>${lineMarkup}</section>
     <p class="packed-record-note"><span>i</span>This is a local Packed status. No live store status or commercial stock was changed.</p>
     <div id="fulfillment-evidence-workspace" class="fulfillment-evidence-host">${evidenceWorkspaceMarkup(order, evidenceState)}</div>
     <div id="fulfillment-shipping-workspace" class="fulfillment-shipping-host"></div>
@@ -4777,13 +4755,13 @@ function renderFulfillmentDetail(order: FulfillmentQueueEntry): void {
   }
   const reasons = order.reasons.length
     ? `<section class="fulfillment-issues" role="alert"><header><span>!</span><div><p class="section-kicker">Action required</p><strong>${order.reasons.length} ${order.reasons.length === 1 ? "item is" : "items are"} blocking this order</strong><p>Nothing can be scanned until every requirement below is resolved.</p></div></header><ul>${order.reasons.map((reason) => fulfillmentIssueMarkup(reason)).join("")}</ul></section>`
-    : `<section class="fulfillment-ready-check"><span>✓</span><div><p class="section-kicker">Ready to pick</p><strong>Every required safety check passed</strong><p>Payment, order status and product mapping are verified. The vial QR will select and validate the exact COA lot while picking.</p></div></section>`;
+    : `<section class="fulfillment-ready-check"><span>✓</span><div><p class="section-kicker">Ready to pick</p><strong>Every required safety check passed</strong><p>Scan each item's registered code. Products with an Available COA require the vial QR; approved non-COA items can use their product barcode.</p></div></section>`;
   const lines = order.lines.map((line) => {
     const batch = line.coa?.lot || line.coa?.batch || "Not assigned";
     return `<article class="fulfillment-line">
       <div class="fulfillment-line-image">${line.imageUrl ? `<img src="${escapeHtml(line.imageUrl)}" alt="" loading="lazy" />` : "P1"}</div>
       <div class="fulfillment-line-main"><strong>${escapeHtml(line.name)}</strong><p>SKU ${escapeHtml(line.sku || "Missing")}${line.variationId ? ` · Variation ${line.variationId}` : ""}</p></div>
-      <div class="fulfillment-line-fact"><span>Customer lot</span><strong>${escapeHtml(batch)}</strong><small>${line.coa ? escapeHtml(line.coa.number || "Current COA") : "Assigned automatically from the scanned vial QR"}</small></div>
+      <div class="fulfillment-line-fact"><span>${line.coa ? "Customer lot" : "Verification"}</span><strong>${escapeHtml(line.coa ? batch : "Scan required")}</strong><small>${line.coa ? escapeHtml(line.coa.number || "Current COA") : "Vial QR or registered product barcode, enforced by the server"}</small></div>
       <div class="fulfillment-line-quantity"><span>Quantity</span><strong>${line.verifiedQuantity} / ${line.quantity}</strong></div>
     </article>`;
   }).join("");
@@ -5474,15 +5452,15 @@ async function startFulfillmentCamera(): Promise<void> {
         if (!candidate.accepted || !candidate.value) {
           setFulfillmentCameraStatus(
             "warning",
-            candidate.reason === "unsupported_format" ? "QR code required" : "This QR does not contain a valid link",
-            "Center the complete square QR printed on the vial inside the guide.",
+            candidate.reason === "unsupported_format" ? "QR or Code 128 required" : "This code is not a valid registered format",
+            "Keep the complete QR square or the full horizontal barcode inside the guide.",
           );
           return;
         }
         fulfillmentCameraCaptured = true;
         activeControls.stop();
         fulfillmentCameraControls = null;
-        setFulfillmentCameraStatus("success", "Vial QR captured", "Matching the registered product, COA and batch securely…");
+        setFulfillmentCameraStatus("success", "Code captured", "Matching the registered product and its verification rules securely…");
         fulfillmentCameraSuccessTimer = window.setTimeout(() => {
           fulfillmentCameraSuccessTimer = undefined;
           closeFulfillmentCamera(false);
@@ -5570,9 +5548,11 @@ async function selectLabelProduct(productId: number): Promise<void> {
     renderLabelWorkspace();
   } catch (error) {
     if (requestId !== labelProductRequest) return;
-    labelProductDetail = { product, variations: [] };
+    labelProductDetail = undefined;
+    selectedLabelProductId = null;
+    labelPrintStep = "product";
     renderLabelWorkspace();
-    showToast("Product details delayed", error instanceof Error ? error.message : "Try refreshing the label workspace.", false);
+    showToast("Product details unavailable", error instanceof Error ? error.message : "Try selecting the product again.", false);
   }
 }
 
@@ -7106,7 +7086,7 @@ const viewNames: Record<string, string> = {
   orders: "Orders",
   products: "Products",
   fulfillment: "Fulfillment",
-  labels: "Storage locations",
+  labels: "Product barcode labels",
   media: "Media library",
   customers: "Customers",
   affiliates: "Affiliates",
@@ -7241,7 +7221,6 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (ev
 
 function navigate(view: string): void {
   if (view === "analytics") view = "monitor";
-  if (view === "labels" && !storageLocationsVisible) view = "fulfillment";
   const requestedTeamSettings = view === "team";
   if (requestedTeamSettings) view = "settings";
   if (!viewNames[view]) return;
@@ -8445,6 +8424,12 @@ function selectMedia(mediaId: number): void {
 for (const item of document.querySelectorAll<HTMLButtonElement>("[data-view]")) {
   item.addEventListener("click", () => navigate(item.dataset.view || "overview"));
 }
+requiredElement<HTMLButtonElement>("#open-product-barcodes").addEventListener("click", () => {
+  resetLabelSelection();
+  showLabelWorkspace("print");
+  navigate("labels");
+});
+requiredElement<HTMLButtonElement>("#back-to-products-from-labels").addEventListener("click", () => navigate("products"));
 document.addEventListener("error", (event) => {
   const image = event.target instanceof HTMLImageElement ? event.target : null;
   if (image?.hasAttribute("data-customer-avatar-image")) {

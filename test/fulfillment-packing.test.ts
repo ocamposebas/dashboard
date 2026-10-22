@@ -216,6 +216,31 @@ test("packing still requires a scanned vial lot when no COA was preassigned", ()
   );
 });
 
+test("packing preserves a completed non-COA product barcode verification without a fake lot", () => {
+  const snapshot = pack({
+    session: session({
+      sourceSnapshot: {
+        orderId: 1501,
+        lines: [{
+          orderItemId: 701,
+          productId: 201,
+          variationId: 301,
+          sku: "BPC-10-BLUE",
+          quantity: 2,
+          locationCode: null,
+          coaId: null,
+          lot: null,
+        }],
+      },
+    }),
+    coas: [],
+  });
+  assert.equal(snapshot.lines[0]?.coaId, "");
+  assert.equal(snapshot.lines[0]?.lot, "");
+  assert.deepEqual(snapshot.lines[0]?.allocations, []);
+  assert.equal(snapshot.lines[0]?.verifiedQuantity, 2);
+});
+
 test("packing is blocked until every required unit is verified", () => {
   const incomplete = session({
     progress: {

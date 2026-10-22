@@ -216,6 +216,95 @@ test("product-only and variation-only labels cannot stand in for a physical batc
   }
 });
 
+test("registered product barcodes verify non-COA products without inventing a lot", () => {
+  const simpleOrder = order({
+    lineItems: [{
+      id: 601,
+      productId: 201,
+      variationId: 0,
+      name: "Bacteriostatic Water 30ml",
+      sku: "BAC-WATER-30",
+      quantity: 2,
+      imageUrl: null,
+    }] as CommerceOrder["lineItems"],
+  });
+  const simpleSession = session(0, {
+    sourceSnapshot: {
+      orderId: 1401,
+      lines: [{
+        orderItemId: 601,
+        productId: 201,
+        variationId: 0,
+        sku: "BAC-WATER-30",
+        quantity: 2,
+        locationCode: null,
+        coaId: null,
+        lot: null,
+      }],
+    },
+  });
+  const decision = decideFulfillmentScan({
+    session: simpleSession,
+    barcode: barcode({
+      barcodeValue: "11123456789012345678",
+      type: "product",
+      variationId: 0,
+      coaId: undefined,
+      lot: undefined,
+    }),
+    order: simpleOrder,
+    coas: [],
+  });
+  assert.equal(decision.result, "accepted");
+  assert.equal(decision.quantityDelta, 1);
+  assert.equal(decision.coaId, undefined);
+  assert.equal(feedbackOf(decision).lot, null);
+  assert.match(feedbackOf(decision).message, /product barcode/i);
+  const progress = decision.nextProgress as unknown as { allocations: unknown[] };
+  assert.deepEqual(progress.allocations, []);
+});
+
+test("registered variation barcodes verify the exact non-COA variation", () => {
+  const decision = decideFulfillmentScan({
+    session: session(0, {
+      sourceSnapshot: {
+        orderId: 1401,
+        lines: [{
+          orderItemId: 601,
+          productId: 201,
+          variationId: 301,
+          sku: "CREAM-30",
+          quantity: 2,
+          locationCode: null,
+          coaId: null,
+          lot: null,
+        }],
+      },
+    }),
+    barcode: barcode({
+      barcodeValue: "12123456789012345678",
+      type: "variation",
+      coaId: undefined,
+      lot: undefined,
+    }),
+    order: order({
+      lineItems: [{
+        id: 601,
+        productId: 201,
+        variationId: 301,
+        name: "Research Cream 30ml",
+        sku: "CREAM-30",
+        quantity: 2,
+        imageUrl: null,
+      }] as CommerceOrder["lineItems"],
+    }),
+    coas: [],
+  });
+  assert.equal(decision.result, "accepted");
+  assert.equal(decision.variationId, 301);
+  assert.equal(feedbackOf(decision).verifiedQuantity, 1);
+});
+
 test("an Available scanned COA is accepted even when it is not the designated current shipping lot", () => {
   const decision = decideFulfillmentScan({
     session: session(),

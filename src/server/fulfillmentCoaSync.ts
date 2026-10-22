@@ -25,14 +25,16 @@ function normalized(value: string | null | undefined): string {
 function desiredAllocations(snapshot: FulfillmentPackingSnapshot): FulfillmentCoaAllocation[] {
   const allocations = snapshot.lines.flatMap((line) => line.allocations?.length
     ? line.allocations
-    : [{
-        orderItemId: line.orderItemId,
-        coaId: line.coaId,
-        coaNumber: line.coaNumber,
-        lot: line.lot,
-        batch: line.batch,
-        quantity: line.verifiedQuantity,
-      }]);
+    : line.coaId && line.lot
+      ? [{
+          orderItemId: line.orderItemId,
+          coaId: line.coaId,
+          coaNumber: line.coaNumber,
+          lot: line.lot,
+          batch: line.batch,
+          quantity: line.verifiedQuantity,
+        }]
+      : []);
   const grouped = new Map<string, FulfillmentCoaAllocation>();
   for (const allocation of allocations) {
     if (

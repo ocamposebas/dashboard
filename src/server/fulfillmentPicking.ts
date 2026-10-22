@@ -7,7 +7,10 @@ import type {
   JsonValue,
 } from "../shared/fulfillment.js";
 import { evaluateFulfillmentEligibility } from "./fulfillmentEligibility.js";
-import { coaIsAvailableForVialScan } from "./coaScanResolver.js";
+import {
+  coaIsAvailableForVialScan,
+  coaRequiresVialQrForLine,
+} from "./coaScanResolver.js";
 import type { CommerceCoa, CommerceOrder } from "./wooCommerceGateway.js";
 
 interface SnapshotLine {
@@ -278,7 +281,7 @@ export function decideFulfillmentScan(input: {
     return rejected(
       progress,
       "unknown_barcode",
-      "The QR was read, but its lab certificate is not linked to an Available COA in Phase One Labz. Publish or link the COA, then scan again.",
+      "This code is not registered. Link the vial QR to an Available COA, or generate a product barcode from the catalog for an item that does not use COAs.",
     );
   }
   if (!input.barcode.active) {
@@ -320,20 +323,6 @@ export function decideFulfillmentScan(input: {
       expectedSku: expectedLine?.sku || null,
     });
   }
-  if (input.barcode.type !== "batch") {
-    const firstVariationLine = variationLines[0]!;
-    return rejected(
-      progress,
-      "batch_required",
-      "Scan the batch-specific label so the physical lot can be verified.",
-      {
-        barcode: input.barcode,
-        line: firstVariationLine,
-        productName: input.order.lineItems.find((item) => item.id === firstVariationLine.orderItemId)?.name,
-      },
-    );
-  }
-
   const line = variationLines.find((candidate) => {
     const item = progress.lines.find((value) => value.orderItemId === candidate.orderItemId);
     return item && item.verifiedQuantity < item.requiredQuantity;
@@ -345,6 +334,48 @@ export function decideFulfillmentScan(input: {
       line: completedLine,
       productName: input.order.lineItems.find((item) => item.id === completedLine.orderItemId)?.name,
     });
+  }
+
+  if (input.barcode.type !== "batch") {
+    const productName = input.order.lineItems.find((item) => item.id === line.orderItemId)?.name || "Product";
+    if (input.coas.some((coa) => coaRequiresVialQrForLine(coa, line))) {
+      return rejected(
+        progress,
+        "batch_required",
+        "This product has an Available COA. Scan the QR printed on the vial so the physical lot is captured.",
+        { barcode: input.barcode, line, productName },
+      );
+    }
+    const nextLines = progress.lines.map((item) => item.orderItemId === line.orderItemId
+      ? { ...item, verifiedQuantity: item.verifiedQuantity + 1 }
+      : item);
+    const nextProgress: PickingProgress = {
+      verifiedUnits: progress.verifiedUnits + 1,
+      totalUnits: progress.totalUnits,
+      lines: nextLines,
+      allocations: progress.allocations,
+    };
+    const current = nextLines.find((item) => item.orderItemId === line.orderItemId)!;
+    const response = feedback(nextProgress, {
+      accepted: true,
+      reasonCode: "accepted",
+      message: `${productName} verified with its registered product barcode. This item does not require a COA lot.`,
+      line,
+      productName,
+      verifiedQuantity: current.verifiedQuantity,
+      lot: null,
+    });
+    return {
+      result: "accepted",
+      reasonCode: "accepted",
+      quantityDelta: 1,
+      nextProgress: nextProgress as unknown as JsonValue,
+      responseSnapshot: response as unknown as JsonValue,
+      barcodeType: input.barcode.type,
+      productId: input.barcode.productId,
+      variationId: input.barcode.variationId,
+      orderItemId: line.orderItemId,
+    };
   }
 
   const coa = input.coas.find((candidate) => candidate.id === input.barcode?.coaId);

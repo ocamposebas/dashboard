@@ -420,7 +420,7 @@ body.has-picking-camera { overflow:hidden; }
 .picking-camera-stage { position:relative;min-height:310px;overflow:hidden;background:#050506;isolation:isolate; }
 .picking-camera-stage video { width:100%;height:100%;display:block;object-fit:cover; }
 .picking-camera-stage::after { content:"";position:absolute;z-index:1;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.2),transparent 30%,transparent 70%,rgba(0,0,0,.32)); }
-.picking-camera-guide { position:absolute;z-index:2;top:50%;left:50%;width:min(58%,280px);aspect-ratio:1;height:auto;transform:translate(-50%,-50%);border:1px solid rgba(255,255,255,.7);border-radius:18px;box-shadow:0 0 0 999px rgba(0,0,0,.26); }
+.picking-camera-guide { position:absolute;z-index:2;top:50%;left:50%;width:min(76%,390px);aspect-ratio:1.55;height:auto;transform:translate(-50%,-50%);border:1px solid rgba(255,255,255,.7);border-radius:18px;box-shadow:0 0 0 999px rgba(0,0,0,.26); }
 .picking-camera-guide::before,.picking-camera-guide::after,.picking-camera-guide span::before,.picking-camera-guide span::after { content:"";position:absolute;width:28px;height:28px;border-color:#fff;border-style:solid; }
 .picking-camera-guide::before { top:-2px;left:-2px;border-width:3px 0 0 3px;border-radius:12px 0 0; }
 .picking-camera-guide::after { top:-2px;right:-2px;border-width:3px 3px 0 0;border-radius:0 12px 0 0; }
@@ -524,7 +524,7 @@ body.has-packing-confirm { overflow:hidden; }
   .picking-camera-head { padding:17px 17px 14px; }
   .picking-camera-head h2 { font-size:19px; }
   .picking-camera-stage { min-height:min(54dvh,440px); }
-  .picking-camera-guide { width:min(62vw,260px); }
+  .picking-camera-guide { width:min(82vw,340px); }
   .picking-camera-status { padding-inline:17px; }
   .picking-camera-actions { padding-inline:17px; }
   .picking-camera-actions .button { flex:1; }

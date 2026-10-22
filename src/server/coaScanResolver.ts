@@ -139,6 +139,24 @@ export function coaIsAvailableForVialScan(coa: CommerceCoa): boolean {
 }
 
 /**
+ * Determines whether an Available COA makes physical lot verification
+ * mandatory for an exact catalog line. Product/variation warehouse barcodes
+ * are intentionally allowed only when no governed COA applies to that line.
+ */
+export function coaRequiresVialQrForLine(
+  coa: CommerceCoa,
+  line: { productId: number; variationId: number; sku: string },
+): boolean {
+  if (!coaIsAvailableForVialScan(coa)) return false;
+  if (coa.matchedProductId > 0 && coa.matchedProductId !== line.productId) return false;
+  if (coa.matchedVariationId > 0 && coa.matchedVariationId !== line.variationId) return false;
+  if (coa.matchedProductId === line.productId) return true;
+  return Boolean(
+    line.sku.trim() && coa.skus.some((sku) => normalized(sku) === normalized(line.sku)),
+  );
+}
+
+/**
  * Resolves a QR URL exclusively against already-governed COA records. No
  * external page is fetched here: scanning remains fast and an arbitrary URL
  * can never become proof of a product or batch.

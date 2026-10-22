@@ -88,3 +88,19 @@ test("Code 128 label artwork is valid SVG and reprints identically", () => {
   assert.equal(first.layout.copies, 2);
   assert.equal(first.payload.type, "batch");
 });
+
+test("product drawer labels remain deterministic scanner-compatible Code 128", () => {
+  const label = service.createLabel({
+    type: "product",
+    productId: 501,
+    productName: "Bacteriostatic Water 30ml",
+    sku: "BAC-WATER-30",
+    locationCode: "STORAGE",
+    size: "3x1",
+    copies: 1,
+  });
+  assert.match(label.token, /^11[0-9]{18}$/);
+  assert.match(label.svg, /<path/);
+  assert.equal(label.layout.size, "3x1");
+  assert.equal(label.locationCode, "STORAGE");
+});

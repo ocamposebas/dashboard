@@ -5,7 +5,10 @@ import type {
   FulfillmentSession,
 } from "../shared/fulfillment.js";
 import { evaluateFulfillmentEligibility } from "./fulfillmentEligibility.js";
-import { coaIsAvailableForVialScan } from "./coaScanResolver.js";
+import {
+  coaIsAvailableForVialScan,
+  coaRequiresVialQrForLine,
+} from "./coaScanResolver.js";
 import type { CommerceCoa, CommerceOrder } from "./wooCommerceGateway.js";
 
 interface SecuredLine {
@@ -192,13 +195,14 @@ export function buildPackingSnapshot(input: {
           quantity: counted.verifiedQuantity,
         }]
         : [];
-    if (!allocations.length) {
+    const requiresVialQr = input.coas.some((coa) => coaRequiresVialQrForLine(coa, line));
+    if (!allocations.length && requiresVialQr) {
       throw new FulfillmentPackingError(
         `Scan the vial QR for every unit of ${live.name} before packing`,
         "invalid_state",
       );
     }
-    if (allocations.reduce((sum, allocation) => sum + allocation.quantity, 0) !== line.quantity) {
+    if (allocations.length && allocations.reduce((sum, allocation) => sum + allocation.quantity, 0) !== line.quantity) {
       throw new FulfillmentPackingError(
         `The scanned lot allocation for ${live.name} does not match the verified quantity`,
         "invalid_state",
@@ -221,7 +225,7 @@ export function buildPackingSnapshot(input: {
         quantity: allocation.quantity,
       };
     });
-    const primary = packedAllocations[0]!;
+    const primary = packedAllocations[0];
     return {
       orderItemId: line.orderItemId,
       productId: line.productId,
@@ -231,10 +235,10 @@ export function buildPackingSnapshot(input: {
       requiredQuantity: line.quantity,
       verifiedQuantity: counted.verifiedQuantity,
       locationCode: line.locationCode,
-      coaId: primary.coaId,
-      coaNumber: primary.coaNumber,
-      lot: primary.lot,
-      batch: primary.batch,
+      coaId: primary?.coaId || "",
+      coaNumber: primary?.coaNumber || "",
+      lot: primary?.lot || "",
+      batch: primary?.batch || "",
       allocations: packedAllocations,
     };
   });
