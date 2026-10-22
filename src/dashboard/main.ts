@@ -6,6 +6,7 @@ import "./clean-ui.css";
 import { initAffiliateAdmin, loadAffiliateAdmin } from "./affiliates-admin";
 import type { AffiliateCommissionSummary } from "../shared/affiliates";
 import { calculateProductProfitability } from "../shared/productProfitability";
+import { suggestedCoaVariationId } from "../shared/coaCatalogMapping";
 import { productSkuBase, productVariantSku } from "../shared/productSku";
 import {
   initialSiteControlsDraftState,
@@ -123,6 +124,10 @@ interface CommerceVariation {
   stockStatus: string;
   image: CommerceMedia | null;
   attributes: Array<{ id: number; name: string; option: string }>;
+  cost?: CommerceCost | null;
+  costInherited?: boolean;
+  estimatedProfit?: number | null;
+  margin?: number | null;
 }
 
 interface CommerceProduct {
@@ -259,6 +264,7 @@ interface CommerceOrder {
     costOfGoods: number;
     operatingCost: number;
     feeCost: number;
+    affiliateCost: number;
     completeCostCoverage: boolean;
     estimatedProfit: number | null;
   };
@@ -2911,13 +2917,19 @@ function productRow(product: CommerceProduct): string {
     ? product.stockStatus === "instock" ? "Available" : "Out of stock"
     : `${formatNumber(product.stockQuantity)} units`;
   const lowStock = product.stockQuantity !== null && product.stockQuantity < 5;
-  const cost = product.cost
-    ? formatCurrency(product.cost.unitCost)
-    : '<button class="cost-action" type="button" data-edit-cost>Set cost</button>';
-  const profit = product.estimatedProfit === null
+  const cost = product.type === "variable"
+    ? '<span class="cell-muted">By variant</span>'
+    : product.cost
+      ? formatCurrency(product.cost.unitCost)
+      : '<button class="cost-action" type="button" data-edit-cost>Set cost</button>';
+  const profit = product.type === "variable"
+    ? '<span class="cell-muted">Open product</span>'
+    : product.estimatedProfit === null
     ? '<span class="cell-muted">—</span>'
     : `<span class="cell-profit${product.estimatedProfit < 0 ? " cell-profit--negative" : ""}">${escapeHtml(formatCurrency(product.estimatedProfit))}</span>`;
-  const margin = product.margin === null
+  const margin = product.type === "variable"
+    ? '<span class="cell-muted">Per mg</span>'
+    : product.margin === null
     ? '<span class="cell-muted">—</span>'
     : `${product.margin.toFixed(1)}%`;
   const state = {
@@ -3284,7 +3296,7 @@ function renderCommerce(): void {
     0,
   );
   const costTotal = covered.reduce(
-    (sum, order) => sum + order.profitability.costOfGoods + order.profitability.operatingCost + order.profitability.feeCost,
+    (sum, order) => sum + order.profitability.costOfGoods + order.profitability.operatingCost + order.profitability.feeCost + (order.profitability.affiliateCost || 0),
     0,
   );
   const margin = revenue > 0 && covered.length === paid.length
@@ -7201,6 +7213,7 @@ const coaFileUrlInput = requiredElement<HTMLInputElement>("#coa-file-url");
 const coaVerifyUrlInput = requiredElement<HTMLInputElement>("#coa-verify-url");
 const coaProductPicker = requiredElement<HTMLSelectElement>("#coa-product-picker");
 const coaProductCorrection = requiredElement<HTMLElement>("#coa-product-correction");
+const coaPresentationMatch = requiredElement<HTMLElement>("#coa-presentation-match");
 const coaProductMatchName = requiredElement<HTMLElement>("#coa-product-match-name");
 const coaProductMatchMeta = requiredElement<HTMLElement>("#coa-product-match-meta");
 const coaDetectedAssays = requiredElement<HTMLElement>("#coa-detected-assays");
@@ -7598,27 +7611,8 @@ function suggestedCoaProduct(coa: CommerceCoa, products: CommerceProduct[]): Com
     .sort((left, right) => right.score - left.score)[0]?.product;
 }
 
-function coaStrengthIdentity(value: string): string {
-  const normalized = value
-    .toLocaleLowerCase("en")
-    .replace(/[μµ]/g, "u")
-    .replace(/micrograms?/g, "mcg")
-    .replace(/milligrams?/g, "mg")
-    .replace(/grams?/g, "g");
-  const match = normalized.match(/(?:^|\s)(\d+(?:\.\d+)?)\s*(mcg|ug|mg|g)(?:\s|$)/);
-  if (!match) return "";
-  const unit = match[2] === "ug" ? "mcg" : match[2];
-  return `${Number(match[1])}${unit}`;
-}
-
 function coaVariationName(variation: CommerceVariation): string {
   return variation.attributes.map((attribute) => attribute.option).filter(Boolean).join(" · ") || `Variation ${variation.id}`;
-}
-
-function coaVariationMatchesStrength(variation: CommerceVariation, strength: string): boolean {
-  const expected = coaStrengthIdentity(strength);
-  if (!expected) return false;
-  return variation.attributes.some((attribute) => coaStrengthIdentity(attribute.option) === expected);
 }
 
 let coaVariationRequest = 0;
@@ -7626,6 +7620,7 @@ let coaVariationRequest = 0;
 async function loadCoaProductVariations(productId: number, selectedVariationId = 0): Promise<void> {
   const requestId = ++coaVariationRequest;
   if (!productId) {
+    coaPresentationMatch.hidden = true;
     coaVariationIdInput.innerHTML = '<option value="0">Select a product first</option>';
     coaVariationIdInput.disabled = true;
     return;
@@ -7654,11 +7649,10 @@ async function loadCoaProductVariations(productId: number, selectedVariationId =
     }
     if (requestId !== coaVariationRequest) return;
     const variations = details.variations;
-    const exactStored = variations.find((variation) => variation.id === selectedVariationId);
-    const strengthMatches = variations.filter((variation) => coaVariationMatchesStrength(variation, coaStrengthInput.value));
-    const suggested = !exactStored && strengthMatches.length === 1 ? strengthMatches[0] : undefined;
-    const selected = exactStored || suggested;
-    const parentLabel = variations.length ? "Parent product / all presentations" : "Simple product (no variations)";
+    coaPresentationMatch.hidden = variations.length === 0;
+    const suggestedId = suggestedCoaVariationId(variations, coaStrengthInput.value, selectedVariationId);
+    const selected = variations.find((variation) => variation.id === suggestedId);
+    const parentLabel = variations.length ? "Choose the exact presentation…" : "Simple product (no variations)";
     coaVariationIdInput.innerHTML = `<option value="0">${parentLabel}</option>${variations.map((variation) => {
       const sku = variation.sku ? ` — ${escapeHtml(variation.sku)}` : "";
       return `<option value="${variation.id}">${escapeHtml(coaVariationName(variation))}${sku}</option>`;
@@ -7675,6 +7669,7 @@ async function loadCoaProductVariations(productId: number, selectedVariationId =
     }
   } catch (error) {
     if (requestId !== coaVariationRequest) return;
+    coaPresentationMatch.hidden = false;
     coaVariationIdInput.innerHTML = selectedVariationId
       ? `<option value="${selectedVariationId}">Variation ${selectedVariationId}</option>`
       : '<option value="0">Presentations unavailable</option>';
@@ -7791,6 +7786,11 @@ coaVariationIdInput.addEventListener("change", () => {
   const variation = details?.variations.find((item) => item.id === Number(coaVariationIdInput.value));
   const product = details?.product || commerceData?.products.find((item) => item.id === productId);
   if (!product) return;
+  if (variation) {
+    const presentation = coaVariationName(variation);
+    coaProductNameInput.value = `${product.name} — ${presentation}`;
+    if (!coaStrengthInput.value.trim()) coaStrengthInput.value = presentation;
+  }
   coaProductMatchMeta.textContent = [
     product.sku,
     variation ? coaVariationName(variation) : "All presentations",
@@ -8256,21 +8256,28 @@ function generateVariantRows(): void {
   }
   const baseSku = productSkuInput.value.trim() || "P1-PRODUCT";
   const price = Number(productPriceInput.value) || 0;
+  const unitCost = Number(productCostInput.value) || 0;
   const stock = Number(productStockInput.value) || 0;
   variantRows.innerHTML = options.map((option) => {
-    return variantRowMarkup({ option, sku: productVariantSku(baseSku, option), price, stock });
+    return variantRowMarkup({ option, sku: productVariantSku(baseSku, option), price, unitCost, stock });
   }).join("");
   variantTable.hidden = false;
 }
 
-function variantRowMarkup(input: { id?: number; option: string; sku: string; price: number; stock: number; image?: CommerceMedia | null }): string {
+function variantRowMarkup(input: { id?: number; option: string; sku: string; price: number; unitCost: number; stock: number; image?: CommerceMedia | null }): string {
   const image = input.image
     ? `<img src="${escapeHtml(input.image.thumbnailUrl || input.image.src)}" alt="" loading="lazy" decoding="async" />`
     : "<span>+</span>";
-  return `<div class="variant-row" data-variant-row><button class="variant-image-button" type="button" data-choose-variant-image aria-label="Choose image for ${escapeHtml(input.option)}">${image}</button><strong>${escapeHtml(variantAttributeInput.value.trim() || "Option")}: ${escapeHtml(input.option)}</strong><input data-variant-sku type="text" value="${escapeHtml(input.sku)}" aria-label="Automatically generated SKU for ${escapeHtml(input.option)}" title="Generated automatically" readonly /><input data-variant-price type="number" min="0" step="0.01" value="${input.price}" aria-label="Price for ${escapeHtml(input.option)}" /><input data-variant-stock type="number" min="0" value="${input.stock}" aria-label="Stock for ${escapeHtml(input.option)}" /><input data-variant-option type="hidden" value="${escapeHtml(input.option)}" /><input data-variant-id type="hidden" value="${input.id || ""}" /><input data-variant-image-id type="hidden" value="${input.image?.id || ""}" /></div>`;
+  const profitability = calculateProductProfitability(input.price, {
+    unitCost: input.unitCost,
+    packagingCost: Number(productPackagingInput.value) || 0,
+    feeRate: Number(productFeeInput.value) || 0,
+    affiliateRate: Number(productAffiliateRateInput.value) || 0,
+  });
+  return `<div class="variant-row" data-variant-row><button class="variant-image-button" type="button" data-choose-variant-image aria-label="Choose image for ${escapeHtml(input.option)}">${image}</button><strong>${escapeHtml(variantAttributeInput.value.trim() || "Option")}: ${escapeHtml(input.option)}</strong><input data-variant-sku type="text" value="${escapeHtml(input.sku)}" aria-label="Automatically generated SKU for ${escapeHtml(input.option)}" title="Generated automatically" readonly /><input data-variant-price type="number" min="0" step="0.01" value="${input.price}" aria-label="Price for ${escapeHtml(input.option)}" /><input data-variant-cost type="number" min="0" step="0.01" value="${input.unitCost}" aria-label="Unit cost for ${escapeHtml(input.option)}" /><span class="variant-profit" data-variant-profit>${escapeHtml(formatCurrency(profitability.estimatedProfit))}<small>${(profitability.margin ?? 0).toFixed(1)}% margin</small></span><input data-variant-stock type="number" min="0" value="${input.stock}" aria-label="Stock for ${escapeHtml(input.option)}" /><input data-variant-option type="hidden" value="${escapeHtml(input.option)}" /><input data-variant-id type="hidden" value="${input.id || ""}" /><input data-variant-image-id type="hidden" value="${input.image?.id || ""}" /></div>`;
 }
 
-function collectVariants(): Array<{ id?: number; option: string; sku: string; price: number; stock: number; imageId?: number }> {
+function collectVariants(): Array<{ id?: number; option: string; sku: string; price: number; unitCost: number; stock: number; imageId?: number }> {
   return [...variantRows.querySelectorAll<HTMLElement>("[data-variant-row]")].map((row) => ({
     ...(Number(row.querySelector<HTMLInputElement>("[data-variant-id]")?.value) > 0
       ? { id: Number(row.querySelector<HTMLInputElement>("[data-variant-id]")?.value) }
@@ -8278,11 +8285,25 @@ function collectVariants(): Array<{ id?: number; option: string; sku: string; pr
     option: row.querySelector<HTMLInputElement>("[data-variant-option]")?.value || "",
     sku: row.querySelector<HTMLInputElement>("[data-variant-sku]")?.value.trim() || "",
     price: Number(row.querySelector<HTMLInputElement>("[data-variant-price]")?.value) || 0,
+    unitCost: Number(row.querySelector<HTMLInputElement>("[data-variant-cost]")?.value) || 0,
     stock: Number(row.querySelector<HTMLInputElement>("[data-variant-stock]")?.value) || 0,
     ...(Number(row.querySelector<HTMLInputElement>("[data-variant-image-id]")?.value) > 0
       ? { imageId: Number(row.querySelector<HTMLInputElement>("[data-variant-image-id]")?.value) }
       : {}),
   }));
+}
+
+function calculateVariantProfits(): void {
+  const packagingCost = Number(productPackagingInput.value) || 0;
+  const feeRate = Number(productFeeInput.value) || 0;
+  const affiliateRate = Number(productAffiliateRateInput.value) || 0;
+  for (const row of variantRows.querySelectorAll<HTMLElement>("[data-variant-row]")) {
+    const price = Number(row.querySelector<HTMLInputElement>("[data-variant-price]")?.value) || 0;
+    const unitCost = Number(row.querySelector<HTMLInputElement>("[data-variant-cost]")?.value) || 0;
+    const result = calculateProductProfitability(price, { unitCost, packagingCost, feeRate, affiliateRate });
+    const output = row.querySelector<HTMLElement>("[data-variant-profit]");
+    if (output) output.innerHTML = `${escapeHtml(formatCurrency(result.estimatedProfit))}<small>${(result.margin ?? 0).toFixed(1)}% margin</small>`;
+  }
 }
 
 function calculateProductProfit(): void {
@@ -8301,6 +8322,7 @@ function calculateProductProfit(): void {
   requiredElement<HTMLElement>("#calculator-margin").textContent = `${(profitability.margin || 0).toFixed(1)}%`;
   requiredElement<HTMLElement>("#calculator-equation").textContent =
     `${formatCurrency(price)} − ${formatCurrency(cost)} cost − ${formatCurrency(packaging)} operations − ${formatCurrency(profitability.transactionFee)} fee − ${formatCurrency(profitability.affiliateReserve)} affiliate`;
+  calculateVariantProfits();
 }
 
 function populateProductWorkspace(product: CommerceProduct, variations: CommerceVariation[] = []): void {
@@ -8333,6 +8355,7 @@ function populateProductWorkspace(product: CommerceProduct, variations: Commerce
       option: item.attributes[0]?.option || `Variant ${item.id}`,
       sku: item.sku,
       price: item.regularPrice || item.price,
+      unitCost: item.cost?.unitCost ?? product.cost?.unitCost ?? 0,
       stock: item.stockQuantity || 0,
       image: item.image,
     })).join("");
@@ -9232,6 +9255,10 @@ variantRows.addEventListener("click", (event) => {
   const row = button?.closest<HTMLElement>("[data-variant-row]");
   if (row) openMediaPicker(row);
 });
+variantRows.addEventListener("input", (event) => {
+  const target = event.target instanceof HTMLInputElement ? event.target : null;
+  if (target?.matches("[data-variant-price],[data-variant-cost]")) calculateVariantProfits();
+});
 
 productForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -9631,6 +9658,11 @@ coaFileUrlInput.addEventListener("input", updateCoaDocumentPreview);
 coaEditorForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (!editingCoa || !extensionsData?.coaWriteEnabled) return;
+  if (!coaPresentationMatch.hidden && coaStatusInput.value === "Available" && Number(coaVariationIdInput.value) <= 0) {
+    showToast("Exact presentation required", "Choose the correct strength or mg before publishing this COA.", false);
+    coaVariationIdInput.focus();
+    return;
+  }
   const submit = requiredElement<HTMLButtonElement>("#save-coa-editor");
   submit.disabled = true;
   submit.textContent = "Saving changes…";

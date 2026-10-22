@@ -35,7 +35,8 @@ import { resolveExternalCoaQr } from "./coaExternalQrResolver.js";
 import { resolveCoaQrScan } from "./coaScanResolver.js";
 import { CoaRepository, type CoaUpdateInput } from "./coaRepository.js";
 import { buildThermalLabelDocument } from "../shared/labelPrint.js";
-import { calculateProductProfitability } from "../shared/productProfitability.js";
+import { calculateProductProfitability, productCostForCatalogLine } from "../shared/productProfitability.js";
+import { coaNeedsExactVariation } from "../shared/coaCatalogMapping.js";
 import { productVariantSku } from "../shared/productSku.js";
 import { fulfillmentAccessForRole } from "./fulfillmentAccess.js";
 import {
@@ -472,21 +473,23 @@ export function createMonitorServer(
 
   async function orderWithProfitability(order: CommerceOrder) {
     const costs = await store.getProductCosts(
-      order.lineItems.map((item) => item.productId),
+      order.lineItems.flatMap((item) => [item.productId, item.variationId]).filter((id) => id > 0),
     );
     let costOfGoods = 0;
     let operatingCost = 0;
     let feeCost = 0;
+    let affiliateCost = 0;
     let coveredItems = 0;
     let totalItems = 0;
     for (const item of order.lineItems) {
       totalItems += item.quantity;
-      const cost = costs[String(item.productId)];
+      const cost = productCostForCatalogLine(costs, item.productId, item.variationId);
       if (!cost) continue;
       coveredItems += item.quantity;
       costOfGoods += cost.unitCost * item.quantity;
       operatingCost += cost.packagingCost * item.quantity;
       feeCost += item.total * (cost.feeRate / 100);
+      affiliateCost += item.total * (cost.affiliateRate / 100);
     }
     const completeCostCoverage = totalItems > 0 && coveredItems >= totalItems;
     return {
@@ -495,9 +498,10 @@ export function createMonitorServer(
         costOfGoods,
         operatingCost,
         feeCost,
+        affiliateCost,
         completeCostCoverage,
         estimatedProfit: completeCostCoverage
-          ? order.total - costOfGoods - operatingCost - feeCost
+          ? order.total - costOfGoods - operatingCost - feeCost - affiliateCost
           : null,
       },
     };
@@ -3941,8 +3945,14 @@ export function createMonitorServer(
           if (coaWrite.matchedVariationId > 0 && coaWrite.matchedProductId <= 0) {
             throw new ProductLocationError("Choose the store product before selecting a presentation", "invalid_input");
           }
-          if (coaWrite.matchedVariationId > 0) {
-            await fulfillmentCatalogRecord(coaWrite.matchedProductId, coaWrite.matchedVariationId);
+          if (coaWrite.matchedProductId > 0) {
+            const catalog = await fulfillmentCatalogRecord(coaWrite.matchedProductId, coaWrite.matchedVariationId);
+            if (coaNeedsExactVariation(catalog.product.type, coaWrite.status, coaWrite.matchedVariationId)) {
+              throw new ProductLocationError(
+                "Choose the exact presentation or strength before publishing this COA",
+                "invalid_input",
+              );
+            }
           }
           const coa = await customCoas.update(coaWrite, currentUser.id);
           extensionsCache = undefined;
@@ -4192,10 +4202,28 @@ export function createMonitorServer(
           const variations = productType === "variable"
             ? await commerce.listProductVariations(productId)
             : [];
-          const cost = cachedProduct && "cost" in cachedProduct
-            ? cachedProduct.cost
-            : (await store.getProductCosts([productId]))[String(productId)] || null;
-          const detailPayload: Record<string, unknown> = { product, variations, cost, mode: config.wooCommerce.accessMode };
+          const detailCosts = await store.getProductCosts([productId, ...variations.map((variation) => variation.id)]);
+          const defaultCost = detailCosts[String(productId)] || null;
+          const variationsWithProfit = variations.map((variation) => {
+            const exactCost = detailCosts[String(variation.id)] || null;
+            const variationCost = exactCost || defaultCost;
+            const profitability = variationCost
+              ? calculateProductProfitability(variation.regularPrice || variation.price, variationCost)
+              : null;
+            return {
+              ...variation,
+              cost: variationCost,
+              costInherited: !exactCost && Boolean(defaultCost),
+              estimatedProfit: profitability?.estimatedProfit ?? null,
+              margin: profitability?.margin ?? null,
+            };
+          });
+          const detailPayload: Record<string, unknown> = {
+            product,
+            variations: variationsWithProfit,
+            cost: defaultCost,
+            mode: config.wooCommerce.accessMode,
+          };
           productDetailCache.set(productId, { payload: detailPayload, updatedAt: Date.now() });
           json(response, 200, detailPayload);
         } catch (error: unknown) {
@@ -4278,8 +4306,13 @@ export function createMonitorServer(
           const variant = value as Record<string, unknown>;
           const option = typeof variant.option === "string" ? variant.option.trim() : "";
           const price = Number(variant.price);
+          const unitCost = variant.unitCost === undefined ? null : Number(variant.unitCost);
           const stock = Number(variant.stock);
-          if (!option || !Number.isFinite(price) || price < 0 || !Number.isFinite(stock) || stock < 0) return [];
+          if (
+            !option || !Number.isFinite(price) || price < 0 ||
+            (unitCost !== null && (!Number.isFinite(unitCost) || unitCost < 0)) ||
+            !Number.isFinite(stock) || stock < 0
+          ) return [];
           const id = Number(variant.id);
           const imageId = Number(variant.imageId);
           return [{
@@ -4287,6 +4320,7 @@ export function createMonitorServer(
             option,
             sku: typeof variant.sku === "string" ? variant.sku.trim().slice(0, 100) : "",
             price,
+            unitCost,
             stock,
             ...(Number.isSafeInteger(imageId) && imageId > 0 ? { imageId } : {}),
           }];
@@ -4329,12 +4363,27 @@ export function createMonitorServer(
           const saved = await commerce.saveProduct(productId, write);
           let profitabilitySaved = true;
           try {
-            await store.setProductCost(saved.id, {
+            const defaultCost = {
               unitCost: Math.max(0, Number(input.unitCost) || 0),
               packagingCost: Math.max(0, Number(input.packagingCost) || 0),
               feeRate: Math.min(100, Math.max(0, Number(input.feeRate) || 0)),
               affiliateRate: Math.min(100, Math.max(0, Number(input.affiliateRate) || 0)),
-            });
+            };
+            await store.setProductCost(saved.id, defaultCost);
+            if (variants.length) {
+              const savedVariations = await commerce.listProductVariations(saved.id);
+              const normalizedOption = (value: string) => value.trim().toLocaleLowerCase("en");
+              for (const variant of variants) {
+                const savedVariation = savedVariations.find((item) => item.id === variant.id) ||
+                  savedVariations.find((item) => item.attributes.some((attribute) =>
+                    normalizedOption(attribute.option) === normalizedOption(variant.option)));
+                if (!savedVariation) throw new Error(`Saved variant ${variant.option} could not be reconciled`);
+                await store.setProductCost(savedVariation.id, {
+                  ...defaultCost,
+                  unitCost: variant.unitCost ?? defaultCost.unitCost,
+                });
+              }
+            }
           } catch (costError: unknown) {
             profitabilitySaved = false;
             console.error("Product saved but profitability metadata could not be saved", costError);

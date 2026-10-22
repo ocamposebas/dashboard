@@ -12,6 +12,15 @@ export interface ProductProfitability {
   margin: number | null;
 }
 
+export function productCostForCatalogLine(
+  costs: Record<string, ProductCostProfile>,
+  productId: number,
+  variationId: number,
+): ProductCostProfile | null {
+  if (variationId > 0 && costs[String(variationId)]) return costs[String(variationId)]!;
+  return costs[String(productId)] || null;
+}
+
 function safeAmount(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
