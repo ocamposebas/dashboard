@@ -594,6 +594,7 @@ interface CommerceCoa {
     pageCount: number;
     warnings: string[];
     fields: Record<string, string>;
+    suggestCurrent?: boolean;
     dateDetection?: {
       value: string;
       source: "test" | "analysis" | "reported" | "certificate" | "received" | "unknown";
@@ -7223,6 +7224,20 @@ const coaFamilyKeyInput = requiredElement<HTMLInputElement>("#coa-family-key");
 const coaSkusInput = requiredElement<HTMLTextAreaElement>("#coa-skus");
 const coaAliasesInput = requiredElement<HTMLTextAreaElement>("#coa-aliases");
 const coaKeywordsInput = requiredElement<HTMLTextAreaElement>("#coa-keywords");
+
+function syncCoaDistributionControl(): void {
+  const available = coaStatusInput.value === "Available";
+  if (!available) coaCurrentLotInput.checked = false;
+  coaCurrentLotInput.disabled = !available;
+  coaCurrentLotInput.title = available
+    ? "Publish this certificate as the lot customers are currently receiving."
+    : "Approve the certificate first. Only Available certificates can be a current shipping lot.";
+
+  const saveButton = requiredElement<HTMLButtonElement>("#save-coa-editor");
+  if (!saveButton.disabled || extensionsData?.coaWriteEnabled) {
+    saveButton.textContent = available ? "Approve & publish COA" : "Save review";
+  }
+}
 const productDrawer = requiredElement<HTMLElement>("#product-drawer");
 const drawerBackdrop = requiredElement<HTMLButtonElement>("#drawer-backdrop");
 const productForm = requiredElement<HTMLFormElement>("#product-form");
@@ -7706,7 +7721,9 @@ function openCoaEditor(coa: CommerceCoa): void {
   coaStatusInput.value = coa.status || "Available";
   coaMethodInput.value = coa.method || "";
   coaTestedInput.value = coa.tested || "";
+  coaCurrentLotInput.dataset.suggested = coa.intakeAnalysis?.suggestCurrent ? "true" : "false";
   coaCurrentLotInput.checked = coa.currentShippingLot;
+  syncCoaDistributionControl();
   coaFileUrlInput.value = coa.fileUrl || "";
   coaVerifyUrlInput.value = coa.verifyUrl || "";
   const products = [...(commerceData?.products || [])].sort((left, right) => left.name.localeCompare(right.name, "en"));
@@ -7749,7 +7766,7 @@ function openCoaEditor(coa: CommerceCoa): void {
     ? `${extensionsData?.coaBridgeVersion || "Custom COA API"} · saved directly in the Phase One library`
     : "Editor preview available · custom certificate storage is unavailable";
   requiredElement<HTMLButtonElement>("#save-coa-editor").disabled = !writeEnabled;
-  requiredElement<HTMLButtonElement>("#save-coa-editor").textContent = coa.status === "Review" ? "Save review" : "Save COA changes";
+  syncCoaDistributionControl();
   showCoaEditorPanel("basics");
   updateCoaDocumentPreview();
   if (coa.source === "custom" && coa.status === "Review" && coa.recordId) {
@@ -9655,6 +9672,16 @@ requiredElement<HTMLButtonElement>("#close-coa-editor").addEventListener("click"
 requiredElement<HTMLButtonElement>("#cancel-coa-editor").addEventListener("click", closeCoaEditor);
 coaEditorBackdrop.addEventListener("click", closeCoaEditor);
 coaFileUrlInput.addEventListener("input", updateCoaDocumentPreview);
+coaStatusInput.addEventListener("change", () => {
+  if (coaStatusInput.value === "Available" && coaCurrentLotInput.dataset.suggested === "true") {
+    coaCurrentLotInput.checked = true;
+    coaCurrentLotInput.dataset.suggested = "false";
+  }
+  syncCoaDistributionControl();
+});
+coaCurrentLotInput.addEventListener("change", () => {
+  coaCurrentLotInput.dataset.suggested = "false";
+});
 coaEditorForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (!editingCoa || !extensionsData?.coaWriteEnabled) return;

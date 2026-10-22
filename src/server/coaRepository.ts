@@ -205,7 +205,7 @@ function rowToCoa(row: CoaRow, publicOrigin: string): CustomCoa {
     laboratory: row.laboratory,
     method: row.method,
     tested: row.tested,
-    currentShippingLot: row.current_shipping_lot,
+    currentShippingLot: row.status === "Available" && row.current_shipping_lot,
     fileUrl: documentUrl,
     externalFileUrl: row.external_file_url,
     verifyUrl: row.verify_url,
@@ -223,7 +223,7 @@ function rowToCoa(row: CoaRow, publicOrigin: string): CustomCoa {
       verifyUrl: String(current.verifyUrl || row.verify_url),
       fileUrl: documentUrl || String(current.fileUrl || ""),
       fileAttachmentId: Math.max(0, Number(current.fileAttachmentId || row.file_attachment_id || 0)),
-      currentShippingLot: row.current_shipping_lot,
+      currentShippingLot: row.status === "Available" && row.current_shipping_lot,
     },
     history: storedHistory,
     historyCount: storedHistory.length,
@@ -385,12 +385,12 @@ export class CoaRepository {
              lot, certificate_date, status, purity, laboratory, method, tested,
              current_shipping_lot, external_file_url, verify_url, source,
              source_fingerprint, created_by, updated_by, intake_analysis
-           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Review',$10,$11,$12,$13,$14,$15,$15,'custom',$16,$17,$17,$18::jsonb)`,
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Review',$10,$11,$12,$13,false,$14,$14,'custom',$15,$16,$16,$17::jsonb)`,
           [id, coaNumber, productName, detected?.compound || "", familyName,
             detected?.strength || "", detected?.batch || "", detected?.lot || detected?.batch || "",
             detected?.date || null, detected?.purity || "", laboratory, detected?.method || "",
-            detected?.tested || "", suggestCurrent, link, fingerprint, actorId,
-            JSON.stringify(analysis || {})],
+            detected?.tested || "", link, fingerprint, actorId,
+            JSON.stringify({ ...(analysis || {}), suggestCurrent })],
         );
         if (directPdf && documentId && sha256) {
           await client.query(
@@ -442,7 +442,7 @@ export class CoaRepository {
            laboratory=CASE WHEN laboratory='' THEN $11 ELSE laboratory END,
            method=CASE WHEN method='' THEN $12 ELSE method END,
            tested=CASE WHEN tested='' THEN $13 ELSE tested END,
-           document_id=$14, intake_analysis=$15::jsonb, revision=revision+1,
+           document_id=$14, intake_analysis=COALESCE(intake_analysis, '{}'::jsonb) || $15::jsonb, revision=revision+1,
            updated_by=$16, updated_at=now()
          WHERE id=$1`,
         [row.id, fields.coaNumber, fields.productName || fields.compound, fields.compound,
@@ -484,12 +484,12 @@ export class CoaRepository {
            certificate_date, status, purity, laboratory, method, tested,
            current_shipping_lot, source, source_fingerprint, created_by, updated_by,
            intake_analysis
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Review',$10,$11,$12,$13,$14,'custom',$15,$16,$16,$17::jsonb)`,
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Review',$10,$11,$12,$13,false,'custom',$14,$15,$15,$16::jsonb)`,
         [id, coaNumber, productName, detected.compound, familyName, detected.strength,
           detected.batch, detected.lot || detected.batch, detected.date || null,
           detected.purity, detected.laboratory, detected.method, detected.tested,
-          input.suggestCurrent, coaSourceFingerprint(`pdf:${sha256}`), input.actorId,
-          JSON.stringify(analysis)],
+          coaSourceFingerprint(`pdf:${sha256}`), input.actorId,
+          JSON.stringify({ ...analysis, suggestCurrent: input.suggestCurrent })],
       );
       await client.query(
         `INSERT INTO coa_documents (id, certificate_id, file_name, mime_type, byte_size, sha256, content, created_by)

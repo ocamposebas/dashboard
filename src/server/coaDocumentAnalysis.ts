@@ -38,6 +38,8 @@ export interface CoaDocumentAnalysis {
   detectedFieldCount: number;
   pageCount: number;
   warnings: string[];
+  /** Intake intent only. A private Review record is never a live shipping lot. */
+  suggestCurrent?: boolean;
 }
 
 const emptyFields = (): CoaDetectedFields => ({

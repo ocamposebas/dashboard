@@ -74,6 +74,8 @@ test("laboratory links stay private until reviewed and duplicate intake is idemp
   assert.equal((await repository!.list({ publishedOnly: true })).length, 0);
 
   const draft = first!.coa;
+  assert.equal(draft.currentShippingLot, false);
+  assert.equal(draft.intakeAnalysis?.suggestCurrent, true);
   await repository!.update({
     id: draft.id, expectedRevision: draft.revision, coaNumber: "COA-CUSTOM-1",
     productName: "Retatrutide 10mg", compound: "Retatrutide", familyName: "Retatrutide",

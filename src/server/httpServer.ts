@@ -1403,7 +1403,7 @@ export function createMonitorServer(
           });
           const body = Buffer.from(JSON.stringify(records));
           const etag = `\"${createHash("sha256").update(body).digest("base64url")}\"`;
-          response.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300, stale-if-error=86400");
+          response.setHeader("Cache-Control", "public, max-age=5, stale-while-revalidate=10, stale-if-error=300");
           response.setHeader("Content-Type", "application/json; charset=utf-8");
           response.setHeader("ETag", etag);
           response.setHeader("X-COA-Source", "phase-one-postgresql");
