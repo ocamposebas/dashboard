@@ -110,6 +110,7 @@ import {
 } from "./productLocationRepository.js";
 import { SearchConsoleGateway } from "./searchConsoleGateway.js";
 import { buildOrderReportPdf } from "./orderReportPdf.js";
+import { LoginAttemptThrottle } from "./loginAttemptThrottle.js";
 import {
   buildIndependentSiteControls,
   defaultIndependentSiteControls,
@@ -177,11 +178,6 @@ async function serveDashboardAsset(
   return true;
 }
 
-interface AttemptState {
-  count: number;
-  resetAt: number;
-}
-
 function securityHeaders(
   response: ServerResponse,
   nonce?: string,
@@ -221,10 +217,12 @@ function json(response: ServerResponse, statusCode: number, value: unknown): voi
   response.end(payload);
 }
 
-function loginHtml(nonce: string, invalid: boolean): string {
-  const error = invalid
+function loginHtml(nonce: string, errorKind: "invalid" | "limited" | null): string {
+  const error = errorKind === "invalid"
     ? '<p class="error" role="alert">The username or password is incorrect.</p>'
-    : "";
+    : errorKind === "limited"
+      ? '<p class="error" role="alert"><strong>Too many incorrect attempts.</strong><br>Wait a few seconds, then enter the correct credentials. A correct sign-in will unlock access immediately.</p>'
+      : "";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -323,8 +321,15 @@ async function readBodyBuffer(request: IncomingMessage, limit = MAX_EVIDENCE_BOD
 
 function requestIp(request: IncomingMessage, trustProxy: boolean): string {
   if (trustProxy) {
-    const forwarded = request.headers["x-real-ip"];
-    if (typeof forwarded === "string" && forwarded.length <= 64) return forwarded;
+    const realIp = Array.isArray(request.headers["x-real-ip"])
+      ? request.headers["x-real-ip"][0]
+      : request.headers["x-real-ip"];
+    if (realIp?.trim() && realIp.trim().length <= 64) return realIp.trim();
+    const forwardedFor = Array.isArray(request.headers["x-forwarded-for"])
+      ? request.headers["x-forwarded-for"][0]
+      : request.headers["x-forwarded-for"];
+    const firstForwarded = forwardedFor?.split(",")[0]?.trim() || "";
+    if (firstForwarded && firstForwarded.length <= 64) return firstForwarded;
   }
   return request.socket.remoteAddress || "unknown";
 }
@@ -394,7 +399,7 @@ export function createMonitorServer(
   store: PresenceStore,
   dependencies: MonitorServerDependencies = {},
 ) {
-  const loginAttempts = new Map<string, AttemptState>();
+  const loginAttempts = new LoginAttemptThrottle();
   const commerceConfig = config.wooCommerce;
   const commerce = commerceConfig
     ? new WooCommerceGateway(commerceConfig)
@@ -442,7 +447,7 @@ export function createMonitorServer(
   const affiliates = dependencies.fulfillmentDatabase
     ? new AffiliateRepository(dependencies.fulfillmentDatabase)
     : undefined;
-  const affiliateLoginAttempts = new Map<string, AttemptState>();
+  const affiliateLoginAttempts = new LoginAttemptThrottle();
   let affiliateLegacySyncAt = 0;
   const shipStation = dependencies.shipStationGateway || new ShipStationGateway(config.shipStation);
   const fulfillmentShippingWorkflow = fulfillmentShipping
@@ -1692,32 +1697,31 @@ export function createMonitorServer(
           return;
         }
         const ip = requestIp(request, config.trustProxy);
-        const now = Date.now();
-        const attempt = affiliateLoginAttempts.get(ip);
-        if (attempt && attempt.resetAt > now && attempt.count >= 8) {
-          response.setHeader("Retry-After", String(Math.ceil((attempt.resetAt - now) / 1_000)));
-          json(response, 429, { error: "Too many sign-in attempts" });
-          return;
-        }
         let payload: Record<string, unknown>;
         try { payload = JSON.parse(await readBody(request)) as Record<string, unknown>; }
         catch { json(response, 400, { error: "Invalid request" }); return; }
         const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
         const password = typeof payload.password === "string" ? payload.password : "";
         const profile = email ? await affiliates.findActiveByEmail(email) : null;
+        const attemptIdentity = profile?.email || "<unknown>";
+        const attempt = affiliateLoginAttempts.beforeAttempt(ip, attemptIdentity);
+        if (!attempt.allowed) {
+          response.setHeader("Retry-After", String(attempt.retryAfterSeconds));
+          json(response, 429, {
+            error: `Too many incorrect attempts. Try the correct password in ${attempt.retryAfterSeconds} seconds.`,
+          });
+          return;
+        }
         const valid = Boolean(
           profile && profile.status === "active" && profile.passwordHash &&
           await verifyPassword(password, profile.passwordHash).catch(() => false),
         );
         if (!valid || !profile) {
-          const next = attempt && attempt.resetAt > now
-            ? { ...attempt, count: attempt.count + 1 }
-            : { count: 1, resetAt: now + 15 * 60_000 };
-          affiliateLoginAttempts.set(ip, next);
+          affiliateLoginAttempts.recordFailure(ip, attemptIdentity);
           json(response, 401, { error: "Email or password is incorrect" });
           return;
         }
-        affiliateLoginAttempts.delete(ip);
+        affiliateLoginAttempts.clear(ip, attemptIdentity);
         await affiliates.recordLogin(profile.id);
         response.setHeader("Set-Cookie", createAffiliateSessionCookie({
           affiliateId: profile.id,
@@ -1885,41 +1889,37 @@ export function createMonitorServer(
           return;
         }
         response.setHeader("Content-Type", "text/html; charset=utf-8");
-        response.end(loginHtml(nonce, url.searchParams.has("invalid")));
+        response.end(loginHtml(nonce, url.searchParams.has("invalid") ? "invalid" : null));
         return;
       }
 
       if (url.pathname === "/login" && request.method === "POST") {
         const ip = requestIp(request, config.trustProxy);
-        const now = Date.now();
-        const attempt = loginAttempts.get(ip);
-        if (attempt && attempt.resetAt > now && attempt.count >= 8) {
-          response.statusCode = 429;
-          response.setHeader("Retry-After", String(Math.ceil((attempt.resetAt - now) / 1_000)));
-          response.end("Too many attempts");
-          return;
-        }
-
         const form = new URLSearchParams(await readBody(request));
         const username = form.get("username") || "";
         const password = form.get("password") || "";
         const user = await store.getUserByUsername(username);
+        const attemptIdentity = user?.username || "<unknown>";
+        const attempt = loginAttempts.beforeAttempt(ip, attemptIdentity);
+        if (!attempt.allowed) {
+          response.statusCode = 429;
+          response.setHeader("Retry-After", String(attempt.retryAfterSeconds));
+          response.setHeader("Content-Type", "text/html; charset=utf-8");
+          response.end(loginHtml(nonce, "limited"));
+          return;
+        }
         const passwordMatches = user
           ? await verifyPassword(password, user.passwordHash).catch(() => false)
           : false;
         const valid = Boolean(user && user.status === "active" && passwordMatches);
 
         if (!valid) {
-          const next =
-            attempt && attempt.resetAt > now
-              ? { ...attempt, count: attempt.count + 1 }
-              : { count: 1, resetAt: now + 15 * 60_000 };
-          loginAttempts.set(ip, next);
+          loginAttempts.recordFailure(ip, attemptIdentity);
           redirect(response, "/login?invalid=1");
           return;
         }
 
-        loginAttempts.delete(ip);
+        loginAttempts.clear(ip, attemptIdentity);
         await store.recordUserLogin(user!.id);
         response.setHeader(
           "Set-Cookie",
