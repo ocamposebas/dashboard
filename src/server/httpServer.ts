@@ -545,31 +545,6 @@ export function createMonitorServer(
   ): Promise<Map<string, Awaited<ReturnType<CoaRepository["update"]>>>> {
     const published = new Map<string, Awaited<ReturnType<CoaRepository["update"]>>>();
     if (!customCoas || !commerce) return published;
-    const unmappedAudit = candidates
-      .filter((coa) =>
-        coa.source === "custom" &&
-        coa.matchedProductId < 1 &&
-        (coa.status === "Review" || coa.status === "Available"),
-      )
-      .slice(0, 20)
-      .map((coa) => ({
-        certificateId: coa.recordId || coa.id,
-        coaNumber: coa.coaNumber,
-        status: coa.status,
-        currentShippingLot: coa.currentShippingLot,
-        suggestCurrent: coa.intakeAnalysis?.suggestCurrent === true,
-        analysisStatus: coa.intakeAnalysis?.status || "not-recorded",
-        dateConfidence: coa.intakeAnalysis?.dateDetection?.confidence || "not-recorded",
-        productName: coa.productName,
-        familyName: coa.familyName,
-        strength: coa.strength,
-        lot: coa.lot || coa.batch,
-        date: coa.date,
-        hasDocument: Boolean(coa.fileUrl || coa.verifyUrl),
-      }));
-    if (unmappedAudit.length) {
-      console.info("Unmapped custom COA publication audit", unmappedAudit);
-    }
     const eligible = candidates.filter(canAutomaticallyPublishCoa);
     if (!eligible.length) return published;
 
