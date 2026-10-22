@@ -14,12 +14,20 @@ export interface ShippingCarrierService {
   international: boolean;
 }
 
+export interface ShippingCarrierPackage {
+  code: string;
+  name: string;
+  domestic: boolean;
+  international: boolean;
+}
+
 export interface ShippingCarrier {
   id: string;
   code: string;
   name: string;
   nickname: string;
   services: ShippingCarrierService[];
+  packages: ShippingCarrierPackage[];
 }
 
 export interface ShippingCapabilitiesPayload {
@@ -39,6 +47,8 @@ export interface ShippingPackageInput {
   lengthIn: number;
   widthIn: number;
   heightIn: number;
+  packageCode?: string;
+  packageName?: string;
 }
 
 export interface ShippingRateQuote {

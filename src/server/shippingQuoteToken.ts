@@ -48,7 +48,10 @@ function assertClaims(value: unknown): ShippingQuoteClaims {
     typeof rate.currency !== "string" || typeof rate.isEstimate !== "boolean" ||
     (claims.dataMode === "live" && (!rate.shipmentId || rate.isEstimate)) || !parcel ||
     ![parcel.weightOz, parcel.lengthIn, parcel.widthIn, parcel.heightIn]
-      .every((item) => typeof item === "number" && Number.isFinite(item) && item > 0)
+      .every((item) => typeof item === "number" && Number.isFinite(item) && item > 0) ||
+    (parcel.packageCode !== undefined &&
+      (typeof parcel.packageCode !== "string" || !/^[a-z0-9_]{1,80}$/.test(parcel.packageCode))) ||
+    (parcel.packageName !== undefined && typeof parcel.packageName !== "string")
   ) {
     throw new ShippingQuoteTokenError("The selected rate is invalid", "invalid");
   }

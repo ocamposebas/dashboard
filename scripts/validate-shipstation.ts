@@ -16,6 +16,7 @@ async function main(): Promise<void> {
       name: carrier.name,
       nickname: carrier.nickname,
       services: carrier.services.map((service) => ({ code: service.code, name: service.name })),
+      packages: carrier.packages.map((item) => ({ code: item.code, name: item.name })),
     })),
     checkedAt: capabilities.checkedAt,
     ...(capabilities.error ? { error: capabilities.error } : {}),

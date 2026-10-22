@@ -107,7 +107,13 @@ function packageSnapshot(value: unknown): ShippingPackageInput {
     .every((part) => typeof part === "number" && Number.isFinite(part) && part > 0)) {
     throw new FulfillmentShippingRepositoryError("Stored package details are invalid", "invalid_input");
   }
-  return item as ShippingPackageInput;
+  const packageCode = typeof item.packageCode === "string" && /^[a-z0-9_]{1,80}$/.test(item.packageCode)
+    ? item.packageCode
+    : "package";
+  const packageName = typeof item.packageName === "string" && item.packageName.trim()
+    ? item.packageName.trim().slice(0, 120)
+    : packageCode === "package" ? "Your own box" : packageCode.replaceAll("_", " ");
+  return { ...item, packageCode, packageName } as ShippingPackageInput;
 }
 
 function iso(value: Date | string | null): string | null {

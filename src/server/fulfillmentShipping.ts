@@ -48,13 +48,26 @@ export function shippingPackageInput(value: unknown): ShippingPackageInput {
   const lengthIn = finiteInRange(input.lengthIn, 0.1, 120);
   const widthIn = finiteInRange(input.widthIn, 0.1, 120);
   const heightIn = finiteInRange(input.heightIn, 0.1, 120);
+  const packageCode = typeof input.packageCode === "string" && input.packageCode.trim()
+    ? input.packageCode.trim().toLowerCase()
+    : "package";
   if (weightOz === null || lengthIn === null || widthIn === null || heightIn === null) {
     throw new FulfillmentShippingError(
       "Package values must be positive and within standard parcel limits",
       "invalid_input",
     );
   }
-  return { weightOz, lengthIn, widthIn, heightIn };
+  if (!/^[a-z0-9_]{1,80}$/.test(packageCode)) {
+    throw new FulfillmentShippingError("The selected package type is invalid", "invalid_input");
+  }
+  return {
+    weightOz,
+    lengthIn,
+    widthIn,
+    heightIn,
+    packageCode,
+    packageName: packageCode === "package" ? "Your own box" : packageCode.replaceAll("_", " "),
+  };
 }
 
 export function shippingDestination(address: CommerceAddress): ShippingDestination {

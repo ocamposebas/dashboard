@@ -113,6 +113,82 @@ test("real label creation is fail-closed behind the server flag", async () => {
   assert.equal(requested, false);
 });
 
+test("FedEx One Rate uses the connected carrier package code without custom dimensions", async () => {
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const gateway = new ShipStationGateway({
+    apiKey: "server-only-key",
+    rateMode: "live",
+    warehouseId: "se-origin",
+    labelPurchaseEnabled: false,
+  }, async (input, init) => {
+    const url = String(input);
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
+    requests.push({ url, body });
+    if (url.includes("/carriers")) {
+      return new Response(JSON.stringify({ carriers: [{
+        carrier_id: "se-fedex",
+        carrier_code: "fedex",
+        friendly_name: "FedEx",
+        services: [{ service_code: "fedex_2day", name: "FedEx 2Day", domestic: true }],
+        packages: [{
+          package_code: "fedex_small_box_onerate",
+          name: "FedEx One Rate Small Box",
+          domestic: true,
+        }],
+      }] }), { status: 200 });
+    }
+    if (url.includes("/warehouses")) {
+      return new Response(JSON.stringify({ warehouses: [{
+        warehouse_id: "se-origin",
+        name: "Main warehouse",
+        origin_address: {
+          city_locality: "Miami", state_province: "FL", postal_code: "33101", country_code: "US",
+        },
+      }] }), { status: 200 });
+    }
+    return new Response(JSON.stringify({
+      shipment_id: "se-onerate-shipment",
+      rate_response: { rates: [{
+        rate_id: "se-onerate-rate",
+        carrier_id: "se-fedex",
+        carrier_code: "fedex",
+        carrier_friendly_name: "FedEx",
+        service_code: "fedex_2day",
+        service_type: "FedEx 2Day",
+        shipping_amount: { amount: 14.2, currency: "USD" },
+      }] },
+    }), { status: 200 });
+  }, "https://shipstation.example/v2");
+
+  const capabilities = await gateway.capabilities();
+  assert.equal(capabilities.carriers[0]?.packages[0]?.code, "fedex_small_box_onerate");
+  const rates = await gateway.rates({
+    carrierIds: ["se-fedex"],
+    package: {
+      weightOz: 16,
+      lengthIn: 8,
+      widthIn: 6,
+      heightIn: 4,
+      packageCode: "fedex_small_box_onerate",
+      packageName: "FedEx One Rate Small Box",
+    },
+    destination: {
+      name: "Test Customer", address1: "100 Test Street", city: "Greeley", state: "CO",
+      postalCode: "78573", countryCode: "US",
+    },
+    externalShipmentId: "p1-onerate-test",
+    orderNumber: "3156",
+  });
+
+  const rateRequest = requests.find((request) => request.url.endsWith("/rates"));
+  const shipment = rateRequest?.body.shipment as Record<string, unknown>;
+  const parcel = (shipment.packages as Array<Record<string, unknown>>)[0];
+  assert.equal(parcel?.package_code, "fedex_small_box_onerate");
+  assert.equal("dimensions" in (parcel || {}), false);
+  assert.equal(rates[0]?.serviceName, "FedEx 2Day One Rate");
+  assert.equal(rates[0]?.amount, 14.2);
+});
+
 test("prepared label creation and reconciliation use only the documented endpoints with mocked fetch", async () => {
   const requests: Array<{ url: string; method: string; body: string }> = [];
   const labelResponse = {

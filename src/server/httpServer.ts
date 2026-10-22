@@ -2808,7 +2808,7 @@ export function createMonitorServer(
           if (!carrierIds.length || carrierIds.length > 50 || new Set(carrierIds).size !== carrierIds.length) {
             throw new FulfillmentShippingError("Choose one or more connected carriers", "invalid_input");
           }
-          const parcel = shippingPackageInput(input.package);
+          let parcel = shippingPackageInput(input.package);
           const { destination, order } = await packedShippingOrder(fulfillmentId);
           const capabilities = await shipStation.capabilities();
           if (!capabilities.rateShoppingAvailable) {
@@ -2816,6 +2816,25 @@ export function createMonitorServer(
               capabilities.error || "ShipStation rate shopping is not available",
               capabilities.credentialConfigured ? "no_origin" : "not_configured",
             );
+          }
+          if (parcel.packageCode !== "package") {
+            if (carrierIds.length !== 1) {
+              throw new FulfillmentShippingError(
+                "Choose one carrier before selecting its packaging",
+                "invalid_input",
+              );
+            }
+            const selectedCarrier = capabilities.carriers.find((carrier) => carrier.id === carrierIds[0]);
+            const selectedPackage = selectedCarrier?.packages.find(
+              (candidate) => candidate.code === parcel.packageCode,
+            );
+            if (!selectedPackage) {
+              throw new FulfillmentShippingError(
+                "This package is not available for the selected carrier account",
+                "invalid_input",
+              );
+            }
+            parcel = { ...parcel, packageName: selectedPackage.name };
           }
           const reconciliation = capabilities.dataMode === "live"
             ? await shipStation.reconcileOrderByNumber(order.number)

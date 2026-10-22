@@ -148,6 +148,24 @@ function serviceList(value: unknown): ShippingCarrier["services"] {
   });
 }
 
+function packageList(value: unknown): ShippingCarrier["packages"] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((item) => {
+    const source = record(item);
+    if (!source) return [];
+    const code = textValue(source.package_code || source.code);
+    if (!code || seen.has(code)) return [];
+    seen.add(code);
+    return [{
+      code,
+      name: textValue(source.name || source.package_name) || code.replaceAll("_", " "),
+      domestic: source.domestic === undefined ? true : boolValue(source.domestic),
+      international: boolValue(source.international),
+    }];
+  });
+}
+
 function carrierList(value: unknown): ShippingCarrier[] {
   const root = record(value);
   const items = Array.isArray(value) ? value : root?.carriers;
@@ -166,6 +184,7 @@ function carrierList(value: unknown): ShippingCarrier[] {
       name: textValue(source.friendly_name || source.name) || code.replaceAll("_", " "),
       nickname: textValue(source.nickname),
       services: serviceList(source.services),
+      packages: packageList(source.packages),
     }];
   });
 }
@@ -265,6 +284,7 @@ function mockCarriers(): ShippingCarrier[] {
         { code: "ups_ground", name: "UPS Ground", domestic: true, international: false },
         { code: "ups_2nd_day_air", name: "UPS 2nd Day Air", domestic: true, international: false },
       ],
+      packages: [],
     },
     {
       id: "mock-usps",
@@ -275,6 +295,7 @@ function mockCarriers(): ShippingCarrier[] {
         { code: "usps_ground_advantage", name: "USPS Ground Advantage", domestic: true, international: false },
         { code: "usps_priority_mail", name: "USPS Priority Mail", domestic: true, international: false },
       ],
+      packages: [],
     },
     {
       id: "mock-fedex",
@@ -284,6 +305,11 @@ function mockCarriers(): ShippingCarrier[] {
       services: [
         { code: "fedex_ground", name: "FedEx Ground", domestic: true, international: false },
         { code: "fedex_2day", name: "FedEx 2Day", domestic: true, international: false },
+      ],
+      packages: [
+        { code: "fedex_small_box_onerate", name: "FedEx One Rate Small Box", domestic: true, international: false },
+        { code: "fedex_medium_box_onerate", name: "FedEx One Rate Medium Box", domestic: true, international: false },
+        { code: "fedex_large_box_onerate", name: "FedEx One Rate Large Box", domestic: true, international: false },
       ],
     },
   ];
@@ -295,6 +321,28 @@ function mockRateId(parts: unknown[]): string {
 
 function mockRates(input: ShipStationRateInput): ShipStationRate[] {
   const carriers = mockCarriers().filter((carrier) => input.carrierIds.includes(carrier.id));
+  const packageCode = input.package.packageCode || "package";
+  if (packageCode.includes("_onerate")) {
+    const carrier = carriers.find((item) => item.code === "fedex");
+    if (!carrier) return [];
+    const delivery = new Date();
+    delivery.setUTCDate(delivery.getUTCDate() + 2);
+    return [{
+      rateId: mockRateId([carrier.id, "fedex_2day", packageCode, input.destination]),
+      shipmentId: null,
+      carrierId: carrier.id,
+      carrierCode: carrier.code,
+      carrierName: carrier.name,
+      serviceCode: "fedex_2day",
+      serviceName: "FedEx 2Day One Rate",
+      amount: 14.2,
+      currency: "USD",
+      deliveryDays: 2,
+      estimatedDeliveryDate: delivery.toISOString(),
+      guaranteed: false,
+      isEstimate: true,
+    }];
+  }
   const dimensionalWeight = (input.package.lengthIn * input.package.widthIn * input.package.heightIn) / 139;
   const billablePounds = Math.max(input.package.weightOz / 16, dimensionalWeight, 0.25);
   const today = new Date();
@@ -525,6 +573,22 @@ export class ShipStationGateway {
       throw new ShipStationGatewayError("A selected carrier is not connected to this account", "invalid_response");
     }
     const origin = this.selectOrigin(warehouses)!;
+    const packageCode = input.package.packageCode?.trim() || "package";
+    if (packageCode !== "package") {
+      if (input.carrierIds.length !== 1) {
+        throw new ShipStationGatewayError(
+          "Carrier packaging can only be rated with its matching carrier account",
+          "invalid_response",
+        );
+      }
+      const carrier = carriers.find((candidate) => candidate.id === input.carrierIds[0]);
+      if (!carrier?.packages.some((candidate) => candidate.code === packageCode)) {
+        throw new ShipStationGatewayError(
+          "The selected package is not available for this connected carrier",
+          "invalid_response",
+        );
+      }
+    }
     const externalShipmentId = input.externalShipmentId.trim();
     if (!externalShipmentId || externalShipmentId.length > 50) {
       throw new ShipStationGatewayError("The external shipment identifier is invalid", "invalid_response");
@@ -551,14 +615,16 @@ export class ShipStationGateway {
         address_residential_indicator: "unknown",
       },
       packages: [{
-        package_code: "package",
+        package_code: packageCode,
         weight: { value: input.package.weightOz, unit: "ounce" },
-        dimensions: {
-          unit: "inch",
-          length: input.package.lengthIn,
-          width: input.package.widthIn,
-          height: input.package.heightIn,
-        },
+        ...(packageCode === "package" ? {
+          dimensions: {
+            unit: "inch",
+            length: input.package.lengthIn,
+            width: input.package.widthIn,
+            height: input.package.heightIn,
+          },
+        } : {}),
       }],
     };
     const existingShipmentId = input.existingShipmentId?.trim() || "";
@@ -613,8 +679,11 @@ export class ShipStationGateway {
       const estimatedDeliveryDate = textValue(source.estimated_delivery_date) || null;
       const carrierCode = textValue(source.carrier_code) || carrier?.code || "carrier";
       const carrierName = textValue(source.carrier_friendly_name) || carrier?.name || carrierCode;
-      const serviceName = textValue(source.service_type) ||
+      let serviceName = textValue(source.service_type) ||
         carrier?.services.find((service) => service.code === serviceCode)?.name || serviceCode;
+      if (packageCode.includes("_onerate") && !/one\s*rate/i.test(serviceName)) {
+        serviceName = `${serviceName} One Rate`;
+      }
       return [{
         rateId,
         shipmentId,

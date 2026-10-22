@@ -3992,7 +3992,14 @@ function initialShippingState(): FulfillmentShippingUiState {
     printUrl: null,
     selectedCarrierId: "all",
     selectedRateIndex: null,
-    package: { weightOz: 16, lengthIn: 8, widthIn: 6, heightIn: 4 },
+    package: {
+      weightOz: 16,
+      lengthIn: 8,
+      widthIn: 6,
+      heightIn: 4,
+      packageCode: "package",
+      packageName: "Your own box",
+    },
     labelAttemptId: null,
     error: null,
   };
@@ -4060,6 +4067,31 @@ function shippingWorkspaceMarkup(order: FulfillmentQueueEntry, state: Fulfillmen
     `<option value="all"${state.selectedCarrierId === "all" ? " selected" : ""}>All connected carriers</option>`,
     ...capabilities.carriers.map((carrier) => `<option value="${escapeHtml(carrier.id)}"${state.selectedCarrierId === carrier.id ? " selected" : ""}>${escapeHtml(carrier.name)}${carrier.nickname ? ` · ${escapeHtml(carrier.nickname)}` : ""}</option>`),
   ].join("");
+  const selectedCarrier = state.selectedCarrierId === "all"
+    ? null
+    : capabilities.carriers.find((carrier) => carrier.id === state.selectedCarrierId) || null;
+  const carrierPackages = [...(selectedCarrier?.packages || [])]
+    .filter((item) => item.domestic)
+    .sort((left, right) => {
+      const leftOneRate = left.code.includes("_onerate") ? 0 : 1;
+      const rightOneRate = right.code.includes("_onerate") ? 0 : 1;
+      return leftOneRate - rightOneRate || left.name.localeCompare(right.name);
+    });
+  const requestedPackageCode = state.package.packageCode || "package";
+  const selectedPackage = carrierPackages.find((item) => item.code === requestedPackageCode) || null;
+  const activePackageCode = selectedPackage?.code || "package";
+  const packageOptions = [
+    `<option value="package"${activePackageCode === "package" ? " selected" : ""}>Your own box</option>`,
+    ...carrierPackages.map((item) => `<option value="${escapeHtml(item.code)}"${activePackageCode === item.code ? " selected" : ""}>${escapeHtml(item.name)}</option>`),
+  ].join("");
+  const oneRateSelected = activePackageCode.includes("_onerate");
+  const packageHelp = selectedCarrier
+    ? carrierPackages.length
+      ? oneRateSelected
+        ? "FedEx One Rate packaging selected · live account pricing"
+        : `${carrierPackages.length} carrier package type${carrierPackages.length === 1 ? "" : "s"} available`
+      : "This carrier currently exposes custom packaging only"
+    : "Choose one carrier to unlock its branded packaging";
   const destination = state.rates?.destination;
   const rateCards = state.rates?.rates.length
     ? `<div class="shipping-rate-list">${state.rates.rates.map((rate, index) => {
@@ -4067,7 +4099,11 @@ function shippingWorkspaceMarkup(order: FulfillmentQueueEntry, state: Fulfillmen
       const delivery = rate.deliveryDays === null
         ? "Delivery estimate unavailable"
         : `${rate.deliveryDays} business day${rate.deliveryDays === 1 ? "" : "s"}`;
-      return `<button class="shipping-rate-card${selected ? " is-selected" : ""}" type="button" data-select-shipping-rate="${index}" aria-pressed="${selected}"><span class="shipping-carrier-mark">${escapeHtml(rate.carrierName.slice(0, 3).toUpperCase())}</span><span><strong>${escapeHtml(rate.serviceName)}</strong><small>${escapeHtml(rate.carrierName)} · ${escapeHtml(delivery)}</small></span><b>${formatCurrency(rate.amount, rate.currency)}</b><i>${selected ? "✓" : "Select"}</i></button>`;
+      const displayName = oneRateSelected && !/one\s*rate/i.test(rate.serviceName)
+        ? `${rate.serviceName} One Rate`
+        : rate.serviceName;
+      const packageDetail = selectedPackage ? ` · ${selectedPackage.name}` : "";
+      return `<button class="shipping-rate-card${selected ? " is-selected" : ""}" type="button" data-select-shipping-rate="${index}" aria-pressed="${selected}"><span class="shipping-carrier-mark">${escapeHtml(rate.carrierName.slice(0, 3).toUpperCase())}</span><span><strong>${escapeHtml(displayName)}</strong><small>${escapeHtml(rate.carrierName)} · ${escapeHtml(delivery + packageDetail)}</small></span><b>${formatCurrency(rate.amount, rate.currency)}</b><i>${selected ? "✓" : "Select"}</i></button>`;
     }).join("")}</div>`
     : state.rates
       ? '<div class="shipping-empty-rates"><span>!</span><strong>No rates returned</strong><p>Try another carrier or confirm the package and destination details.</p></div>'
@@ -4077,7 +4113,7 @@ function shippingWorkspaceMarkup(order: FulfillmentQueueEntry, state: Fulfillmen
     : state.rates?.rates[state.selectedRateIndex] || null;
   return `<section class="shipping-workspace" data-fulfillment-id="${escapeHtml(fulfillmentId)}">
     <div class="shipping-flow-rail"><span class="is-done"><i>✓</i><b>Packed</b></span><em></em><span class="is-current"><i>2</i><b>Choose shipping</b></span><em></em><span><i>3</i><b>${capabilities.dataMode === "live" ? "Purchase label" : "Test label"}</b></span></div>
-    <header class="shipping-workspace-head"><div><p class="section-kicker">Shipping · ${escapeHtml(modeLabel)}</p><h3>Choose the best service</h3><p>Enter the package once, compare clear prices and select one service.</p></div><span class="shipping-mode is-${capabilities.dataMode}">${capabilities.dataMode === "live" ? "CONNECTED" : "SAFE TEST MODE"}</span></header>
+    <header class="shipping-workspace-head"><div><p class="section-kicker">Shipping · ${escapeHtml(modeLabel)}</p><h3>Choose the best service</h3><p>Select the carrier package first, then compare the exact account rates.</p></div><span class="shipping-mode is-${capabilities.dataMode}">${capabilities.dataMode === "live" ? "CONNECTED" : "SAFE TEST MODE"}</span></header>
     ${capabilities.dataMode === "mock"
       ? '<div class="shipping-test-banner"><span>i</span><p><strong>Test environment</strong> Carrier names, prices and label purchase are simulated. Nothing is sent to ShipStation.</p></div>'
       : purchaseUnlocked
@@ -4085,13 +4121,14 @@ function shippingWorkspaceMarkup(order: FulfillmentQueueEntry, state: Fulfillmen
         : '<div class="shipping-test-banner is-live"><span>✓</span><p><strong>Live rates, purchase locked</strong> Prices come from connected carriers, but the server safety flag prevents every label charge.</p></div>'}
     <form class="shipping-rate-form" id="shipping-rate-form">
       <label class="shipping-carrier-field"><span>Carrier</span><select name="carrierId">${carrierOptions}</select><small>${capabilities.carriers.length} connected carrier${capabilities.carriers.length === 1 ? "" : "s"} · ${escapeHtml(capabilities.originName || "Origin ready")}</small></label>
-      <fieldset><legend>Package</legend><label><span>Weight</span><div><input name="weightOz" type="number" min="0.1" max="2400" step="0.1" value="${state.package.weightOz}" required><b>oz</b></div></label><label><span>Length</span><div><input name="lengthIn" type="number" min="0.1" max="120" step="0.1" value="${state.package.lengthIn}" required><b>in</b></div></label><label><span>Width</span><div><input name="widthIn" type="number" min="0.1" max="120" step="0.1" value="${state.package.widthIn}" required><b>in</b></div></label><label><span>Height</span><div><input name="heightIn" type="number" min="0.1" max="120" step="0.1" value="${state.package.heightIn}" required><b>in</b></div></label></fieldset>
+      <label class="shipping-package-field"><span>Package type</span><select name="packageCode"${selectedCarrier ? "" : " disabled"}>${packageOptions}</select><small>${escapeHtml(packageHelp)}</small></label>
+      <fieldset class="${activePackageCode === "package" ? "" : "is-carrier-package"}"><legend>Package</legend><label><span>Weight</span><div><input name="weightOz" type="number" min="0.1" max="2400" step="0.1" value="${state.package.weightOz}" required><b>oz</b></div></label>${activePackageCode === "package" ? `<label><span>Length</span><div><input name="lengthIn" type="number" min="0.1" max="120" step="0.1" value="${state.package.lengthIn}" required><b>in</b></div></label><label><span>Width</span><div><input name="widthIn" type="number" min="0.1" max="120" step="0.1" value="${state.package.widthIn}" required><b>in</b></div></label><label><span>Height</span><div><input name="heightIn" type="number" min="0.1" max="120" step="0.1" value="${state.package.heightIn}" required><b>in</b></div></label>` : `<div class="shipping-carrier-package-note"><strong>${escapeHtml(selectedPackage?.name || "Carrier package")}</strong><small>Dimensions are supplied by the carrier package code.</small></div>`}</fieldset>
       <button class="button button--primary" type="submit"${state.rateLoading ? " disabled" : ""}>${state.rateLoading ? "Comparing rates…" : "Compare rates"}</button>
     </form>
     ${destination ? `<div class="shipping-destination"><span>SHIP TO</span><strong>${escapeHtml(destination.city)}, ${escapeHtml(destination.state)} ${escapeHtml(destination.postalCode)}</strong><small>${escapeHtml(destination.countryCode)} · Address remains sourced from the order</small></div>` : ""}
     ${state.error ? `<p class="shipping-error" role="alert"><span>!</span>${escapeHtml(state.error)}</p>` : ""}
     ${rateCards}
-    ${selectedRate ? `<div class="shipping-purchase-review"><div><p class="section-kicker">Selected service</p><h4>${escapeHtml(selectedRate.carrierName)} · ${escapeHtml(selectedRate.serviceName)}</h4><p>${formatCurrency(selectedRate.amount, selectedRate.currency)}${selectedRate.isEstimate ? " estimated" : " final quoted total"} · 4×6 PDF</p></div><div class="shipping-purchase-safety${purchaseUnlocked ? " is-live" : ""}"><span>${capabilities.dataMode === "mock" ? "TEST" : purchaseUnlocked ? "LIVE" : "LOCKED"}</span><p>${capabilities.dataMode === "mock" ? "Creates a local test label only. No postage or source order is changed." : purchaseUnlocked ? "Explicit confirmation purchases this exact rate once and writes tracking back safely." : "Live purchase is disabled on the server. Ask an administrator to complete the launch checklist."}</p></div><button class="button button--primary" type="button" ${capabilities.dataMode === "mock" ? "data-generate-shipping-label" : purchaseUnlocked ? "data-review-live-label" : "disabled"}${state.labelBusy ? " disabled" : ""}>${state.labelBusy ? "Processing safely…" : capabilities.dataMode === "mock" ? "Generate test label" : purchaseUnlocked ? `Review & purchase ${formatCurrency(selectedRate.amount, selectedRate.currency)}` : "Purchase locked"}</button></div>` : ""}
+    ${selectedRate ? `<div class="shipping-purchase-review"><div><p class="section-kicker">Selected service</p><h4>${escapeHtml(selectedRate.carrierName)} · ${escapeHtml(oneRateSelected && !/one\s*rate/i.test(selectedRate.serviceName) ? `${selectedRate.serviceName} One Rate` : selectedRate.serviceName)}</h4><p>${formatCurrency(selectedRate.amount, selectedRate.currency)}${selectedRate.isEstimate ? " estimated" : " final quoted total"} · ${escapeHtml(selectedPackage?.name || "Your own box")} · 4×6 PDF</p></div><div class="shipping-purchase-safety${purchaseUnlocked ? " is-live" : ""}"><span>${capabilities.dataMode === "mock" ? "TEST" : purchaseUnlocked ? "LIVE" : "LOCKED"}</span><p>${capabilities.dataMode === "mock" ? "Creates a local test label only. No postage or source order is changed." : purchaseUnlocked ? "Explicit confirmation purchases this exact rate once and writes tracking back safely." : "Live purchase is disabled on the server. Ask an administrator to complete the launch checklist."}</p></div><button class="button button--primary" type="button" ${capabilities.dataMode === "mock" ? "data-generate-shipping-label" : purchaseUnlocked ? "data-review-live-label" : "disabled"}${state.labelBusy ? " disabled" : ""}>${state.labelBusy ? "Processing safely…" : capabilities.dataMode === "mock" ? "Generate test label" : purchaseUnlocked ? `Review & purchase ${formatCurrency(selectedRate.amount, selectedRate.currency)}` : "Purchase locked"}</button></div>` : ""}
   </section>`;
 }
 
@@ -4153,13 +4190,21 @@ async function compareShippingRates(): Promise<void> {
   const state = fulfillmentShippingStates.get(fulfillmentId);
   if (!state?.capabilities || state.rateLoading) return;
   const data = new FormData(form);
+  const selectedCarrierId = String(data.get("carrierId") || state.selectedCarrierId || "all");
+  const packageCode = String(data.get("packageCode") || state.package.packageCode || "package");
+  const packageCarrier = selectedCarrierId === "all"
+    ? null
+    : state.capabilities.carriers.find((carrier) => carrier.id === selectedCarrierId) || null;
+  const packageDefinition = packageCarrier?.packages.find((item) => item.code === packageCode) || null;
   state.package = {
     weightOz: Number(data.get("weightOz")),
-    lengthIn: Number(data.get("lengthIn")),
-    widthIn: Number(data.get("widthIn")),
-    heightIn: Number(data.get("heightIn")),
+    lengthIn: data.get("lengthIn") === null ? state.package.lengthIn : Number(data.get("lengthIn")),
+    widthIn: data.get("widthIn") === null ? state.package.widthIn : Number(data.get("widthIn")),
+    heightIn: data.get("heightIn") === null ? state.package.heightIn : Number(data.get("heightIn")),
+    packageCode: packageDefinition?.code || "package",
+    packageName: packageDefinition?.name || "Your own box",
   };
-  state.selectedCarrierId = String(data.get("carrierId") || "all");
+  state.selectedCarrierId = selectedCarrierId;
   const carrierIds = state.selectedCarrierId === "all"
     ? state.capabilities.carriers.map((carrier) => carrier.id)
     : [state.selectedCarrierId];
@@ -9837,6 +9882,30 @@ function handleFulfillmentClick(event: Event): void {
 requiredElement<HTMLElement>("#fulfillment-queue-view").addEventListener("click", handleFulfillmentClick);
 requiredElement<HTMLElement>("#fulfillment-detail-view").addEventListener("click", handleFulfillmentClick);
 requiredElement<HTMLElement>("#fulfillment-detail-view").addEventListener("change", (event) => {
+  const shippingSelect = event.target instanceof HTMLSelectElement
+    ? event.target.closest<HTMLSelectElement>("#shipping-rate-form select")
+    : null;
+  if (shippingSelect) {
+    const order = selectedFulfillmentOrder();
+    const fulfillmentId = order?.session?.id;
+    const state = fulfillmentId ? fulfillmentShippingStates.get(fulfillmentId) : undefined;
+    if (!order || !state) return;
+    if (shippingSelect.name === "carrierId") {
+      state.selectedCarrierId = shippingSelect.value || "all";
+      state.package.packageCode = "package";
+      state.package.packageName = "Your own box";
+    } else if (shippingSelect.name === "packageCode") {
+      const carrier = state.capabilities?.carriers.find((item) => item.id === state.selectedCarrierId);
+      const carrierPackage = carrier?.packages.find((item) => item.code === shippingSelect.value);
+      state.package.packageCode = carrierPackage?.code || "package";
+      state.package.packageName = carrierPackage?.name || "Your own box";
+    }
+    delete state.rates;
+    state.selectedRateIndex = null;
+    state.error = null;
+    renderFulfillmentShipping(order);
+    return;
+  }
   const input = event.target instanceof HTMLInputElement
     ? event.target.closest<HTMLInputElement>("[data-evidence-file]")
     : null;

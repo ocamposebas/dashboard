@@ -32,7 +32,28 @@ function address(overrides: Partial<CommerceAddress> = {}): CommerceAddress {
 test("shipping validates standard package limits and complete order addresses", () => {
   assert.deepEqual(shippingPackageInput({
     weightOz: "16", lengthIn: 8, widthIn: 6, heightIn: 4,
-  }), { weightOz: 16, lengthIn: 8, widthIn: 6, heightIn: 4 });
+  }), {
+    weightOz: 16,
+    lengthIn: 8,
+    widthIn: 6,
+    heightIn: 4,
+    packageCode: "package",
+    packageName: "Your own box",
+  });
+  assert.deepEqual(shippingPackageInput({
+    weightOz: 16,
+    lengthIn: 8,
+    widthIn: 6,
+    heightIn: 4,
+    packageCode: "FEDEX_SMALL_BOX_ONERATE",
+  }), {
+    weightOz: 16,
+    lengthIn: 8,
+    widthIn: 6,
+    heightIn: 4,
+    packageCode: "fedex_small_box_onerate",
+    packageName: "fedex small box onerate",
+  });
   const destination = shippingDestination(address());
   assert.equal(destination.name, "Ana Lopez");
   assert.equal(destination.countryCode, "US");
@@ -45,6 +66,12 @@ test("shipping validates standard package limits and complete order addresses", 
 test("shipping blocks invalid package values and incomplete source addresses", () => {
   assert.throws(
     () => shippingPackageInput({ weightOz: 0, lengthIn: 8, widthIn: 6, heightIn: 4 }),
+    (error: unknown) => error instanceof FulfillmentShippingError && error.code === "invalid_input",
+  );
+  assert.throws(
+    () => shippingPackageInput({
+      weightOz: 16, lengthIn: 8, widthIn: 6, heightIn: 4, packageCode: "../../bad",
+    }),
     (error: unknown) => error instanceof FulfillmentShippingError && error.code === "invalid_input",
   );
   assert.throws(

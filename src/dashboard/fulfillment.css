@@ -348,15 +348,19 @@ html[data-theme="dark"] .fulfillment-status.is-packed { background: #2a2723; col
 .shipping-test-banner>span { width:19px;height:19px;display:grid;flex:0 0 19px;place-items:center;border:1px solid currentColor;border-radius:50%;font-size:8px;font-weight:850; }
 .shipping-test-banner p { margin:0;font-size:8px;line-height:1.55; }
 .shipping-test-banner strong { margin-right:4px; }
-.shipping-rate-form { display:grid;grid-template-columns:minmax(220px,1fr) minmax(430px,1.7fr) auto;align-items:end;gap:14px;padding:0 23px 22px; }
+.shipping-rate-form { display:grid;grid-template-columns:minmax(175px,.85fr) minmax(215px,1fr) minmax(340px,1.6fr) auto;align-items:end;gap:12px;padding:0 23px 22px; }
 .shipping-rate-form>label,.shipping-rate-form fieldset label { display:grid;gap:6px;color:var(--ink-soft);font-size:8px;font-weight:760; }
 .shipping-rate-form select { width:100%;height:42px;border:1px solid var(--line-strong);border-radius:9px;background:var(--surface);padding:0 11px;color:var(--ink);font:inherit; }
 .shipping-rate-form small { color:var(--muted);font-size:7px;font-weight:500; }
 .shipping-rate-form fieldset { min-width:0;display:grid;grid-template-columns:repeat(4,minmax(75px,1fr));gap:8px;margin:0;padding:0;border:0; }
+.shipping-rate-form fieldset.is-carrier-package { grid-template-columns:minmax(90px,.55fr) minmax(190px,1.45fr); }
 .shipping-rate-form legend { position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0); }
 .shipping-rate-form fieldset label>div { height:42px;display:grid;grid-template-columns:1fr auto;align-items:center;overflow:hidden;border:1px solid var(--line-strong);border-radius:9px;background:var(--surface); }
 .shipping-rate-form input { min-width:0;width:100%;height:40px;border:0;outline:0;background:transparent;padding:0 9px;color:var(--ink);font-size:10px; }
 .shipping-rate-form fieldset b { padding-right:9px;color:var(--muted);font-size:7px;text-transform:uppercase; }
+.shipping-carrier-package-note { min-height:42px;display:grid;align-content:center;gap:3px;padding:6px 10px;border:1px solid #bdd4c8;border-radius:9px;background:#f1f7f4; }
+.shipping-carrier-package-note strong { overflow:hidden;color:#356c56;font-size:8px;text-overflow:ellipsis;white-space:nowrap; }
+.shipping-carrier-package-note small { color:#507565;font-size:7px; }
 .shipping-rate-form>.button { min-width:118px;height:42px; }
 .shipping-destination { display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;margin:0 23px 17px;padding:11px 13px;border:1px solid var(--line);border-radius:9px;background:var(--surface-soft); }
 .shipping-destination span { color:var(--muted);font-size:7px;font-weight:850;letter-spacing:.08em; }
@@ -405,6 +409,7 @@ html[data-theme="dark"] .picking-feedback.is-accepted small,html[data-theme="dar
 html[data-theme="dark"] .picking-feedback.is-rejected small,html[data-theme="dark"] .picking-feedback.is-rejected strong { color:#eda9a2; }
 html[data-theme="dark"] .packed-record-hero { background:#1c2d25; }
 html[data-theme="dark"] .shipping-test-banner { background:#2d281f;color:#d4b97f; }html[data-theme="dark"] .shipping-test-banner.is-live,html[data-theme="dark"] .shipping-rate-card.is-selected,html[data-theme="dark"] .shipping-label-card { background:#1c2d25; }html[data-theme="dark"] .shipping-error { background:#32211f;color:#eda9a2; }html[data-theme="dark"] .shipping-state-card>span { background:#322b20;color:#e2c488; }html[data-theme="dark"] .shipping-label-state.is-failed .shipping-state-card>span { background:#382320;color:#eda9a2; }
+html[data-theme="dark"] .shipping-carrier-package-note { border-color:#315b49;background:#1c2d25; }html[data-theme="dark"] .shipping-carrier-package-note strong,html[data-theme="dark"] .shipping-carrier-package-note small { color:#a8d8bf; }
 html[data-theme="dark"] .shipping-test-banner.is-purchase-live,html[data-theme="dark"] .shipping-confirm-safety,html[data-theme="dark"] .shipping-sync-warning { background:#302719;color:#e4bf78; }html[data-theme="dark"] .shipping-confirm-safety.is-danger { background:#382320;color:#eda9a2; }html[data-theme="dark"] .shipping-sync-success { background:#1c2d25;color:#89c6a8; }
 html[data-theme="dark"] .packing-confirm-error { background:#32211f;color:#eda9a2; }
 
