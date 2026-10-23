@@ -4285,12 +4285,16 @@ async function generateShippingLabel(): Promise<void> {
     showToast(
       state.label.state === "label_ready"
         ? state.label.providerMode === "live" ? "Shipping label purchased" : "Test label generated"
-        : "Shipping request saved",
+        : state.label.state === "failed"
+          ? "No label was created"
+          : "Shipping request saved",
       state.label.state === "label_ready"
         ? state.label.providerMode === "live"
           ? "The 4×6 label is ready and the tracking sync was recorded."
           : "No postage was purchased and the live order was not changed."
-        : "The request is protected from duplicate submission.",
+        : state.label.state === "failed"
+          ? state.label.failureMessage || "Choose another service and try again."
+          : "The request is protected from duplicate submission.",
     );
   } catch (error) {
     state.error = error instanceof Error ? error.message : "The shipping label could not be generated.";
@@ -4426,10 +4430,16 @@ async function reconcileShippingLabel(): Promise<void> {
     state.label = payload.label as unknown as ShippingLabel;
     state.printUrl = typeof payload.printUrl === "string" ? payload.printUrl : null;
     showToast(
-      state.label.state === "label_ready" ? "Label recovered safely" : "No duplicate request sent",
+      state.label.state === "label_ready"
+        ? "Label recovered safely"
+        : state.label.state === "failed"
+          ? "No label was created"
+          : "No duplicate request sent",
       state.label.state === "label_ready"
         ? "The existing label was found and is ready to print."
-        : "The original request remains protected while its outcome is uncertain.",
+        : state.label.state === "failed"
+          ? state.label.failureMessage || "Choose another service and try again."
+          : "The original request remains protected while its outcome is uncertain.",
     );
   } catch (error) {
     state.error = error instanceof Error ? error.message : "The label request could not be checked.";

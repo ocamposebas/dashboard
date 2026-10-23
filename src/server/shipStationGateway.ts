@@ -9,6 +9,8 @@ import type {
 
 const SHIPSTATION_BASE_URL = "https://api.shipstation.com/v2";
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const READ_REQUEST_TIMEOUT_MS = 10_000;
+const LABEL_PURCHASE_TIMEOUT_MS = 25_000;
 
 export interface ShipStationConfig {
   apiKey?: string;
@@ -416,7 +418,9 @@ export class ShipStationGateway {
           ...(init.body ? { "Content-Type": "application/json" } : {}),
           ...init.headers,
         },
-        signal: init.signal || AbortSignal.timeout(10_000),
+        signal: init.signal || AbortSignal.timeout(
+          outcomeSensitive ? LABEL_PURCHASE_TIMEOUT_MS : READ_REQUEST_TIMEOUT_MS,
+        ),
       });
     } catch {
       throw new ShipStationGatewayError(
