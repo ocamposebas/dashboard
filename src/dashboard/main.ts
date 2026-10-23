@@ -6,6 +6,7 @@ import "./clean-ui.css";
 import { initAffiliateAdmin, loadAffiliateAdmin } from "./affiliates-admin";
 import type { AffiliateCommissionSummary } from "../shared/affiliates";
 import { calculateProductProfitability } from "../shared/productProfitability";
+import { monthToDateStart, summarizeMonthToDate } from "../shared/monthlyFinance";
 import { suggestedCoaVariationId } from "../shared/coaCatalogMapping";
 import { productSkuBase, productVariantSku } from "../shared/productSku";
 import {
@@ -773,7 +774,7 @@ const footerConnection = requiredElement<HTMLElement>("#footer-connection");
 const announcement = requiredElement<HTMLElement>("#announcement");
 const uniqueVisitorsElement = requiredElement<HTMLElement>("#unique-visitors");
 const monitorPageRankingElement = requiredElement<HTMLElement>("#monitor-page-ranking");
-const totalOrdersElement = requiredElement<HTMLElement>("#total-orders");
+const financeOrdersElement = requiredElement<HTMLElement>("#finance-orders");
 const monitorSourceListElement = requiredElement<HTMLElement>("#monitor-source-list");
 const monitorDeviceListElement = requiredElement<HTMLElement>("#monitor-device-list");
 const monitorDeviceDonutElement = requiredElement<HTMLElement>("#monitor-device-donut");
@@ -925,6 +926,9 @@ type SalesInsightRange = "today" | "week" | "month";
 let salesInsightRange: SalesInsightRange = "today";
 let salesInsightLoading = false;
 let salesInsightComplete: { range: SalesInsightRange; orders: CommerceOrder[] } | undefined;
+let monthlyFinanceOrders: CommerceOrder[] | undefined;
+let monthlyFinanceLoading = false;
+let monthlyFinanceUpdatedAt = 0;
 let skuStockSearch = "";
 const skuStockExpanded = new Set<number>();
 const skuStockDetails = new Map<number, LabelProductDetail>();
@@ -1444,8 +1448,7 @@ function renderAnalytics(snapshot: DashboardSnapshot): void {
   monitorUniqueVisitorsElement.textContent = uniqueVisitorsElement.textContent;
   monitorReturningVisitsElement.textContent = formatNumber(filteredReturningSessions);
   monitorTotalSessionsElement.textContent = formatNumber(filteredSessions);
-  totalOrdersElement.textContent = formatNumber(filteredOrders);
-  monitorTotalOrdersElement.textContent = totalOrdersElement.textContent;
+  monitorTotalOrdersElement.textContent = formatNumber(filteredOrders);
   visitors30Element.textContent = formatNumber(analytics.visitorsLast30Minutes);
   monitorVisitors30Element.textContent = visitors30Element.textContent;
   const conversion = filteredSessions > 0
@@ -2085,6 +2088,97 @@ function renderSalesPerformance(): void {
   container.innerHTML = products.length
     ? products.slice(0, 6).map((product, index) => `<article class="overview-product-rank"><span class="overview-product-position">${String(index + 1).padStart(2, "0")}</span><span class="overview-product-image">${product.imageUrl ? `<img src="${escapeHtml(product.imageUrl)}" alt="" loading="lazy" decoding="async" />` : escapeHtml((product.name[0] || "P").toUpperCase())}</span><div><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.sku || (product.variationId ? `Variation ${product.variationId}` : `Product ${product.productId}`))} · ${formatNumber(product.orders.size)} order${product.orders.size === 1 ? "" : "s"}</small></div><span class="overview-product-units"><strong>${formatNumber(product.units)}</strong><small>units</small></span><span class="overview-product-revenue"><strong>${escapeHtml(formatCurrency(product.revenue, currency))}</strong><small>sales</small></span></article>`).join("")
     : `<div class="overview-sales-empty"><span>◇</span><div><strong>No paid product sales for ${escapeHtml(salesRangeLabel(salesInsightRange).toLocaleLowerCase("en"))}</strong><p>Completed and processing orders will be ranked here automatically.</p></div></div>`;
+}
+
+function monthToDateLabel(now = new Date()): string {
+  const month = new Intl.DateTimeFormat("en-US", { month: "short" }).format(now);
+  return `${month} 1–${now.getDate()}`;
+}
+
+function monthToDateOrderSource(): CommerceOrder[] {
+  return monthlyFinanceOrders || commerceData?.orders || [];
+}
+
+function renderOverviewFinancials(): void {
+  const summary = summarizeMonthToDate(monthToDateOrderSource());
+  const profitReady = summary.profit !== null;
+  const completeCoverage = summary.orders > 0 && summary.coverage >= 99.999;
+  requiredElement<HTMLElement>("#finance-period-label").textContent = monthToDateLabel();
+  requiredElement<HTMLElement>("#finance-revenue").textContent = formatCurrency(summary.revenue, summary.currency);
+  requiredElement<HTMLElement>("#finance-profit").textContent = profitReady
+    ? formatCurrency(summary.profit || 0, summary.currency)
+    : "—";
+  requiredElement<HTMLElement>("#finance-profit-secondary").textContent = profitReady
+    ? formatCurrency(summary.profit || 0, summary.currency)
+    : "—";
+  financeOrdersElement.textContent = formatNumber(summary.orders);
+  requiredElement<HTMLElement>("#finance-margin").textContent = summary.margin === null ? "—" : `${summary.margin.toFixed(1)}%`;
+  requiredElement<HTMLElement>("#finance-revenue-change").textContent = summary.refunds > 0
+    ? `${formatNumber(summary.orders)} paid · ${formatCurrency(summary.refunds, summary.currency)} refunded`
+    : `${formatNumber(summary.orders)} paid order${summary.orders === 1 ? "" : "s"} · no refunds`;
+  requiredElement<HTMLElement>("#finance-profit-change").textContent = completeCoverage
+    ? "Net after product, operations, fees and affiliate costs"
+    : profitReady
+      ? "Partial estimate · some product costs are missing"
+      : "Add product costs to calculate profit";
+  requiredElement<HTMLElement>("#profit-coverage").textContent = `${summary.coverage.toFixed(0)}% of paid orders calculated`;
+  requiredElement<HTMLElement>("#legend-revenue").textContent = formatCurrency(summary.revenue, summary.currency);
+  requiredElement<HTMLElement>("#legend-costs").textContent = summary.costs === null ? "—" : formatCurrency(summary.costs, summary.currency);
+  requiredElement<HTMLElement>("#legend-profit").textContent = profitReady ? formatCurrency(summary.profit || 0, summary.currency) : "—";
+  requiredElement<HTMLElement>("#margin-ring").style.setProperty(
+    "--margin",
+    `${Math.max(0, Math.min(360, (summary.margin || 0) * 3.6))}deg`,
+  );
+
+  const methods = requiredElement<HTMLElement>("#overview-payment-methods");
+  methods.innerHTML = summary.paymentMethods.length
+    ? summary.paymentMethods.map((method) => `<span class="payment-method-chip payment-method-chip--${method.kind}"><i aria-hidden="true"></i><span><b>${escapeHtml(method.label)}</b><small>${formatNumber(method.orders)} order${method.orders === 1 ? "" : "s"}</small></span><strong>${escapeHtml(formatCurrency(method.revenue, summary.currency))}</strong></span>`).join("")
+    : '<span class="payment-method-loading">No paid orders have been recorded this month.</span>';
+  const dataStatus = requiredElement<HTMLElement>("#finance-data-status");
+  dataStatus.textContent = monthlyFinanceLoading
+    ? "Refreshing the complete month…"
+    : monthlyFinanceOrders
+      ? `Complete month · updated ${new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(monthlyFinanceUpdatedAt))}`
+      : "Fast preview · loading complete month";
+}
+
+async function loadMonthToDateFinancials(force = false): Promise<void> {
+  if (monthlyFinanceLoading) return;
+  if (!force && monthlyFinanceOrders && Date.now() - monthlyFinanceUpdatedAt < 5 * 60_000) return;
+  monthlyFinanceLoading = true;
+  renderOverviewFinancials();
+  try {
+    const after = new Date(monthToDateStart().getTime() - 1_000).toISOString();
+    const before = new Date(Date.now() + 60_000).toISOString();
+    const response = await fetch(`/api/commerce/sales-report?after=${encodeURIComponent(after)}&before=${encodeURIComponent(before)}&fresh=1`, {
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    const payload: unknown = await response.json();
+    if (!response.ok || !isRecord(payload) || !Array.isArray(payload.orders)) {
+      throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The monthly totals are unavailable");
+    }
+    monthlyFinanceOrders = payload.orders as CommerceOrder[];
+    monthlyFinanceUpdatedAt = Date.now();
+  } catch (error) {
+    console.error("Month-to-date finance refresh failed", error);
+  } finally {
+    monthlyFinanceLoading = false;
+    renderOverviewFinancials();
+  }
+}
+
+function reconcileMonthToDateOrders(recentOrders: CommerceOrder[]): void {
+  if (!monthlyFinanceOrders) return;
+  const start = monthToDateStart().getTime();
+  const merged = new Map(monthlyFinanceOrders.map((order) => [order.id, order]));
+  for (const order of recentOrders) {
+    const timestamp = Date.parse(order.paidAt || order.createdAt || "");
+    if (Number.isFinite(timestamp) && timestamp >= start) merged.set(order.id, order);
+  }
+  monthlyFinanceOrders = [...merged.values()];
+  monthlyFinanceUpdatedAt = Date.now();
 }
 
 function visibleOrders(): CommerceOrder[] {
@@ -3288,34 +3382,7 @@ function renderCommerce(): void {
   }
 
   const orders = commerceData.orders;
-  const paid = orders.filter(paidOrder);
-  const currency = orders[0]?.currency || "USD";
-  const revenue = paid.reduce((sum, order) => sum + order.total, 0);
-  const covered = paid.filter((order) => order.profitability.completeCostCoverage);
-  const profit = covered.reduce(
-    (sum, order) => sum + (order.profitability.estimatedProfit ?? 0),
-    0,
-  );
-  const costTotal = covered.reduce(
-    (sum, order) => sum + order.profitability.costOfGoods + order.profitability.operatingCost + order.profitability.feeCost + (order.profitability.affiliateCost || 0),
-    0,
-  );
-  const margin = revenue > 0 && covered.length === paid.length
-    ? (profit / revenue) * 100
-    : null;
-  const orderCoverage = paid.length ? (covered.length / paid.length) * 100 : 0;
-  requiredElement<HTMLElement>("#finance-revenue").textContent = formatCurrency(revenue, currency);
-  requiredElement<HTMLElement>("#finance-profit").textContent = covered.length ? formatCurrency(profit, currency) : "—";
-  requiredElement<HTMLElement>("#finance-profit-secondary").textContent = covered.length ? formatCurrency(profit, currency) : "—";
-  requiredElement<HTMLElement>("#finance-margin").textContent = margin === null ? "—" : `${margin.toFixed(1)}%`;
-  requiredElement<HTMLElement>("#profit-coverage").textContent = `${orderCoverage.toFixed(0)}% of orders calculated`;
-  requiredElement<HTMLElement>("#legend-revenue").textContent = formatCurrency(revenue, currency);
-  requiredElement<HTMLElement>("#legend-costs").textContent = covered.length ? formatCurrency(costTotal, currency) : "—";
-  requiredElement<HTMLElement>("#legend-profit").textContent = covered.length ? formatCurrency(profit, currency) : "—";
-  requiredElement<HTMLElement>("#margin-ring").style.setProperty(
-    "--margin",
-    `${Math.max(0, Math.min(360, (margin || 0) * 3.6))}deg`,
-  );
+  renderOverviewFinancials();
   requiredElement<HTMLElement>("#orders-nav-count").textContent = formatNumber(
     orders.filter((order) => order.status === "processing").length,
   );
@@ -5907,6 +5974,7 @@ async function loadLiveOrders(initial = false): Promise<void> {
     commerceData.affiliateCommissions = Array.isArray(payload.affiliateCommissions)
       ? payload.affiliateCommissions as unknown as AffiliateCommissionSummary[]
       : [];
+    reconcileMonthToDateOrders(orders);
     knownOrderIds = new Set(orders.map((order) => order.id));
     orderFeedInitialized = true;
     consecutiveOrderFeedFailures = 0;
@@ -10074,15 +10142,21 @@ void loadExtensions();
 void loadIndependentSiteControls();
 void (async () => {
   await loadCommerce();
-  await loadLiveOrders(true);
+  await Promise.all([loadLiveOrders(true), loadMonthToDateFinancials(true)]);
 })();
 window.setInterval(() => {
   if (!document.hidden) void loadLiveOrders();
 }, 15_000);
+window.setInterval(() => {
+  if (!document.hidden) void loadMonthToDateFinancials(true);
+}, 5 * 60_000);
 window.setInterval(updatePromoCountdown, 60_000);
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) closeFulfillmentCamera(false);
-  if (!document.hidden) void loadLiveOrders();
+  if (!document.hidden) {
+    void loadLiveOrders();
+    if (Date.now() - monthlyFinanceUpdatedAt >= 60_000) void loadMonthToDateFinancials(true);
+  }
 });
 document.addEventListener("error", (event) => {
   const image = event.target;

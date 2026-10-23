@@ -3629,7 +3629,8 @@ export function createMonitorServer(
         }
         const cacheKey = `${after.toISOString()}:${before.toISOString()}`;
         const cached = salesReportCache.get(cacheKey);
-        if (cached && Date.now() - cached.updatedAt < 5 * 60_000) {
+        const forceRefresh = url.searchParams.get("fresh") === "1";
+        if (!forceRefresh && cached && Date.now() - cached.updatedAt < 5 * 60_000) {
           json(response, 200, {
             orders: cached.orders,
             generatedAt: new Date(cached.updatedAt).toISOString(),
