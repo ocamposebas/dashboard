@@ -241,6 +241,23 @@ test("packing preserves a completed non-COA product barcode verification without
   assert.equal(snapshot.lines[0]?.verifiedQuantity, 2);
 });
 
+test("an internal item code explicitly bypasses a mistakenly inferred COA requirement", () => {
+  const snapshot = pack({
+    session: session({
+      progress: {
+        verifiedUnits: 2,
+        totalUnits: 2,
+        lines: [{ orderItemId: 701, requiredQuantity: 2, verifiedQuantity: 2 }],
+        productBarcodeOrderItemIds: [701],
+        allocations: [],
+      },
+    }),
+  });
+  assert.equal(snapshot.lines[0]?.coaId, "");
+  assert.equal(snapshot.lines[0]?.lot, "");
+  assert.deepEqual(snapshot.lines[0]?.allocations, []);
+});
+
 test("packing is blocked until every required unit is verified", () => {
   const incomplete = session({
     progress: {

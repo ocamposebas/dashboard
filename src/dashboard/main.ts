@@ -4006,7 +4006,7 @@ function pickingFeedbackMarkup(): string {
     return '<div class="picking-feedback is-reading" role="status"><span class="picking-feedback-icon">···</span><div><strong>Checking scanned code</strong><p>Verifying the exact product, variation, COA requirements and live order.</p></div></div>';
   }
   if (!fulfillmentScanFeedback) {
-    return '<div class="picking-feedback is-idle" role="status"><span class="picking-feedback-icon">⌁</span><div><strong>Ready for the first item</strong><p>Scan its vial QR or its registered product barcode. The server will enforce the correct method automatically.</p></div></div>';
+    return '<div class="picking-feedback is-idle" role="status"><span class="picking-feedback-icon">⌁</span><div><strong>Ready for the first item</strong><p>Scan the lab QR when the vial has one, or use the registered Phase One item code printed for products without a QR.</p></div></div>';
   }
   const feedback = fulfillmentScanFeedback;
   const mismatch = !feedback.accepted && ["wrong_product", "wrong_variation"].includes(feedback.reasonCode);
@@ -4066,7 +4066,7 @@ function renderPickingStation(order: FulfillmentQueueEntry): string {
     ${complete ? '<div class="picking-ready-banner"><span>✓</span><div><strong>Picking complete</strong><p>The exact vial lots are saved and will be assigned to the customer order when packing is confirmed.</p></div></div>' : pickingFeedbackMarkup()}
     <div class="picking-product-list">${cards}</div>
     ${controls}
-    ${complete ? "" : '<p class="picking-limitation"><span>i</span> Vials with an Available COA always require their lab QR. Registered product barcodes work only for items that do not use COA lots.</p>'}
+    ${complete ? "" : '<p class="picking-limitation"><span>i</span> Lab QR scans capture the exact lot. Products using a printed Phase One label can be verified directly with that registered item code.</p>'}
   </section>`;
 }
 
@@ -4907,7 +4907,7 @@ function renderFulfillmentDetail(order: FulfillmentQueueEntry): void {
   }
   const reasons = order.reasons.length
     ? `<section class="fulfillment-issues" role="alert"><header><span>!</span><div><p class="section-kicker">Action required</p><strong>${order.reasons.length} ${order.reasons.length === 1 ? "item is" : "items are"} blocking this order</strong><p>Nothing can be scanned until every requirement below is resolved.</p></div></header><ul>${order.reasons.map((reason) => fulfillmentIssueMarkup(reason)).join("")}</ul></section>`
-    : `<section class="fulfillment-ready-check"><span>✓</span><div><p class="section-kicker">Ready to pick</p><strong>Every required safety check passed</strong><p>Scan each item's registered code. Products with an Available COA require the vial QR; approved non-COA items can use their product barcode.</p></div></section>`;
+    : `<section class="fulfillment-ready-check"><span>✓</span><div><p class="section-kicker">Ready to pick</p><strong>Every required safety check passed</strong><p>Use the lab QR when present. Products with a printed Phase One label can be verified with their registered item code.</p></div></section>`;
   const lines = order.lines.map((line) => {
     const batch = line.coa?.lot || line.coa?.batch || "Not assigned";
     return `<article class="fulfillment-line">

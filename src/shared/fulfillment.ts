@@ -161,7 +161,8 @@ export type FulfillmentScanReasonCode =
   | "quantity_complete"
   | "order_ineligible"
   | "order_changed"
-  | "line_changed";
+  | "line_changed"
+  | "verification_method_changed";
 
 export interface FulfillmentScanFeedback {
   accepted: boolean;

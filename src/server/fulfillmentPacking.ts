@@ -116,6 +116,15 @@ function progressAllocations(session: FulfillmentSession): ProgressAllocation[] 
   });
 }
 
+function productBarcodeOrderItemIds(session: FulfillmentSession): Set<number> {
+  const progress = record(session.progress);
+  if (!progress || !Array.isArray(progress.productBarcodeOrderItemIds)) return new Set();
+  return new Set(progress.productBarcodeOrderItemIds.flatMap((value) => {
+    const orderItemId = positiveInteger(value);
+    return orderItemId ? [orderItemId] : [];
+  }));
+}
+
 function coaIsApproved(
   coa: CommerceCoa,
   line: SecuredLine,
@@ -157,6 +166,7 @@ export function buildPackingSnapshot(input: {
   const secured = securedLines(input.session);
   const progress = progressLines(input.session);
   const recordedAllocations = progressAllocations(input.session);
+  const productBarcodeLines = productBarcodeOrderItemIds(input.session);
   if (!secured.length || secured.length !== input.order.lineItems.length || progress.length !== secured.length) {
     throw new FulfillmentPackingError("The secured picking record is incomplete", "invalid_state");
   }
@@ -182,8 +192,11 @@ export function buildPackingSnapshot(input: {
         "invalid_state",
       );
     }
+    const verifiedWithProductBarcode = productBarcodeLines.has(line.orderItemId);
     const lineAllocations = recordedAllocations.filter((item) => item.orderItemId === line.orderItemId);
-    const allocations = lineAllocations.length
+    const allocations = verifiedWithProductBarcode
+      ? []
+      : lineAllocations.length
       ? lineAllocations
       : line.coaId && line.lot
         ? [{
@@ -193,7 +206,8 @@ export function buildPackingSnapshot(input: {
           quantity: counted.verifiedQuantity,
         }]
         : [];
-    const requiresVialQr = input.coas.some((coa) => coaRequiresVialQrForLine(coa, line));
+    const requiresVialQr = !verifiedWithProductBarcode && input.coas.some((coa) =>
+      coaRequiresVialQrForLine(coa, line));
     if (!allocations.length && requiresVialQr) {
       throw new FulfillmentPackingError(
         `Scan the vial QR for every unit of ${live.name} before packing`,

@@ -10,7 +10,6 @@ import { evaluateFulfillmentEligibility } from "./fulfillmentEligibility.js";
 import {
   coaMatchesCatalogLine,
   coaIsAvailableForVialScan,
-  coaRequiresVialQrForLine,
 } from "./coaScanResolver.js";
 import type { CommerceCoa, CommerceOrder } from "./wooCommerceGateway.js";
 
@@ -35,6 +34,7 @@ interface PickingProgress {
   verifiedUnits: number;
   totalUnits: number;
   lines: ProgressLine[];
+  productBarcodeOrderItemIds: number[];
   allocations: Array<{
     orderItemId: number;
     coaId: string;
@@ -109,6 +109,12 @@ function progressFor(session: FulfillmentSession, lines: SnapshotLine[]): Pickin
       verifiedQuantity: verified,
     };
   });
+  const productBarcodeOrderItemIds = stored && Array.isArray(stored.productBarcodeOrderItemIds)
+    ? [...new Set(stored.productBarcodeOrderItemIds.flatMap((value) => {
+      const orderItemId = positiveInteger(value);
+      return orderItemId && lines.some((line) => line.orderItemId === orderItemId) ? [orderItemId] : [];
+    }))]
+    : [];
   const storedAllocations = stored && Array.isArray(stored.allocations) ? stored.allocations : [];
   const allocations = lines.flatMap((line) => {
     const verified = progressLines.find((item) => item.orderItemId === line.orderItemId)?.verifiedQuantity || 0;
@@ -123,7 +129,10 @@ function progressFor(session: FulfillmentSession, lines: SnapshotLine[]): Pickin
       remaining -= quantity;
       return [{ orderItemId: line.orderItemId, coaId, lot, quantity }];
     });
-    if (remaining > 0 && line.coaId && line.lot) {
+    if (
+      remaining > 0 && line.coaId && line.lot &&
+      !productBarcodeOrderItemIds.includes(line.orderItemId)
+    ) {
       parsed.push({
         orderItemId: line.orderItemId,
         coaId: line.coaId,
@@ -137,6 +146,7 @@ function progressFor(session: FulfillmentSession, lines: SnapshotLine[]): Pickin
     verifiedUnits: progressLines.reduce((sum, line) => sum + line.verifiedQuantity, 0),
     totalUnits: lines.reduce((sum, line) => sum + line.quantity, 0),
     lines: progressLines,
+    productBarcodeOrderItemIds,
     allocations,
   };
 }
@@ -349,11 +359,11 @@ export function decideFulfillmentScan(input: {
 
   if (input.barcode.type !== "batch") {
     const productName = input.order.lineItems.find((item) => item.id === line.orderItemId)?.name || "Product";
-    if (input.coas.some((coa) => coaRequiresVialQrForLine(coa, line))) {
+    if (progress.allocations.some((allocation) => allocation.orderItemId === line.orderItemId)) {
       return rejected(
         progress,
-        "batch_required",
-        "This product has an Available COA. Scan the QR printed on the vial so the physical lot is captured.",
+        "verification_method_changed",
+        "This item was already started with vial QR verification. Continue scanning the QR printed on each vial.",
         { barcode: input.barcode, line, productName },
       );
     }
@@ -364,13 +374,17 @@ export function decideFulfillmentScan(input: {
       verifiedUnits: progress.verifiedUnits + 1,
       totalUnits: progress.totalUnits,
       lines: nextLines,
+      productBarcodeOrderItemIds: [...new Set([
+        ...progress.productBarcodeOrderItemIds,
+        line.orderItemId,
+      ])],
       allocations: progress.allocations,
     };
     const current = nextLines.find((item) => item.orderItemId === line.orderItemId)!;
     const response = feedback(nextProgress, {
       accepted: true,
       reasonCode: "accepted",
-      message: `${productName} verified with its registered product barcode. This item does not require a COA lot.`,
+      message: `${productName} verified with its registered Phase One item code. No vial QR is required for this item.`,
       line,
       productName,
       verifiedQuantity: current.verifiedQuantity,
@@ -387,6 +401,19 @@ export function decideFulfillmentScan(input: {
       variationId: input.barcode.variationId,
       orderItemId: line.orderItemId,
     };
+  }
+
+  if (progress.productBarcodeOrderItemIds.includes(line.orderItemId)) {
+    return rejected(
+      progress,
+      "verification_method_changed",
+      "This item was already started with a registered Phase One item code. Continue with that same printed code.",
+      {
+        barcode: input.barcode,
+        line,
+        productName: input.order.lineItems.find((item) => item.id === line.orderItemId)?.name,
+      },
+    );
   }
 
   const coa = input.coas.find((candidate) => candidate.id === input.barcode?.coaId);
@@ -425,6 +452,7 @@ export function decideFulfillmentScan(input: {
     verifiedUnits: progress.verifiedUnits + 1,
     totalUnits: progress.totalUnits,
     lines: nextLines,
+    productBarcodeOrderItemIds: progress.productBarcodeOrderItemIds,
     allocations: nextAllocations,
   };
   const current = nextLines.find((item) => item.orderItemId === line.orderItemId)!;

@@ -310,15 +310,49 @@ test("unknown and inactive barcodes fail closed", () => {
   assert.equal(inactive.reasonCode, "inactive_barcode");
 });
 
-test("product-only and variation-only labels cannot stand in for a physical batch", () => {
-  for (const scanned of [
-    barcode({ type: "product", variationId: 0, coaId: undefined, lot: undefined }),
-    barcode({ type: "variation", coaId: undefined, lot: undefined }),
-  ]) {
-    const decision = decideFulfillmentScan({ session: session(), barcode: scanned, order: order(), coas: [coa()] });
-    assert.equal(decision.reasonCode, scanned.type === "product" ? "wrong_variation" : "batch_required");
-    assert.equal(decision.quantityDelta, 0);
-  }
+test("a registered internal variation label verifies a product that has no physical lab QR", () => {
+  const baseProduct = decideFulfillmentScan({
+    session: session(),
+    barcode: barcode({ type: "product", variationId: 0, coaId: undefined, lot: undefined }),
+    order: order(),
+    coas: [coa()],
+  });
+  assert.equal(baseProduct.reasonCode, "wrong_variation");
+  assert.equal(baseProduct.quantityDelta, 0);
+
+  const internalLabel = decideFulfillmentScan({
+    session: session(),
+    barcode: barcode({ type: "variation", coaId: undefined, lot: undefined }),
+    order: order(),
+    coas: [coa()],
+  });
+  assert.equal(internalLabel.result, "accepted");
+  assert.equal(internalLabel.quantityDelta, 1);
+  assert.match(feedbackOf(internalLabel).message, /registered Phase One item code/i);
+  const progress = internalLabel.nextProgress as unknown as {
+    productBarcodeOrderItemIds: number[];
+    allocations: unknown[];
+  };
+  assert.deepEqual(progress.productBarcodeOrderItemIds, [601]);
+  assert.deepEqual(progress.allocations, []);
+});
+
+test("one order line cannot mix internal item codes and physical vial QR lots", () => {
+  const first = decideFulfillmentScan({
+    session: session(),
+    barcode: barcode({ type: "variation", coaId: undefined, lot: undefined }),
+    order: order(),
+    coas: [coa()],
+  });
+  const second = decideFulfillmentScan({
+    session: session(1, { progress: first.nextProgress! }),
+    barcode: barcode(),
+    order: order(),
+    coas: [coa()],
+  });
+  assert.equal(second.result, "rejected");
+  assert.equal(second.reasonCode, "verification_method_changed");
+  assert.equal(second.quantityDelta, 0);
 });
 
 test("registered product barcodes verify non-COA products without inventing a lot", () => {
@@ -364,7 +398,7 @@ test("registered product barcodes verify non-COA products without inventing a lo
   assert.equal(decision.quantityDelta, 1);
   assert.equal(decision.coaId, undefined);
   assert.equal(feedbackOf(decision).lot, null);
-  assert.match(feedbackOf(decision).message, /product barcode/i);
+  assert.match(feedbackOf(decision).message, /Phase One item code/i);
   const progress = decision.nextProgress as unknown as { allocations: unknown[] };
   assert.deepEqual(progress.allocations, []);
 });
