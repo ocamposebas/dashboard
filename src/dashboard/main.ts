@@ -6,7 +6,7 @@ import "./clean-ui.css";
 import { initAffiliateAdmin, loadAffiliateAdmin } from "./affiliates-admin";
 import type { AffiliateCommissionSummary } from "../shared/affiliates";
 import { calculateProductProfitability } from "../shared/productProfitability";
-import { monthToDateStart, summarizeMonthToDate } from "../shared/monthlyFinance";
+import { monthToDateStart, summarizeCompleteMonthToDate } from "../shared/monthlyFinance";
 import { suggestedCoaVariationId } from "../shared/coaCatalogMapping";
 import { productSkuBase, productVariantSku } from "../shared/productSku";
 import {
@@ -929,6 +929,7 @@ let salesInsightComplete: { range: SalesInsightRange; orders: CommerceOrder[] } 
 let monthlyFinanceOrders: CommerceOrder[] | undefined;
 let monthlyFinanceLoading = false;
 let monthlyFinanceUpdatedAt = 0;
+let monthlyFinanceError = "";
 let skuStockSearch = "";
 const skuStockExpanded = new Set<number>();
 const skuStockDetails = new Map<number, LabelProductDetail>();
@@ -2095,12 +2096,26 @@ function monthToDateLabel(now = new Date()): string {
   return `${month} 1–${now.getDate()}`;
 }
 
-function monthToDateOrderSource(): CommerceOrder[] {
-  return monthlyFinanceOrders || commerceData?.orders || [];
-}
-
 function renderOverviewFinancials(): void {
-  const summary = summarizeMonthToDate(monthToDateOrderSource());
+  const summary = summarizeCompleteMonthToDate(monthlyFinanceOrders);
+  if (!summary) {
+    requiredElement<HTMLElement>("#finance-period-label").textContent = monthToDateLabel();
+    requiredElement<HTMLElement>("#finance-revenue").textContent = "—";
+    requiredElement<HTMLElement>("#finance-profit").textContent = "—";
+    requiredElement<HTMLElement>("#finance-profit-secondary").textContent = "—";
+    financeOrdersElement.textContent = "—";
+    requiredElement<HTMLElement>("#finance-margin").textContent = "—";
+    requiredElement<HTMLElement>("#finance-revenue-change").textContent = monthlyFinanceError || "Loading the complete month…";
+    requiredElement<HTMLElement>("#finance-profit-change").textContent = "Waiting for authoritative order totals";
+    requiredElement<HTMLElement>("#profit-coverage").textContent = "Calculating cost coverage";
+    requiredElement<HTMLElement>("#legend-revenue").textContent = "—";
+    requiredElement<HTMLElement>("#legend-costs").textContent = "—";
+    requiredElement<HTMLElement>("#legend-profit").textContent = "—";
+    requiredElement<HTMLElement>("#margin-ring").style.setProperty("--margin", "0deg");
+    requiredElement<HTMLElement>("#overview-payment-methods").innerHTML = '<span class="payment-method-loading">Calculating Zelle, card and eDebit…</span>';
+    requiredElement<HTMLElement>("#finance-data-status").textContent = monthlyFinanceError || "Loading the complete month…";
+    return;
+  }
   const profitReady = summary.profit !== null;
   const completeCoverage = summary.orders > 0 && summary.coverage >= 99.999;
   requiredElement<HTMLElement>("#finance-period-label").textContent = monthToDateLabel();
@@ -2146,6 +2161,7 @@ async function loadMonthToDateFinancials(force = false): Promise<void> {
   if (monthlyFinanceLoading) return;
   if (!force && monthlyFinanceOrders && Date.now() - monthlyFinanceUpdatedAt < 5 * 60_000) return;
   monthlyFinanceLoading = true;
+  monthlyFinanceError = "";
   renderOverviewFinancials();
   try {
     const after = new Date(monthToDateStart().getTime() - 1_000).toISOString();
@@ -2163,6 +2179,7 @@ async function loadMonthToDateFinancials(force = false): Promise<void> {
     monthlyFinanceUpdatedAt = Date.now();
   } catch (error) {
     console.error("Month-to-date finance refresh failed", error);
+    monthlyFinanceError = "Complete monthly totals are temporarily unavailable";
   } finally {
     monthlyFinanceLoading = false;
     renderOverviewFinancials();

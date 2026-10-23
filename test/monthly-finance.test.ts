@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { paymentMethodKind, summarizeMonthToDate, type MonthlyFinanceOrder } from "../src/shared/monthlyFinance";
+import { paymentMethodKind, summarizeCompleteMonthToDate, summarizeMonthToDate, type MonthlyFinanceOrder } from "../src/shared/monthlyFinance";
 
 function order(input: Partial<MonthlyFinanceOrder> = {}): MonthlyFinanceOrder {
   return {
@@ -58,4 +58,16 @@ test("payment methods receive stable visual groups", () => {
   assert.equal(paymentMethodKind(order({ paymentMethod: "eDebit", paymentMethodId: "custom_edebit" })), "debit");
   assert.equal(paymentMethodKind(order({ paymentMethod: "Credit card", paymentMethodId: "stripe" })), "card");
   assert.equal(paymentMethodKind(order({ paymentMethod: "ACH", paymentMethodId: "bank" })), "bank");
+});
+
+test("overview finance waits for the complete monthly report instead of flashing recent-order totals", () => {
+  assert.equal(summarizeCompleteMonthToDate(undefined, new Date("2026-10-22T20:00:00.000Z")), null);
+
+  const complete = summarizeCompleteMonthToDate([
+    order({ total: 120 }),
+    order({ total: 80 }),
+  ], new Date("2026-10-22T20:00:00.000Z"));
+
+  assert.equal(complete?.revenue, 200);
+  assert.equal(complete?.orders, 2);
 });

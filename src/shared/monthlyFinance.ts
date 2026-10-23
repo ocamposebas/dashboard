@@ -124,3 +124,13 @@ export function summarizeMonthToDate(
     }),
   };
 }
+
+export function summarizeCompleteMonthToDate(
+  orders: MonthlyFinanceOrder[] | undefined,
+  now = new Date(),
+): MonthlyFinanceSummary | null {
+  // `undefined` means the complete bounded report has not arrived yet. Do not
+  // substitute the shorter recent-order feed because that produces a plausible
+  // but incorrect KPI flash before the authoritative total replaces it.
+  return orders === undefined ? null : summarizeMonthToDate(orders, now);
+}
