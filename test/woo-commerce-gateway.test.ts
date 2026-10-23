@@ -190,6 +190,60 @@ test("saves the selected catalog category with the generated product SKU", async
   assert.equal(requestBody?.sku, "KPV-30-MG");
 });
 
+test("derives variable parent availability from its saved child stock", async () => {
+  const requests: Array<{ path: string; method: string; body: Record<string, unknown> }> = [];
+  const productResponse = (stockStatus: string) => ({
+    id: 534,
+    name: "PL-RT",
+    sku: "PL-RT",
+    type: "variable",
+    status: "publish",
+    catalog_visibility: "visible",
+    price: "35.00",
+    regular_price: "35.00",
+    stock_quantity: null,
+    stock_status: stockStatus,
+    categories: [{ id: 16, name: "Research Peptides" }],
+    images: [],
+    variations: [648, 649],
+    attributes: [{ name: "MG", options: ["20MG", "30MG"] }],
+  });
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    const body = JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
+    requests.push({ path: url.pathname, method: init?.method || "GET", body });
+    if (url.pathname.includes("/variations/")) {
+      return new Response(JSON.stringify({ id: Number(url.pathname.split("/").at(-1)), ...body }), { status: 200 });
+    }
+    return new Response(JSON.stringify(productResponse(String(body.stock_status || "instock"))), { status: 200 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example", consumerKey: "ck_test", consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  const saved = await gateway.saveProduct(534, {
+    name: "PL-RT",
+    sku: "PL-RT",
+    regularPrice: 35,
+    stockQuantity: 0,
+    categoryId: 16,
+    visibility: "public",
+    images: [],
+    attributeName: "MG",
+    variants: [
+      { id: 648, option: "20MG", sku: "R3TA-20MG", price: 55, stock: 0 },
+      { id: 649, option: "30MG", sku: "R3TA-30MG", price: 65, stock: 75 },
+    ],
+  });
+
+  assert.equal(requests.length, 4);
+  assert.equal(requests[0]?.body.manage_stock, false);
+  assert.equal(requests[0]?.body.stock_status, "instock");
+  assert.equal(requests[0]?.body.stock_quantity, undefined);
+  assert.deepEqual(requests.at(-1)?.body, { manage_stock: false, stock_status: "instock" });
+  assert.equal(saved.stockStatus, "instock");
+});
+
 test("preserves WooCommerce duplicate-SKU details as a safe catalog error", async () => {
   const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({
     code: "product_invalid_sku",

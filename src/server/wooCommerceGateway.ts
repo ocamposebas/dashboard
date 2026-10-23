@@ -1844,14 +1844,18 @@ export class WooCommerceGateway {
   async saveProduct(productId: number | null, input: CommerceProductWrite): Promise<CommerceProduct> {
     const variants = input.variants || [];
     const body: Record<string, unknown> = {
-      name: input.name, sku: input.sku, regular_price: input.regularPrice.toFixed(2), manage_stock: true,
-      stock_quantity: Math.max(0, Math.floor(input.stockQuantity)), images: input.images,
+      name: input.name, sku: input.sku, regular_price: input.regularPrice.toFixed(2), images: input.images,
       categories: input.categoryId > 0 ? [{ id: input.categoryId }] : [],
       ...visibilityPayload(input.visibility),
     };
     if (variants.length) {
       body.type = "variable";
+      body.manage_stock = false;
+      body.stock_status = variants.some((variant) => variant.stock > 0) ? "instock" : "outofstock";
       body.attributes = [{ name: input.attributeName || "Option", visible: true, variation: true, options: variants.map((item) => item.option) }];
+    } else {
+      body.manage_stock = true;
+      body.stock_quantity = Math.max(0, Math.floor(input.stockQuantity));
     }
     const saved = mapProduct(await this.request(productId ? `products/${productId}` : "products", {
       method: productId ? "PUT" : "POST", body,
@@ -1867,7 +1871,18 @@ export class WooCommerceGateway {
         method: variant.id ? "PUT" : "POST", body: variationBody,
       });
     }
-    return saved;
+    if (!variants.length) return saved;
+
+    // WooCommerce occasionally keeps an old parent stock flag after child
+    // variations are edited. Reassert the aggregate state after all children
+    // have been saved and return that final canonical product to the caller.
+    return mapProduct(await this.request(`products/${saved.id}`, {
+      method: "PUT",
+      body: {
+        manage_stock: false,
+        stock_status: variants.some((variant) => variant.stock > 0) ? "instock" : "outofstock",
+      },
+    }));
   }
 
   async setProductSale(productId: number, input: CommerceProductSaleWrite): Promise<CommerceProduct> {
