@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Phase One Operations Bridge
  * Description: Secure bridge between Phase One Operations Suite, storefront controls, customer rewards and existing COA Manager records.
- * Version: 1.7.1
+ * Version: 1.8.0
  * Author: Phase One Labz
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -145,7 +145,7 @@ final class Phase_One_Operations_Bridge {
     public static function status() {
         return rest_ensure_response([
             'connected' => true,
-            'version' => '1.7.1',
+            'version' => '1.8.0',
             'capabilities' => array_values(array_filter([
                 'edit_coa',
                 'read_customer_rewards',
@@ -185,6 +185,74 @@ final class Phase_One_Operations_Bridge {
         return self::proxy_request('GET', '/phaseone/v1/order-evidence/orders/' . absint($request['id']), $request);
     }
 
+    private static function shipping_tracking_url($carrier, $tracking) {
+        $carrier_key = strtolower((string) $carrier);
+        $tracking_encoded = rawurlencode((string) $tracking);
+        if (strpos($carrier_key, 'fedex') !== false) {
+            return 'https://www.fedex.com/fedextrack/?trknbr=' . $tracking_encoded;
+        }
+        if (strpos($carrier_key, 'ups') !== false) {
+            return 'https://www.ups.com/track?loc=en_US&tracknum=' . $tracking_encoded;
+        }
+        if (strpos($carrier_key, 'usps') !== false || strpos($carrier_key, 'postal') !== false) {
+            return 'https://tools.usps.com/go/TrackConfirmAction?tLabels=' . $tracking_encoded;
+        }
+        if (strpos($carrier_key, 'dhl') !== false) {
+            return 'https://www.dhl.com/us-en/home/tracking.html?tracking-id=' . $tracking_encoded;
+        }
+        return '';
+    }
+
+    private static function finalize_shipping_label($order, $label_id, $tracking, $carrier, $service) {
+        $tracking_url = self::shipping_tracking_url($carrier, $tracking);
+        $order->update_meta_data('_tracking_number', $tracking);
+        $order->update_meta_data('_tracking_provider', $carrier);
+        $order->update_meta_data('_tracking_link', $tracking_url);
+        $order->update_meta_data('_date_shipped', time());
+        $order->save();
+
+        $notified_label = (string) $order->get_meta('_phaseone_shipping_customer_notified_label_id', true);
+        $customer_notified = $notified_label !== '' && hash_equals($notified_label, $label_id);
+        if (!$customer_notified) {
+            $note = sprintf(
+                'Your order has shipped via %s%s. Tracking number: %s.',
+                $carrier !== '' ? $carrier : 'the selected carrier',
+                $service !== '' ? ' · ' . $service : '',
+                $tracking
+            );
+            if ($tracking_url !== '') {
+                $note .= sprintf(' <a href="%s">Track your package</a>.', esc_url($tracking_url));
+            }
+            $order->add_order_note(wp_kses_post($note), true);
+            $order->update_meta_data('_phaseone_shipping_customer_notified_label_id', $label_id);
+            $order->update_meta_data('_phaseone_shipping_customer_notified_at', gmdate('c'));
+            $order->save();
+            $customer_notified = true;
+        }
+
+        if ($order->has_status('processing')) {
+            $order->update_status(
+                'completed',
+                sprintf('Order completed automatically after purchasing shipping label %s. Tracking %s.', $label_id, $tracking),
+                true
+            );
+        } elseif (!$order->has_status('completed')) {
+            return new WP_Error(
+                'phaseone_shipping_status_conflict',
+                sprintf('Tracking was saved, but the order is %s and was not completed automatically.', $order->get_status()),
+                ['status' => 409]
+            );
+        }
+
+        $order->update_meta_data('_phaseone_shipping_completed_label_id', $label_id);
+        $order->update_meta_data('_phaseone_shipping_completed_at', gmdate('c'));
+        $order->save();
+        return [
+            'customer_notified' => $customer_notified,
+            'order_status' => $order->get_status(),
+        ];
+    }
+
     public static function save_shipping_label(WP_REST_Request $request) {
         if (!class_exists('WooCommerce')) {
             return new WP_Error('phaseone_woocommerce_missing', 'WooCommerce is not available.', ['status' => 503]);
@@ -201,26 +269,37 @@ final class Phase_One_Operations_Bridge {
             return new WP_Error('phaseone_shipping_invalid', 'A valid event, label and tracking number are required.', ['status' => 400]);
         }
         $existing_label = (string) $order->get_meta('_phaseone_shipping_label_id', true);
-        if ($existing_label !== '' && hash_equals($existing_label, $label_id)) {
-            return rest_ensure_response(['replayed' => true, 'message' => 'Tracking was already saved to this order.']);
-        }
+        $replayed = $existing_label !== '' && hash_equals($existing_label, $label_id);
         if ($existing_label !== '' && !hash_equals($existing_label, $label_id)) {
             return new WP_Error('phaseone_shipping_conflict', 'This order already has a different native shipping label.', ['status' => 409]);
         }
-        $order->update_meta_data('_phaseone_shipping_event_id', $event_id);
-        $order->update_meta_data('_phaseone_shipping_label_id', $label_id);
-        $order->update_meta_data('_phaseone_shipping_shipment_id', sanitize_text_field($input['shipment_id'] ?? ''));
-        $order->update_meta_data('_phaseone_shipping_tracking_number', $tracking);
-        $order->update_meta_data('_phaseone_shipping_carrier', sanitize_text_field($input['carrier'] ?? ''));
-        $order->update_meta_data('_phaseone_shipping_service', sanitize_text_field($input['service'] ?? ''));
-        $order->update_meta_data('_phaseone_shipping_amount', wc_format_decimal($input['amount'] ?? 0, 2));
-        $order->update_meta_data('_phaseone_shipping_currency', strtoupper(sanitize_text_field($input['currency'] ?? 'USD')));
-        $order->update_meta_data('_phaseone_shipping_purchased_at', sanitize_text_field($input['purchased_at'] ?? ''));
-        $order->update_meta_data('_phaseone_native_shipping_managed', 'yes');
-        $order->add_order_note(sprintf('Shipping label purchased in Phase One Operations. %s · %s · Tracking %s.',
-            sanitize_text_field($input['carrier'] ?? ''), sanitize_text_field($input['service'] ?? ''), $tracking));
-        $order->save();
-        return rest_ensure_response(['replayed' => false, 'message' => 'Tracking saved to the source order.']);
+        $carrier = sanitize_text_field($input['carrier'] ?? '');
+        $service = sanitize_text_field($input['service'] ?? '');
+        if (!$replayed) {
+            $order->update_meta_data('_phaseone_shipping_event_id', $event_id);
+            $order->update_meta_data('_phaseone_shipping_label_id', $label_id);
+            $order->update_meta_data('_phaseone_shipping_shipment_id', sanitize_text_field($input['shipment_id'] ?? ''));
+            $order->update_meta_data('_phaseone_shipping_tracking_number', $tracking);
+            $order->update_meta_data('_phaseone_shipping_carrier', $carrier);
+            $order->update_meta_data('_phaseone_shipping_service', $service);
+            $order->update_meta_data('_phaseone_shipping_amount', wc_format_decimal($input['amount'] ?? 0, 2));
+            $order->update_meta_data('_phaseone_shipping_currency', strtoupper(sanitize_text_field($input['currency'] ?? 'USD')));
+            $order->update_meta_data('_phaseone_shipping_purchased_at', sanitize_text_field($input['purchased_at'] ?? ''));
+            $order->update_meta_data('_phaseone_native_shipping_managed', 'yes');
+            $order->add_order_note(sprintf('Shipping label purchased in Phase One Operations. %s · %s · Tracking %s.',
+                $carrier, $service, $tracking));
+            $order->save();
+        }
+        $finalized = self::finalize_shipping_label($order, $label_id, $tracking, $carrier, $service);
+        if (is_wp_error($finalized)) {
+            return $finalized;
+        }
+        return rest_ensure_response([
+            'replayed' => $replayed,
+            'customer_notified' => $finalized['customer_notified'],
+            'order_status' => $finalized['order_status'],
+            'message' => 'Tracking saved, customer notified and order completed.',
+        ]);
     }
 
     public static function void_shipping_label(WP_REST_Request $request) {
@@ -248,14 +327,21 @@ final class Phase_One_Operations_Bridge {
         foreach (['_phaseone_shipping_event_id', '_phaseone_shipping_label_id', '_phaseone_shipping_shipment_id',
             '_phaseone_shipping_tracking_number', '_phaseone_shipping_carrier', '_phaseone_shipping_service',
             '_phaseone_shipping_amount', '_phaseone_shipping_currency', '_phaseone_shipping_purchased_at',
-            '_phaseone_native_shipping_managed'] as $key) {
+            '_phaseone_native_shipping_managed', '_phaseone_shipping_customer_notified_label_id',
+            '_phaseone_shipping_customer_notified_at', '_phaseone_shipping_completed_label_id',
+            '_phaseone_shipping_completed_at', '_tracking_number', '_tracking_provider', '_tracking_link',
+            '_date_shipped'] as $key) {
             $order->delete_meta_data($key);
         }
         $order->update_meta_data('_phaseone_shipping_voided_label_id', $label_id);
         $order->update_meta_data('_phaseone_shipping_voided_at', gmdate('c'));
-        $order->add_order_note('The native shipping label was voided in Phase One Operations. No order status was changed.');
-        $order->save();
-        return rest_ensure_response(['replayed' => false, 'message' => 'Voided tracking removed from the source order.']);
+        $order->add_order_note('The native shipping label was voided in Phase One Operations.');
+        if ($order->has_status('completed')) {
+            $order->update_status('processing', 'Order returned to Processing because its native shipping label was voided.', true);
+        } else {
+            $order->save();
+        }
+        return rest_ensure_response(['replayed' => false, 'message' => 'Voided tracking removed and the order returned to Processing.']);
     }
 
     public static function upload_order_evidence(WP_REST_Request $request) {

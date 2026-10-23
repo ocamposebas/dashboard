@@ -53,3 +53,9 @@ subscriber records from both installed notifier families, preserves exact
 product and variation relationships, and exposes the existing customer list to
 the Operations Suite without sending notifications or changing stock.
 
+Version 1.8.0 completes the native shipping lifecycle. Once postage and tracking
+are confirmed, the bridge stores portable tracking metadata, sends the customer
+a WooCommerce tracking note through the site's configured mail transport and
+marks the order Completed. Replays remain idempotent, while voiding the same
+label removes tracking and returns the order to Processing.
+
