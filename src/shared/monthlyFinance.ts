@@ -14,6 +14,7 @@ export interface MonthlyFinanceOrder {
     operatingCost: number;
     feeCost: number;
     affiliateCost: number;
+    testingCost?: number;
     completeCostCoverage: boolean;
     estimatedProfit: number | null;
   };
@@ -103,7 +104,8 @@ export function summarizeMonthToDate(
       coveredOrders += 1;
       profit += order.profitability.estimatedProfit - refunded;
       costs += order.profitability.costOfGoods + order.profitability.operatingCost +
-        order.profitability.feeCost + (order.profitability.affiliateCost || 0);
+        order.profitability.feeCost + (order.profitability.affiliateCost || 0) +
+        (order.profitability.testingCost || 0);
     }
   }
 

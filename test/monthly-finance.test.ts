@@ -53,6 +53,14 @@ test("month-to-date finance does not invent profit when product costs are incomp
   assert.equal(summary.profit, 52);
 });
 
+test("month-to-date finance includes allocated laboratory testing in total costs", () => {
+  const summary = summarizeMonthToDate([
+    order({ profitability: { ...order().profitability, testingCost: 4 } }),
+  ], new Date("2026-10-22T20:00:00.000Z"));
+
+  assert.equal(summary.costs, 52);
+});
+
 test("payment methods receive stable visual groups", () => {
   assert.equal(paymentMethodKind(order({ paymentMethod: "Zelle", paymentMethodId: "phaseone_zelle" })), "zelle");
   assert.equal(paymentMethodKind(order({ paymentMethod: "eDebit", paymentMethodId: "custom_edebit" })), "debit");

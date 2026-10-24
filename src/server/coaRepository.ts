@@ -34,6 +34,8 @@ interface CoaRow extends QueryResultRow {
   laboratory: string;
   method: string;
   tested: string;
+  testing_cost_total: string | number;
+  batch_unit_count: string | number;
   current_shipping_lot: boolean;
   external_file_url: string;
   verify_url: string;
@@ -120,6 +122,19 @@ export interface CoaDocument {
   content: Buffer;
 }
 
+export interface CoaTestingCost {
+  certificateId: string;
+  lot: string;
+  total: number;
+  batchUnits: number;
+  perUnit: number;
+}
+
+export interface OrderTestingCostAllocation {
+  quantity: number;
+  cost: number;
+}
+
 export interface CoaListFilters {
   productId?: number;
   variationId?: number;
@@ -144,6 +159,7 @@ const SELECT_COA = `
   SELECT id, legacy_wp_post_id, coa_number, product_name, compound,
          family_name, family_key, strength, batch, lot,
          certificate_date::text, status, purity, laboratory, method, tested,
+         testing_cost_total, batch_unit_count,
          current_shipping_lot, external_file_url, verify_url, file_attachment_id,
          matched_product_id, matched_variation_id, skus, aliases, keywords,
          panel_types, current_coa, history, source, document_id, revision,
@@ -216,6 +232,11 @@ function rowToCoa(row: CoaRow, publicOrigin: string): CustomCoa {
     laboratory: row.laboratory,
     method: row.method,
     tested: row.tested,
+    testingCostTotal: Math.max(0, Number(row.testing_cost_total || 0)),
+    batchUnitCount: Math.max(0, Number(row.batch_unit_count || 0)),
+    testingCostPerUnit: Number(row.batch_unit_count) > 0
+      ? Math.max(0, Number(row.testing_cost_total || 0)) / Number(row.batch_unit_count)
+      : 0,
     currentShippingLot: row.status === "Available" && row.current_shipping_lot,
     fileUrl: documentUrl,
     externalFileUrl: row.external_file_url,
@@ -338,6 +359,61 @@ export class CoaRepository {
   async get(id: string): Promise<CustomCoa | null> {
     const result = await this.database.query<CoaRow>(`${SELECT_COA} WHERE id = $1`, [id]);
     return result.rows[0] ? rowToCoa(result.rows[0], this.publicOrigin) : null;
+  }
+
+  async currentTestingCosts(catalogIds: number[]): Promise<Record<string, CoaTestingCost>> {
+    const ids = [...new Set(catalogIds.filter((id) => Number.isSafeInteger(id) && id > 0))];
+    if (!ids.length) return {};
+    const result = await this.database.query<CoaRow>(
+      `${SELECT_COA}
+       WHERE status = 'Available' AND current_shipping_lot = true
+         AND testing_cost_total > 0 AND batch_unit_count > 0
+         AND (matched_product_id = ANY($1::bigint[]) OR matched_variation_id = ANY($1::bigint[]))
+       ORDER BY current_shipping_lot DESC, certificate_date DESC NULLS LAST, updated_at DESC`,
+      [ids],
+    );
+    const costs: Record<string, CoaTestingCost> = {};
+    for (const row of result.rows) {
+      const catalogId = Math.max(0, Number(row.matched_variation_id || 0)) || Math.max(0, Number(row.matched_product_id || 0));
+      if (!catalogId || costs[String(catalogId)]) continue;
+      const total = Math.max(0, Number(row.testing_cost_total || 0));
+      const batchUnits = Math.max(0, Number(row.batch_unit_count || 0));
+      if (!total || !batchUnits) continue;
+      costs[String(catalogId)] = {
+        certificateId: row.id,
+        lot: row.lot || row.batch,
+        total,
+        batchUnits,
+        perUnit: total / batchUnits,
+      };
+    }
+    return costs;
+  }
+
+  async orderTestingCostAllocations(orderId: number): Promise<Record<string, OrderTestingCostAllocation>> {
+    if (!Number.isSafeInteger(orderId) || orderId <= 0) return {};
+    const result = await this.database.query<{
+      order_item_id: string | number;
+      quantity: string | number;
+      cost: string | number;
+    }>(
+      `SELECT e.order_item_id,
+              sum(e.quantity_delta)::text AS quantity,
+              sum(e.quantity_delta * CASE
+                WHEN c.batch_unit_count > 0 THEN c.testing_cost_total / c.batch_unit_count
+                ELSE 0
+              END)::text AS cost
+       FROM fulfillment_scan_events e
+       JOIN order_fulfillments f ON f.id = e.fulfillment_id
+       JOIN coa_certificates c ON c.id = e.coa_id
+       WHERE f.order_id = $1 AND e.result = 'accepted' AND e.order_item_id IS NOT NULL
+       GROUP BY e.order_item_id`,
+      [orderId],
+    );
+    return Object.fromEntries(result.rows.map((row) => [String(row.order_item_id), {
+      quantity: Math.max(0, Number(row.quantity || 0)),
+      cost: Math.max(0, Number(row.cost || 0)),
+    }]));
   }
 
   async stageLinks(links: string[], suggestCurrent: boolean, actorId: string): Promise<StageResult[]> {
@@ -532,6 +608,14 @@ export class CoaRepository {
       ? requestedTestDate
       : "";
     if (!coaNumber || (!productName && !familyName)) throw new Error("COA number and product or family are required");
+    const testingCostTotal = Math.max(0, Number(input.testingCostTotal || 0));
+    const batchUnitCount = Math.max(0, Math.floor(Number(input.batchUnitCount || 0)));
+    if (!Number.isFinite(testingCostTotal) || testingCostTotal > 1_000_000 || batchUnitCount > 10_000_000) {
+      throw new Error("Testing cost and batch quantity must be valid positive values");
+    }
+    if ((testingCostTotal > 0 && batchUnitCount === 0) || (batchUnitCount > 0 && testingCostTotal === 0)) {
+      throw new Error("Enter both the total testing cost and the number of units in the lot");
+    }
     return this.database.transaction(async (client) => {
       const current = await client.query<CoaRow>(`${SELECT_COA} WHERE id = $1 FOR UPDATE`, [input.id]);
       if (!current.rows[0]) throw new Error("COA record not found");
@@ -569,14 +653,16 @@ export class CoaRepository {
            current_shipping_lot=$16, external_file_url=$17, verify_url=$18,
            file_attachment_id=$19, matched_product_id=$20, matched_variation_id=$21,
            skus=$22::jsonb, aliases=$23::jsonb, keywords=$24::jsonb,
-           panel_types=$25::jsonb, revision=revision+1, updated_by=$26,
+           panel_types=$25::jsonb, testing_cost_total=$26, batch_unit_count=$27,
+           revision=revision+1, updated_by=$28,
            updated_at=now(), published_at=CASE WHEN $11::text='Available' THEN COALESCE(published_at, now()) ELSE published_at END
          WHERE id=$1 RETURNING id, legacy_wp_post_id, coa_number, product_name, compound,
            family_name, family_key, strength, batch, lot, certificate_date::text, status,
            purity, laboratory, method, tested, current_shipping_lot, external_file_url,
            verify_url, file_attachment_id, matched_product_id, matched_variation_id,
-           skus, aliases, keywords, panel_types, current_coa, history, source,
-           document_id, revision, created_at, updated_at, published_at`,
+           skus, aliases, keywords, panel_types, testing_cost_total, batch_unit_count,
+           current_coa, history, source,
+           document_id, revision, created_at, updated_at, published_at, intake_analysis`,
         [input.id, coaNumber, productName, input.compound.trim(), familyName || productName,
           input.familyKey.trim(), input.strength.trim(), input.batch.trim(), lot,
           testDate || null, status,
@@ -585,10 +671,10 @@ export class CoaRepository {
           Math.max(0, input.fileAttachmentId || 0), Math.max(0, input.matchedProductId || 0),
           Math.max(0, input.matchedVariationId || 0), JSON.stringify(uniqueTextList(input.skus)),
           JSON.stringify(uniqueTextList(input.aliases)), JSON.stringify(uniqueTextList(input.keywords)),
-          JSON.stringify(uniqueTextList(input.panelTypes)), actorId],
+          JSON.stringify(uniqueTextList(input.panelTypes)), testingCostTotal, batchUnitCount, actorId],
       );
       await this.event(client, input.id, status === "Available" ? "published_or_updated" : "updated", actorId, {
-        revision: Number(result.rows[0]?.revision || 0), status,
+        revision: Number(result.rows[0]?.revision || 0), status, testingCostTotal, batchUnitCount,
       });
       return rowToCoa(result.rows[0]!, this.publicOrigin);
     });

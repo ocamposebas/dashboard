@@ -130,6 +130,10 @@ interface CommerceVariation {
   costInherited?: boolean;
   estimatedProfit?: number | null;
   margin?: number | null;
+  testingCostPerUnit?: number;
+  testingCostTotal?: number;
+  testingBatchUnitCount?: number;
+  testingLot?: string;
 }
 
 interface CommerceProduct {
@@ -157,6 +161,10 @@ interface CommerceProduct {
   cost: CommerceCost | null;
   estimatedProfit: number | null;
   margin: number | null;
+  testingCostPerUnit?: number;
+  testingCostTotal?: number;
+  testingBatchUnitCount?: number;
+  testingLot?: string;
   localDraft?: true;
 }
 
@@ -267,6 +275,7 @@ interface CommerceOrder {
     operatingCost: number;
     feeCost: number;
     affiliateCost: number;
+    testingCost?: number;
     completeCostCoverage: boolean;
     estimatedProfit: number | null;
   };
@@ -555,6 +564,9 @@ interface CommerceCoa {
   laboratory: string;
   method: string;
   tested: string;
+  testingCostTotal?: number;
+  batchUnitCount?: number;
+  testingCostPerUnit?: number;
   currentShippingLot: boolean;
   fileUrl: string;
   verifyUrl: string;
@@ -1010,6 +1022,8 @@ let activeBarcodeLabel: BarcodeLabel | null = null;
 let labelPrintStep: "product" | "details" | "preview" = "product";
 let mediaSearch = "";
 let editingProductId: number | null = null;
+let activeProductTestingCost = 0;
+let activeProductTestingLot = "";
 let activeOrder: CommerceOrder | null = null;
 let activeOrderOperations: OrderOperations | null = null;
 let activeOrderTab: "overview" | "payment" | "documents" | "coas" | "shipping" | "timeline" = "overview";
@@ -3033,7 +3047,7 @@ function productRow(product: CommerceProduct): string {
   const cost = product.type === "variable"
     ? '<span class="cell-muted">By variant</span>'
     : product.cost
-      ? formatCurrency(product.cost.unitCost)
+      ? `<span class="cell-cost-stack"><b>${escapeHtml(formatCurrency(product.cost.unitCost))}</b>${product.testingCostPerUnit ? `<small>+ ${escapeHtml(formatCurrency(product.testingCostPerUnit))} test · Lot ${escapeHtml(product.testingLot || "current")}</small>` : ""}</span>`
       : '<button class="cost-action" type="button" data-edit-cost>Set cost</button>';
   const profit = product.type === "variable"
     ? '<span class="cell-muted">Open product</span>'
@@ -3106,6 +3120,10 @@ function localDraftProducts(): CommerceProduct[] {
         cost: { unitCost, packagingCost, feeRate, affiliateRate },
         estimatedProfit: profitability.estimatedProfit,
         margin: profitability.margin,
+        testingCostPerUnit: 0,
+        testingCostTotal: 0,
+        testingBatchUnitCount: 0,
+        testingLot: "",
         localDraft: true as const,
       }];
     });
@@ -6108,7 +6126,7 @@ function renderCoaReviewQueue(): void {
       const canDelete = coa.source === "custom" && coa.status === "Review" && !coa.publishedAt;
       return `<article class="coa-review-card ${duplicate ? "is-duplicate" : ""}">
         <div class="coa-review-card-head"><span class="coa-review-document">PDF</span><div><small>${duplicate ? "EXISTING RECORD" : "DETECTED CERTIFICATE"}</small><h3>${escapeHtml(coa.productName === "Needs product review" ? "Product not identified" : (coa.productName || coa.familyName || "Product not identified"))}</h3><p>${escapeHtml(statusLabel)}</p></div><div class="coa-review-card-actions"><span class="status-pill status-pill--${coa.status === "Available" ? "completed" : "pending"}">${escapeHtml(coa.status === "Available" ? "Published" : "Review required")}</span>${canDelete ? `<button class="coa-review-delete" type="button" data-delete-coa="${escapeHtml(coa.recordId || coa.id)}" aria-label="Discard this COA draft" title="Discard draft">×</button>` : ""}</div></div>
-        <dl class="coa-review-fields"><div><dt>COA number</dt><dd>${escapeHtml(coa.coaNumber.startsWith("DRAFT-") ? "Not detected" : coa.coaNumber)}</dd></div><div><dt>Batch / lot</dt><dd>${escapeHtml(coa.batch || coa.lot || "Not detected")}</dd></div><div><dt>Purity</dt><dd>${escapeHtml(coa.purity || "Not detected")}</dd></div><div><dt>Laboratory</dt><dd>${escapeHtml(coa.laboratory || "Not detected")}</dd></div><div><dt>Test / analysis date</dt><dd>${escapeHtml(coa.date || "Not detected")}</dd></div><div><dt>Store match</dt><dd>${escapeHtml(coa.skus?.join(", ") || (coa.matchedProductId ? `Product ${coa.matchedProductId}` : "Needs mapping"))}</dd></div></dl>
+        <dl class="coa-review-fields"><div><dt>COA number</dt><dd>${escapeHtml(coa.coaNumber.startsWith("DRAFT-") ? "Not detected" : coa.coaNumber)}</dd></div><div><dt>Batch / lot</dt><dd>${escapeHtml(coa.batch || coa.lot || "Not detected")}</dd></div><div><dt>Purity</dt><dd>${escapeHtml(coa.purity || "Not detected")}</dd></div><div><dt>Laboratory</dt><dd>${escapeHtml(coa.laboratory || "Not detected")}</dd></div><div><dt>Test / analysis date</dt><dd>${escapeHtml(coa.date || "Not detected")}</dd></div><div><dt>Testing allocation</dt><dd>${coa.testingCostPerUnit ? `${escapeHtml(formatCurrency(coa.testingCostPerUnit))} / unit · ${formatNumber(coa.batchUnitCount || 0)} units` : "Not recorded"}</dd></div><div><dt>Store match</dt><dd>${escapeHtml(coa.skus?.join(", ") || (coa.matchedProductId ? `Product ${coa.matchedProductId}` : "Needs mapping"))}</dd></div></dl>
         ${assaySummary}
         <div class="coa-review-notice ${analysis?.status === "failed" || dateNeedsConfirmation ? "is-warning" : ""}"><span>${analysis?.status === "complete" && !dateNeedsConfirmation ? "✓" : "!"}</span><p><strong>${dateNeedsConfirmation ? "Confirm the laboratory test date" : analysis?.status === "complete" ? "Information extracted from the PDF" : "Check the missing information"}</strong><small>${escapeHtml(warning)}</small></p></div>
         <footer>${privateDocument ? `<a class="button button--secondary" href="${escapeHtml(privateDocument)}" target="_blank" rel="noopener noreferrer">Open certificate</a>` : ""}<button class="button button--primary" type="button" data-review-coa="${escapeHtml(coa.recordId || coa.id)}">${coa.status === "Available" ? "Open existing COA" : "Review and approve"}</button></footer>
@@ -7302,6 +7320,10 @@ const coaLaboratoryInput = requiredElement<HTMLInputElement>("#coa-laboratory");
 const coaStatusInput = requiredElement<HTMLSelectElement>("#coa-status");
 const coaMethodInput = requiredElement<HTMLInputElement>("#coa-method");
 const coaTestedInput = requiredElement<HTMLTextAreaElement>("#coa-tested");
+const coaTestingCostInput = requiredElement<HTMLInputElement>("#coa-testing-cost");
+const coaBatchUnitsInput = requiredElement<HTMLInputElement>("#coa-batch-units");
+const coaTestingPerUnit = requiredElement<HTMLElement>("#coa-testing-per-unit");
+const coaTestingCostGuidance = requiredElement<HTMLElement>("#coa-testing-cost-guidance");
 const coaCurrentLotInput = requiredElement<HTMLInputElement>("#coa-current-lot-input");
 const coaFileUrlInput = requiredElement<HTMLInputElement>("#coa-file-url");
 const coaVerifyUrlInput = requiredElement<HTMLInputElement>("#coa-verify-url");
@@ -7317,6 +7339,19 @@ const coaFamilyKeyInput = requiredElement<HTMLInputElement>("#coa-family-key");
 const coaSkusInput = requiredElement<HTMLTextAreaElement>("#coa-skus");
 const coaAliasesInput = requiredElement<HTMLTextAreaElement>("#coa-aliases");
 const coaKeywordsInput = requiredElement<HTMLTextAreaElement>("#coa-keywords");
+
+function syncCoaTestingCost(): void {
+  const total = Math.max(0, Number(coaTestingCostInput.value) || 0);
+  const units = Math.max(0, Math.floor(Number(coaBatchUnitsInput.value) || 0));
+  const complete = total > 0 && units > 0;
+  coaTestingPerUnit.textContent = formatCurrency(complete ? total / units : 0);
+  coaTestingCostGuidance.textContent = complete
+    ? `${formatCurrency(total)} allocated across ${formatNumber(units)} units from this exact lot.`
+    : total || units
+      ? "Complete both values so the expense can be allocated safely."
+      : "Optional. Enter both values to include testing in profitability.";
+  coaTestingCostGuidance.classList.toggle("is-warning", Boolean(total || units) && !complete);
+}
 
 function syncCoaDistributionControl(): void {
   const available = coaStatusInput.value === "Available";
@@ -7814,6 +7849,9 @@ function openCoaEditor(coa: CommerceCoa): void {
   coaStatusInput.value = coa.status || "Available";
   coaMethodInput.value = coa.method || "";
   coaTestedInput.value = coa.tested || "";
+  coaTestingCostInput.value = String(coa.testingCostTotal || 0);
+  coaBatchUnitsInput.value = String(coa.batchUnitCount || 0);
+  syncCoaTestingCost();
   coaCurrentLotInput.dataset.suggested = coa.intakeAnalysis?.suggestCurrent ? "true" : "false";
   coaCurrentLotInput.checked = coa.currentShippingLot;
   syncCoaDistributionControl();
@@ -8374,7 +8412,7 @@ function generateVariantRows(): void {
   variantTable.hidden = false;
 }
 
-function variantRowMarkup(input: { id?: number; option: string; sku: string; price: number; unitCost: number; stock: number; image?: CommerceMedia | null }): string {
+function variantRowMarkup(input: { id?: number; option: string; sku: string; price: number; unitCost: number; stock: number; image?: CommerceMedia | null; testingCost?: number; testingLot?: string }): string {
   const image = input.image
     ? `<img src="${escapeHtml(input.image.thumbnailUrl || input.image.src)}" alt="" loading="lazy" decoding="async" />`
     : "<span>+</span>";
@@ -8383,8 +8421,9 @@ function variantRowMarkup(input: { id?: number; option: string; sku: string; pri
     packagingCost: Number(productPackagingInput.value) || 0,
     feeRate: Number(productFeeInput.value) || 0,
     affiliateRate: Number(productAffiliateRateInput.value) || 0,
+    testingCost: input.testingCost || 0,
   });
-  return `<div class="variant-row" data-variant-row><button class="variant-image-button" type="button" data-choose-variant-image aria-label="Choose image for ${escapeHtml(input.option)}">${image}</button><strong>${escapeHtml(variantAttributeInput.value.trim() || "Option")}: ${escapeHtml(input.option)}</strong><input data-variant-sku type="text" value="${escapeHtml(input.sku)}" aria-label="Automatically generated SKU for ${escapeHtml(input.option)}" title="Generated automatically" readonly /><input data-variant-price type="number" min="0" step="0.01" value="${input.price}" aria-label="Price for ${escapeHtml(input.option)}" /><input data-variant-cost type="number" min="0" step="0.01" value="${input.unitCost}" aria-label="Unit cost for ${escapeHtml(input.option)}" /><span class="variant-profit" data-variant-profit>${escapeHtml(formatCurrency(profitability.estimatedProfit))}<small>${(profitability.margin ?? 0).toFixed(1)}% margin</small></span><input data-variant-stock type="number" min="0" value="${input.stock}" aria-label="Stock for ${escapeHtml(input.option)}" /><input data-variant-option type="hidden" value="${escapeHtml(input.option)}" /><input data-variant-id type="hidden" value="${input.id || ""}" /><input data-variant-image-id type="hidden" value="${input.image?.id || ""}" /></div>`;
+  return `<div class="variant-row" data-variant-row data-testing-cost="${input.testingCost || 0}" data-testing-lot="${escapeHtml(input.testingLot || "")}"><button class="variant-image-button" type="button" data-choose-variant-image aria-label="Choose image for ${escapeHtml(input.option)}">${image}</button><strong>${escapeHtml(variantAttributeInput.value.trim() || "Option")}: ${escapeHtml(input.option)}</strong><input data-variant-sku type="text" value="${escapeHtml(input.sku)}" aria-label="Automatically generated SKU for ${escapeHtml(input.option)}" title="Generated automatically" readonly /><input data-variant-price type="number" min="0" step="0.01" value="${input.price}" aria-label="Price for ${escapeHtml(input.option)}" /><input data-variant-cost type="number" min="0" step="0.01" value="${input.unitCost}" aria-label="Unit cost for ${escapeHtml(input.option)}" /><span class="variant-profit" data-variant-profit>${escapeHtml(formatCurrency(profitability.estimatedProfit))}<small>${(profitability.margin ?? 0).toFixed(1)}% margin${input.testingCost ? ` · ${escapeHtml(formatCurrency(input.testingCost))} test` : ""}</small></span><input data-variant-stock type="number" min="0" value="${input.stock}" aria-label="Stock for ${escapeHtml(input.option)}" /><input data-variant-option type="hidden" value="${escapeHtml(input.option)}" /><input data-variant-id type="hidden" value="${input.id || ""}" /><input data-variant-image-id type="hidden" value="${input.image?.id || ""}" /></div>`;
 }
 
 function collectVariants(): Array<{ id?: number; option: string; sku: string; price: number; unitCost: number; stock: number; imageId?: number }> {
@@ -8410,9 +8449,10 @@ function calculateVariantProfits(): void {
   for (const row of variantRows.querySelectorAll<HTMLElement>("[data-variant-row]")) {
     const price = Number(row.querySelector<HTMLInputElement>("[data-variant-price]")?.value) || 0;
     const unitCost = Number(row.querySelector<HTMLInputElement>("[data-variant-cost]")?.value) || 0;
-    const result = calculateProductProfitability(price, { unitCost, packagingCost, feeRate, affiliateRate });
+    const testingCost = Math.max(0, Number(row.dataset.testingCost) || 0);
+    const result = calculateProductProfitability(price, { unitCost, packagingCost, feeRate, affiliateRate, testingCost });
     const output = row.querySelector<HTMLElement>("[data-variant-profit]");
-    if (output) output.innerHTML = `${escapeHtml(formatCurrency(result.estimatedProfit))}<small>${(result.margin ?? 0).toFixed(1)}% margin</small>`;
+    if (output) output.innerHTML = `${escapeHtml(formatCurrency(result.estimatedProfit))}<small>${(result.margin ?? 0).toFixed(1)}% margin${testingCost ? ` · ${escapeHtml(formatCurrency(testingCost))} test` : ""}</small>`;
   }
 }
 
@@ -8427,16 +8467,19 @@ function calculateProductProfit(): void {
     packagingCost: packaging,
     feeRate,
     affiliateRate,
+    testingCost: activeProductTestingCost,
   });
   requiredElement<HTMLElement>("#calculator-profit").textContent = formatCurrency(profitability.estimatedProfit);
   requiredElement<HTMLElement>("#calculator-margin").textContent = `${(profitability.margin || 0).toFixed(1)}%`;
   requiredElement<HTMLElement>("#calculator-equation").textContent =
-    `${formatCurrency(price)} − ${formatCurrency(cost)} cost − ${formatCurrency(packaging)} operations − ${formatCurrency(profitability.transactionFee)} fee − ${formatCurrency(profitability.affiliateReserve)} affiliate`;
+    `${formatCurrency(price)} − ${formatCurrency(cost)} cost − ${formatCurrency(packaging)} operations${activeProductTestingCost ? ` − ${formatCurrency(activeProductTestingCost)} test (${activeProductTestingLot || "current lot"})` : ""} − ${formatCurrency(profitability.transactionFee)} fee − ${formatCurrency(profitability.affiliateReserve)} affiliate`;
   calculateVariantProfits();
 }
 
 function populateProductWorkspace(product: CommerceProduct, variations: CommerceVariation[] = []): void {
   editingProductId = product?.id ?? null;
+  activeProductTestingCost = product.testingCostPerUnit || 0;
+  activeProductTestingLot = product.testingLot || "";
   requiredElement<HTMLElement>("#product-drawer-title").textContent = product.name;
   requiredElement<HTMLElement>("#product-record-badge").textContent = `#${product.id}`;
   requiredElement<HTMLElement>("#product-drawer-subtitle").textContent = "Manage merchandising, inventory, economics and channel visibility.";
@@ -8468,6 +8511,8 @@ function populateProductWorkspace(product: CommerceProduct, variations: Commerce
       unitCost: item.cost?.unitCost ?? product.cost?.unitCost ?? 0,
       stock: item.stockQuantity || 0,
       image: item.image,
+      testingCost: item.testingCostPerUnit || 0,
+      testingLot: item.testingLot || "",
     })).join("");
     variantTable.hidden = variations.length === 0;
   }
@@ -8499,6 +8544,8 @@ async function loadProductWorkspace(product: CommerceProduct): Promise<void> {
 
 function openProductDrawer(product?: CommerceProduct): void {
   editingProductId = product?.id ?? null;
+  activeProductTestingCost = product?.testingCostPerUnit || 0;
+  activeProductTestingLot = product?.testingLot || "";
   productDrawer.classList.remove("is-cost-mode");
   requiredElement<HTMLElement>("#product-drawer-title").textContent = product ? product.name : "Add product";
   requiredElement<HTMLElement>("#product-record-badge").textContent = product ? `#${product.id}` : "NEW";
@@ -9781,9 +9828,18 @@ coaStatusInput.addEventListener("change", () => {
 coaCurrentLotInput.addEventListener("change", () => {
   coaCurrentLotInput.dataset.suggested = "false";
 });
+coaTestingCostInput.addEventListener("input", syncCoaTestingCost);
+coaBatchUnitsInput.addEventListener("input", syncCoaTestingCost);
 coaEditorForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (!editingCoa || !extensionsData?.coaWriteEnabled) return;
+  const testingTotal = Math.max(0, Number(coaTestingCostInput.value) || 0);
+  const testingUnits = Math.max(0, Math.floor(Number(coaBatchUnitsInput.value) || 0));
+  if ((testingTotal > 0 && testingUnits === 0) || (testingUnits > 0 && testingTotal === 0)) {
+    showToast("Complete the testing allocation", "Enter both the laboratory invoice total and the number of units covered by this lot.", false);
+    (testingTotal > 0 ? coaBatchUnitsInput : coaTestingCostInput).focus();
+    return;
+  }
   if (!coaPresentationMatch.hidden && coaStatusInput.value === "Available" && Number(coaVariationIdInput.value) <= 0) {
     showToast("Exact presentation required", "Choose the correct strength or mg before publishing this COA.", false);
     coaVariationIdInput.focus();
@@ -9810,6 +9866,8 @@ coaEditorForm.addEventListener("submit", (event) => {
     laboratory: coaLaboratoryInput.value.trim(),
     method: coaMethodInput.value.trim(),
     tested: coaTestedInput.value.trim(),
+    testingCostTotal: testingTotal,
+    batchUnitCount: testingUnits,
     currentShippingLot: coaCurrentLotInput.checked,
     fileUrl: coaFileUrlInput.value.trim(),
     verifyUrl: coaVerifyUrlInput.value.trim(),
@@ -9836,6 +9894,7 @@ coaEditorForm.addEventListener("submit", (event) => {
     } else {
       await loadExtensions();
     }
+    await loadCommerce();
     closeCoaEditor();
     showToast(
       payload.status === "Available" ? "COA approved and published" : "COA review saved",

@@ -1276,6 +1276,12 @@ html[data-theme="dark"] .customer-trust-mark,html[data-theme="dark"] .catalog-co
 .coa-presentation-match { margin-top:10px;padding:14px;border:1px solid color-mix(in srgb,var(--accent) 34%,var(--line));border-radius:10px;background:color-mix(in srgb,var(--accent-soft) 38%,var(--surface)); }
 .coa-presentation-match>label { display:grid;gap:7px; }.coa-presentation-match label>span { color:var(--ink);font-size:9px;font-weight:800; }.coa-presentation-match select { width:100%;height:43px;padding:0 11px;border:1px solid var(--line-strong);border-radius:7px;background:var(--surface);color:var(--ink);font-size:11px; }.coa-presentation-match small { color:var(--muted);font-size:8px;line-height:1.45; }
 .coa-date-guidance { color:var(--muted);font-size:8px;line-height:1.45; }.coa-date-guidance.is-confirmed { color:var(--green); }.coa-date-guidance.is-warning { color:#a45a3a; }
+.coa-testing-economics { background:linear-gradient(135deg,color-mix(in srgb,var(--surface) 92%,#dff5ec),var(--surface))!important; }
+.coa-testing-allocation { display:grid;grid-template-columns:1fr auto;align-items:center;gap:4px 18px;margin-top:14px;padding:14px 16px;border:1px solid color-mix(in srgb,var(--green) 30%,var(--line));border-radius:9px;background:var(--surface); }
+.coa-testing-allocation span { color:var(--muted);font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.06em; }
+.coa-testing-allocation strong { color:var(--green);font-size:20px;letter-spacing:-.03em; }
+.coa-testing-allocation small { grid-column:1/-1;color:var(--muted);font-size:8px; }
+.cell-cost-stack { display:grid;gap:3px; }.cell-cost-stack small { color:var(--muted);font-size:7px;white-space:nowrap; }
 .coa-detected-assays { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px; }
 .coa-detected-assay { display:grid;grid-template-columns:28px minmax(0,1fr);align-items:center;gap:9px;padding:11px;border:1px solid var(--line);border-radius:9px;background:var(--surface-soft); }
 .coa-detected-assay>span { width:28px;height:28px;display:grid;place-items:center;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:9px;font-weight:900; }

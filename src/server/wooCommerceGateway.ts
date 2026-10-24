@@ -403,6 +403,9 @@ export interface CommerceCoa {
   laboratory: string;
   method: string;
   tested: string;
+  testingCostTotal?: number;
+  batchUnitCount?: number;
+  testingCostPerUnit?: number;
   currentShippingLot: boolean;
   fileUrl: string;
   externalFileUrl?: string;
@@ -452,6 +455,8 @@ export interface CommerceCoaWrite {
   laboratory: string;
   method: string;
   tested: string;
+  testingCostTotal?: number;
+  batchUnitCount?: number;
   currentShippingLot: boolean;
   fileUrl: string;
   verifyUrl: string;

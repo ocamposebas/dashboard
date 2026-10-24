@@ -33,9 +33,18 @@ import {
 import { CoaScanIdentifierRepository } from "./coaScanIdentifierRepository.js";
 import { resolveExternalCoaQr } from "./coaExternalQrResolver.js";
 import { resolveCoaQrScan } from "./coaScanResolver.js";
-import { CoaRepository, type CoaUpdateInput } from "./coaRepository.js";
+import {
+  CoaRepository,
+  type CoaTestingCost,
+  type CoaUpdateInput,
+  type OrderTestingCostAllocation,
+} from "./coaRepository.js";
 import { buildThermalLabelDocument } from "../shared/labelPrint.js";
-import { calculateProductProfitability, productCostForCatalogLine } from "../shared/productProfitability.js";
+import {
+  allocatedTestingCost,
+  calculateProductProfitability,
+  productCostForCatalogLine,
+} from "../shared/productProfitability.js";
 import { coaNeedsExactVariation } from "../shared/coaCatalogMapping.js";
 import {
   canAutomaticallyPublishCoa,
@@ -482,13 +491,17 @@ export function createMonitorServer(
   });
 
   async function orderWithProfitability(order: CommerceOrder) {
-    const costs = await store.getProductCosts(
-      order.lineItems.flatMap((item) => [item.productId, item.variationId]).filter((id) => id > 0),
-    );
+    const catalogIds = order.lineItems.flatMap((item) => [item.productId, item.variationId]).filter((id) => id > 0);
+    const [costs, currentTestingCosts, recordedTestingCosts] = await Promise.all([
+      store.getProductCosts(catalogIds),
+      customCoas?.currentTestingCosts(catalogIds) ?? Promise.resolve<Record<string, CoaTestingCost>>({}),
+      customCoas?.orderTestingCostAllocations(order.id) ?? Promise.resolve<Record<string, OrderTestingCostAllocation>>({}),
+    ]);
     let costOfGoods = 0;
     let operatingCost = 0;
     let feeCost = 0;
     let affiliateCost = 0;
+    let testingCost = 0;
     let coveredItems = 0;
     let totalItems = 0;
     for (const item of order.lineItems) {
@@ -500,6 +513,11 @@ export function createMonitorServer(
       operatingCost += cost.packagingCost * item.quantity;
       feeCost += item.total * (cost.feeRate / 100);
       affiliateCost += item.total * (cost.affiliateRate / 100);
+      const recorded = recordedTestingCosts[String(item.id)];
+      const current = item.variationId > 0 && currentTestingCosts[String(item.variationId)]
+        ? currentTestingCosts[String(item.variationId)]
+        : currentTestingCosts[String(item.productId)];
+      testingCost += allocatedTestingCost(item.quantity, recorded, current?.perUnit || 0);
     }
     const completeCostCoverage = totalItems > 0 && coveredItems >= totalItems;
     return {
@@ -509,9 +527,10 @@ export function createMonitorServer(
         operatingCost,
         feeCost,
         affiliateCost,
+        testingCost,
         completeCostCoverage,
         estimatedProfit: completeCostCoverage
-          ? order.total - costOfGoods - operatingCost - feeCost - affiliateCost
+          ? order.total - costOfGoods - operatingCost - feeCost - affiliateCost - testingCost
           : null,
       },
     };
@@ -889,16 +908,27 @@ export function createMonitorServer(
       ]);
       const productIds = [
         ...products.map((product) => product.id),
-        ...orders.flatMap((order) => order.lineItems.map((item) => item.productId)),
+        ...orders.flatMap((order) => order.lineItems.flatMap((item) => [item.productId, item.variationId]).filter((id) => id > 0)),
       ];
-      const costs = await store.getProductCosts(productIds);
+      const [costs, testingCosts] = await Promise.all([
+        store.getProductCosts(productIds),
+        customCoas?.currentTestingCosts(productIds) ?? Promise.resolve<Record<string, CoaTestingCost>>({}),
+      ]);
       const productsWithProfit = products.map((product) => {
         const cost = costs[String(product.id)] || null;
-        const profitability = cost ? calculateProductProfitability(product.price, cost) : null;
+        const testing = testingCosts[String(product.id)] || null;
+        const profitability = cost ? calculateProductProfitability(product.price, {
+          ...cost,
+          testingCost: testing?.perUnit || 0,
+        }) : null;
         const estimatedProfit = profitability?.estimatedProfit ?? null;
         return {
           ...product,
           cost,
+          testingCostPerUnit: testing?.perUnit || 0,
+          testingCostTotal: testing?.total || 0,
+          testingBatchUnitCount: testing?.batchUnits || 0,
+          testingLot: testing?.lot || "",
           estimatedProfit,
           margin: profitability?.margin ?? null,
         };
@@ -4085,6 +4115,8 @@ export function createMonitorServer(
           familyName, familyKey: textValue("familyKey"), strength: textValue("strength"),
           batch: textValue("batch"), lot: textValue("lot"), date, status: textValue("status") || "Available",
           purity: textValue("purity"), laboratory: textValue("laboratory"), method: textValue("method"), tested: textValue("tested"),
+          testingCostTotal: Math.max(0, Number(input.testingCostTotal) || 0),
+          batchUnitCount: Math.max(0, Math.floor(Number(input.batchUnitCount) || 0)),
           currentShippingLot: Boolean(input.currentShippingLot), fileUrl, verifyUrl,
           fileAttachmentId: Math.max(0, Number(input.fileAttachmentId) || 0),
           matchedProductId: Math.max(0, Number(input.matchedProductId) || 0),
@@ -4107,6 +4139,7 @@ export function createMonitorServer(
           const coa = await customCoas.update(coaWrite, currentUser.id);
           extensionsCache = undefined;
           fulfillmentCoasCache = undefined;
+          await invalidateCommerceCache();
           const extensions = await refreshExtensions();
           json(response, 200, { coa, extensions });
         } catch (error: unknown) {
@@ -4352,24 +4385,43 @@ export function createMonitorServer(
           const variations = productType === "variable"
             ? await commerce.listProductVariations(productId)
             : [];
-          const detailCosts = await store.getProductCosts([productId, ...variations.map((variation) => variation.id)]);
+          const detailIds = [productId, ...variations.map((variation) => variation.id)];
+          const [detailCosts, detailTestingCosts] = await Promise.all([
+            store.getProductCosts(detailIds),
+            customCoas?.currentTestingCosts(detailIds) ?? Promise.resolve<Record<string, CoaTestingCost>>({}),
+          ]);
           const defaultCost = detailCosts[String(productId)] || null;
+          const defaultTesting = detailTestingCosts[String(productId)] || null;
           const variationsWithProfit = variations.map((variation) => {
             const exactCost = detailCosts[String(variation.id)] || null;
             const variationCost = exactCost || defaultCost;
+            const testing = detailTestingCosts[String(variation.id)] || defaultTesting;
             const profitability = variationCost
-              ? calculateProductProfitability(variation.regularPrice || variation.price, variationCost)
+              ? calculateProductProfitability(variation.regularPrice || variation.price, {
+                  ...variationCost,
+                  testingCost: testing?.perUnit || 0,
+                })
               : null;
             return {
               ...variation,
               cost: variationCost,
               costInherited: !exactCost && Boolean(defaultCost),
+              testingCostPerUnit: testing?.perUnit || 0,
+              testingCostTotal: testing?.total || 0,
+              testingBatchUnitCount: testing?.batchUnits || 0,
+              testingLot: testing?.lot || "",
               estimatedProfit: profitability?.estimatedProfit ?? null,
               margin: profitability?.margin ?? null,
             };
           });
           const detailPayload: Record<string, unknown> = {
-            product,
+            product: {
+              ...product,
+              testingCostPerUnit: defaultTesting?.perUnit || 0,
+              testingCostTotal: defaultTesting?.total || 0,
+              testingBatchUnitCount: defaultTesting?.batchUnits || 0,
+              testingLot: defaultTesting?.lot || "",
+            },
             variations: variationsWithProfit,
             cost: defaultCost,
             mode: config.wooCommerce.accessMode,
