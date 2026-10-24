@@ -59,3 +59,8 @@ a WooCommerce tracking note through the site's configured mail transport and
 marks the order Completed. Replays remain idempotent, while voiding the same
 label removes tracking and returns the order to Processing.
 
+Version 1.9.0 lets the packing workflow continue with either one or two evidence
+photos. WordPress validates every supplied image and sends exactly the available
+evidence through the site's existing SMTP transport without weakening replay or
+size protections.
+

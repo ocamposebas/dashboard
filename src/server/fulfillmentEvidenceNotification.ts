@@ -18,7 +18,7 @@ function safeFailure(error: unknown): boolean {
   return error instanceof Error && (
     /^Commerce service returned \d{3}:/.test(error.message) ||
     /^Packaging evidence email /.test(error.message) ||
-    /^Both packaging evidence photos /.test(error.message)
+    /^One or two unique packaging evidence photos /.test(error.message)
   );
 }
 
@@ -79,7 +79,7 @@ export class FulfillmentEvidenceNotificationWorkflow {
       }
       return this.evidence.repository.markNotificationSent({
         ...input,
-        message: result.message || "Customer email sent through WordPress SMTP with both photos attached.",
+        message: result.message || `Customer email sent through WordPress SMTP with ${attachments.length === 1 ? "the evidence photo" : "both photos"} attached.`,
       });
     } catch (error: unknown) {
       const uncertain = !safeFailure(error);

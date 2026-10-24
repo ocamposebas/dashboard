@@ -358,9 +358,8 @@ export class FulfillmentEvidenceRepository {
         return { workspace: workspaceFromRows(set, await activeFiles(client, fulfillmentId)), replayed: true };
       }
       const files = await activeFiles(client, fulfillmentId);
-      const kinds = new Set(files.map((file) => file.kind));
-      if (!kinds.has("contents") || !kinds.has("sealed_label")) {
-        throw new FulfillmentEvidenceRepositoryError("Capture both required photos before confirming evidence", "invalid_state");
+      if (files.length < 1) {
+        throw new FulfillmentEvidenceRepositoryError("Capture the required packaging photo before confirming evidence", "invalid_state");
       }
       const result = await client.query<FulfillmentEvidenceSetRow>(
         `UPDATE fulfillment_evidence_sets SET
@@ -374,7 +373,11 @@ export class FulfillmentEvidenceRepository {
         clientEventId,
         eventType: "confirmed",
         actorId,
-        details: { requiredPhotos: ["contents", "sealed_label"], notificationState: "not_configured" },
+        details: {
+          minimumPhotos: 1,
+          capturedPhotos: files.map((file) => file.kind),
+          notificationState: "not_configured",
+        },
       });
       return { workspace: workspaceFromRows(result.rows[0]!, files), replayed: false };
     });
@@ -406,15 +409,19 @@ export class FulfillmentEvidenceRepository {
          WHERE fulfillment_id = $1 RETURNING *`,
         [fulfillmentId, "Customer email is queued through WordPress SMTP."],
       );
+      const files = await activeFiles(client, fulfillmentId);
       await addEvent(client, {
         fulfillmentId,
         clientEventId,
         eventType: "notification_queued",
         actorId,
-        details: { transport: "wordpress_wp_mail", attachments: ["contents", "sealed_label"] },
+        details: {
+          transport: "wordpress_wp_mail",
+          attachments: files.map((file) => file.kind),
+        },
       });
       return {
-        workspace: workspaceFromRows(result.rows[0]!, await activeFiles(client, fulfillmentId)),
+        workspace: workspaceFromRows(result.rows[0]!, files),
         replayed: false,
       };
     });

@@ -113,7 +113,7 @@ test("real label creation is fail-closed behind the server flag", async () => {
   assert.equal(requested, false);
 });
 
-test("FedEx One Rate uses the connected carrier package code without custom dimensions", async () => {
+test("Phase One shipping requests only FedEx 2Day with the One Rate Pak package", async () => {
   const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
   const gateway = new ShipStationGateway({
     apiKey: "server-only-key",
@@ -131,8 +131,8 @@ test("FedEx One Rate uses the connected carrier package code without custom dime
         friendly_name: "FedEx",
         services: [{ service_code: "fedex_2day", name: "FedEx 2Day", domestic: true }],
         packages: [{
-          package_code: "fedex_small_box_onerate",
-          name: "FedEx One Rate Small Box",
+          package_code: "fedex_pak_onerate",
+          name: "FedEx One Rate Pak",
           domestic: true,
         }],
       }] }), { status: 200 });
@@ -156,12 +156,20 @@ test("FedEx One Rate uses the connected carrier package code without custom dime
         service_code: "fedex_2day",
         service_type: "FedEx 2Day",
         shipping_amount: { amount: 14.2, currency: "USD" },
+      }, {
+        rate_id: "se-ground-rate",
+        carrier_id: "se-fedex",
+        carrier_code: "fedex",
+        carrier_friendly_name: "FedEx",
+        service_code: "fedex_ground",
+        service_type: "FedEx Ground",
+        shipping_amount: { amount: 9.9, currency: "USD" },
       }] },
     }), { status: 200 });
   }, "https://shipstation.example/v2");
 
   const capabilities = await gateway.capabilities();
-  assert.equal(capabilities.carriers[0]?.packages[0]?.code, "fedex_small_box_onerate");
+  assert.equal(capabilities.carriers[0]?.packages[0]?.code, "fedex_pak_onerate");
   const rates = await gateway.rates({
     carrierIds: ["se-fedex"],
     package: {
@@ -169,8 +177,8 @@ test("FedEx One Rate uses the connected carrier package code without custom dime
       lengthIn: 8,
       widthIn: 6,
       heightIn: 4,
-      packageCode: "fedex_small_box_onerate",
-      packageName: "FedEx One Rate Small Box",
+      packageCode: "fedex_pak_onerate",
+      packageName: "FedEx One Rate Pak",
     },
     destination: {
       name: "Test Customer", address1: "100 Test Street", city: "Greeley", state: "CO",
@@ -183,8 +191,12 @@ test("FedEx One Rate uses the connected carrier package code without custom dime
   const rateRequest = requests.find((request) => request.url.endsWith("/rates"));
   const shipment = rateRequest?.body.shipment as Record<string, unknown>;
   const parcel = (shipment.packages as Array<Record<string, unknown>>)[0];
-  assert.equal(parcel?.package_code, "fedex_small_box_onerate");
+  assert.equal(parcel?.package_code, "fedex_pak_onerate");
   assert.equal("dimensions" in (parcel || {}), false);
+  const rateOptions = rateRequest?.body.rate_options as Record<string, unknown>;
+  assert.deepEqual(rateOptions.service_codes, ["fedex_2day"]);
+  assert.deepEqual(rateOptions.package_types, ["fedex_pak_onerate"]);
+  assert.equal(rates.length, 1);
   assert.equal(rates[0]?.serviceName, "FedEx 2Day One Rate");
   assert.equal(rates[0]?.amount, 14.2);
 });

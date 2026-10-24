@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Phase One Operations Bridge
  * Description: Secure bridge between Phase One Operations Suite, storefront controls, customer rewards and existing COA Manager records.
- * Version: 1.8.0
+ * Version: 1.9.0
  * Author: Phase One Labz
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -145,7 +145,7 @@ final class Phase_One_Operations_Bridge {
     public static function status() {
         return rest_ensure_response([
             'connected' => true,
-            'version' => '1.8.0',
+            'version' => '1.9.0',
             'capabilities' => array_values(array_filter([
                 'edit_coa',
                 'read_customer_rewards',
@@ -384,7 +384,7 @@ final class Phase_One_Operations_Bridge {
                 'state' => 'sent',
                 'sent_at' => sanitize_text_field((string) $sent_events[$event_id]),
                 'replayed' => true,
-                'message' => 'Customer email already sent through WordPress SMTP with both photos attached.',
+                'message' => 'Customer packaging evidence email was already sent through WordPress SMTP.',
             ]);
         }
 
@@ -419,6 +419,9 @@ final class Phase_One_Operations_Bridge {
             $attachment_bytes = 0;
             foreach ($requirements as $field => $filename) {
                 $file = isset($files[$field]) && is_array($files[$field]) ? $files[$field] : [];
+                if (empty($file['tmp_name']) && empty($file['size'])) {
+                    continue;
+                }
                 if (
                     empty($file['tmp_name']) ||
                     !is_uploaded_file($file['tmp_name']) ||
@@ -426,7 +429,7 @@ final class Phase_One_Operations_Bridge {
                     empty($file['size']) ||
                     (int) $file['size'] > 6 * MB_IN_BYTES
                 ) {
-                    throw new RuntimeException('Both valid packaging evidence photos are required.');
+                    throw new RuntimeException('Every packaging evidence attachment must be a valid image smaller than 6 MB.');
                 }
                 $attachment_bytes += (int) $file['size'];
                 $image_info = @getimagesize($file['tmp_name']); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
@@ -446,6 +449,9 @@ final class Phase_One_Operations_Bridge {
                 }
                 $temp_files[] = $temp_path;
             }
+            if (count($temp_files) < 1 || count($temp_files) > 2) {
+                throw new RuntimeException('One or two packaging evidence photos are required.');
+            }
             if ($attachment_bytes > 10 * MB_IN_BYTES) {
                 throw new RuntimeException('Packaging evidence attachments exceed the safe email size.');
             }
@@ -453,9 +459,10 @@ final class Phase_One_Operations_Bridge {
             $customer_name = trim((string) $order->get_formatted_billing_full_name());
             $confirmed_at = sanitize_text_field((string) $request->get_param('confirmed_at'));
             $body = sprintf(
-                '<p>Hello %s,</p><p>Your order <strong>#%s</strong> has been packed.</p><p>For your records, we attached two photos: the verified packed contents and the sealed package with its shipping label.</p>%s<p>Please keep this email with your order records.</p>',
+                '<p>Hello %s,</p><p>Your order <strong>#%s</strong> has been packed.</p><p>For your records, we attached %s from the verified packaging process.</p>%s<p>Please keep this email with your order records.</p>',
                 esc_html($customer_name ?: 'there'),
                 esc_html($order->get_order_number()),
+                count($temp_files) === 1 ? 'one evidence photo' : 'two evidence photos',
                 $confirmed_at ? '<p><strong>Packaging confirmed:</strong> ' . esc_html($confirmed_at) . '</p>' : ''
             );
             $mailer = WC()->mailer();
@@ -490,7 +497,8 @@ final class Phase_One_Operations_Bridge {
             $order->update_meta_data('_phaseone_packaging_evidence_email_status', 'sent');
             $order->update_meta_data('_phaseone_packaging_evidence_email_sent_at', $sent_at);
             $order->delete_meta_data('_phaseone_packaging_evidence_email_last_error');
-            $order->add_order_note('Packaging evidence emailed through WordPress with two photo attachments.');
+            $attachment_count = count($temp_files);
+            $order->add_order_note(sprintf('Packaging evidence emailed through WordPress with %d photo attachment%s.', $attachment_count, $attachment_count === 1 ? '' : 's'));
             $order->save();
             delete_option($lock_key);
 
@@ -498,7 +506,7 @@ final class Phase_One_Operations_Bridge {
                 'state' => 'sent',
                 'sent_at' => $sent_at,
                 'replayed' => false,
-                'message' => 'Customer email sent through WordPress SMTP with both photos attached.',
+                'message' => sprintf('Customer email sent through WordPress SMTP with %d evidence photo%s attached.', $attachment_count, $attachment_count === 1 ? '' : 's'),
             ]);
         } catch (Throwable $error) {
             $message = sanitize_text_field($error->getMessage());

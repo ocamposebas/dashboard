@@ -1,5 +1,26 @@
 export type ShippingDataMode = "live" | "mock";
 export type ShippingLabelPurchaseMode = "mock_only" | "live_disabled" | "live_enabled";
+
+// Phase One intentionally offers one warehouse shipping path. Keeping the
+// carrier, package and service together prevents the UI and API from drifting
+// into a different (and potentially more expensive) ShipStation rate.
+export const PHASE_ONE_SHIPPING_POLICY = {
+  carrierCode: "fedex",
+  packageCode: "fedex_pak_onerate",
+  packageName: "FedEx One Rate Pak",
+  serviceCode: "fedex_2day",
+  serviceName: "FedEx 2Day One Rate Pak",
+} as const;
+
+export function matchesPhaseOneShippingPolicy(input: {
+  carrierCode: string;
+  serviceCode: string;
+  packageCode: string | undefined;
+}): boolean {
+  return input.carrierCode.trim().toLowerCase() === PHASE_ONE_SHIPPING_POLICY.carrierCode &&
+    input.serviceCode.trim().toLowerCase() === PHASE_ONE_SHIPPING_POLICY.serviceCode &&
+    input.packageCode?.trim().toLowerCase() === PHASE_ONE_SHIPPING_POLICY.packageCode;
+}
 export type ShippingLabelState =
   | "purchase_pending"
   | "purchase_unknown"

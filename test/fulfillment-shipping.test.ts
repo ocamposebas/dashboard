@@ -11,6 +11,10 @@ import {
   shippingPackageInput,
 } from "../src/server/fulfillmentShipping.js";
 import type { CommerceAddress } from "../src/server/wooCommerceGateway.js";
+import {
+  matchesPhaseOneShippingPolicy,
+  PHASE_ONE_SHIPPING_POLICY,
+} from "../src/shared/shipping.js";
 
 function address(overrides: Partial<CommerceAddress> = {}): CommerceAddress {
   return {
@@ -61,6 +65,24 @@ test("shipping validates standard package limits and complete order addresses", 
   const externalKey = shippingExternalShipmentKey("11111111-1111-4111-8111-111111111111");
   assert.equal(externalKey, "p1-11111111-1111-4111-8111-111111111111");
   assert.ok(externalKey.length <= 50);
+});
+
+test("the warehouse shipping policy accepts only FedEx 2Day One Rate Pak", () => {
+  assert.equal(matchesPhaseOneShippingPolicy({
+    carrierCode: "fedex",
+    serviceCode: "fedex_2day",
+    packageCode: PHASE_ONE_SHIPPING_POLICY.packageCode,
+  }), true);
+  assert.equal(matchesPhaseOneShippingPolicy({
+    carrierCode: "fedex",
+    serviceCode: "fedex_ground",
+    packageCode: PHASE_ONE_SHIPPING_POLICY.packageCode,
+  }), false);
+  assert.equal(matchesPhaseOneShippingPolicy({
+    carrierCode: "fedex",
+    serviceCode: "fedex_2day",
+    packageCode: "fedex_small_box_onerate",
+  }), false);
 });
 
 test("shipping blocks invalid package values and incomplete source addresses", () => {

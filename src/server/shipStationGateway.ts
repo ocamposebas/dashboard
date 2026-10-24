@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 
-import type {
-  ShippingCarrier,
-  ShippingCapabilitiesPayload,
-  ShippingDataMode,
-  ShippingPackageInput,
+import {
+  PHASE_ONE_SHIPPING_POLICY,
+  type ShippingCarrier,
+  type ShippingCapabilitiesPayload,
+  type ShippingDataMode,
+  type ShippingPackageInput,
 } from "../shared/shipping.js";
 
 const SHIPSTATION_BASE_URL = "https://api.shipstation.com/v2";
@@ -309,6 +310,7 @@ function mockCarriers(): ShippingCarrier[] {
         { code: "fedex_2day", name: "FedEx 2Day", domestic: true, international: false },
       ],
       packages: [
+        { code: PHASE_ONE_SHIPPING_POLICY.packageCode, name: PHASE_ONE_SHIPPING_POLICY.packageName, domestic: true, international: false },
         { code: "fedex_small_box_onerate", name: "FedEx One Rate Small Box", domestic: true, international: false },
         { code: "fedex_medium_box_onerate", name: "FedEx One Rate Medium Box", domestic: true, international: false },
         { code: "fedex_large_box_onerate", name: "FedEx One Rate Large Box", domestic: true, international: false },
@@ -597,10 +599,15 @@ export class ShipStationGateway {
     if (!externalShipmentId || externalShipmentId.length > 50) {
       throw new ShipStationGatewayError("The external shipment identifier is invalid", "invalid_response");
     }
+    const phaseOnePolicySelected = packageCode === PHASE_ONE_SHIPPING_POLICY.packageCode;
     const rateOptions = {
       carrier_ids: input.carrierIds,
       preferred_currency: "USD",
       rate_type: "shipment",
+      ...(phaseOnePolicySelected ? {
+        service_codes: [PHASE_ONE_SHIPPING_POLICY.serviceCode],
+        package_types: [PHASE_ONE_SHIPPING_POLICY.packageCode],
+      } : {}),
     };
     const shipmentDetails = {
       validate_address: "validate_only",
@@ -704,7 +711,12 @@ export class ShipStationGateway {
         isEstimate: false,
       }];
     });
-    return parsed.sort((left, right) => left.amount - right.amount);
+    return parsed
+      .filter((rate) => !phaseOnePolicySelected || (
+        rate.carrierCode.toLowerCase() === PHASE_ONE_SHIPPING_POLICY.carrierCode &&
+        rate.serviceCode.toLowerCase() === PHASE_ONE_SHIPPING_POLICY.serviceCode
+      ))
+      .sort((left, right) => left.amount - right.amount);
   }
 
   async purchaseLabelFromRate(rateId: string): Promise<ShipStationLabelResult> {

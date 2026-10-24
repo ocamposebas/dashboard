@@ -36,11 +36,12 @@ import type {
   FulfillmentScanFeedback,
   FulfillmentScanPayload,
 } from "../shared/fulfillment";
-import type {
-  ShippingLabel,
-  ShippingCapabilitiesPayload,
-  ShippingPackageInput,
-  ShippingRatesPayload,
+import {
+  PHASE_ONE_SHIPPING_POLICY,
+  type ShippingLabel,
+  type ShippingCapabilitiesPayload,
+  type ShippingPackageInput,
+  type ShippingRatesPayload,
 } from "../shared/shipping";
 import type {
   FulfillmentEvidenceFile,
@@ -4080,6 +4081,13 @@ function packingSnapshotFromSession(order: FulfillmentQueueEntry): FulfillmentPa
   return value as unknown as FulfillmentPackingSnapshot;
 }
 
+function phaseOneShippingCarrier(capabilities: ShippingCapabilitiesPayload) {
+  return capabilities.carriers.find((carrier) =>
+    carrier.code.trim().toLowerCase() === PHASE_ONE_SHIPPING_POLICY.carrierCode &&
+    carrier.packages.some((item) => item.code === PHASE_ONE_SHIPPING_POLICY.packageCode && item.domestic)
+  ) || null;
+}
+
 function initialShippingState(): FulfillmentShippingUiState {
   return {
     loading: true,
@@ -4087,15 +4095,15 @@ function initialShippingState(): FulfillmentShippingUiState {
     labelBusy: false,
     label: null,
     printUrl: null,
-    selectedCarrierId: "all",
+    selectedCarrierId: "",
     selectedRateIndex: null,
     package: {
       weightOz: 16,
       lengthIn: 8,
       widthIn: 6,
       heightIn: 4,
-      packageCode: "package",
-      packageName: "Your own box",
+      packageCode: PHASE_ONE_SHIPPING_POLICY.packageCode,
+      packageName: PHASE_ONE_SHIPPING_POLICY.packageName,
     },
     labelAttemptId: null,
     error: null,
@@ -4160,35 +4168,12 @@ function shippingWorkspaceMarkup(order: FulfillmentQueueEntry, state: Fulfillmen
   }
   const modeLabel = capabilities.dataMode === "live" ? "Live carrier rates" : "Test rates";
   const purchaseUnlocked = capabilities.labelPurchaseMode === "live_enabled";
-  const carrierOptions = [
-    `<option value="all"${state.selectedCarrierId === "all" ? " selected" : ""}>All connected carriers</option>`,
-    ...capabilities.carriers.map((carrier) => `<option value="${escapeHtml(carrier.id)}"${state.selectedCarrierId === carrier.id ? " selected" : ""}>${escapeHtml(carrier.name)}${carrier.nickname ? ` · ${escapeHtml(carrier.nickname)}` : ""}</option>`),
-  ].join("");
-  const selectedCarrier = state.selectedCarrierId === "all"
-    ? null
-    : capabilities.carriers.find((carrier) => carrier.id === state.selectedCarrierId) || null;
-  const carrierPackages = [...(selectedCarrier?.packages || [])]
-    .filter((item) => item.domestic)
-    .sort((left, right) => {
-      const leftOneRate = left.code.includes("_onerate") ? 0 : 1;
-      const rightOneRate = right.code.includes("_onerate") ? 0 : 1;
-      return leftOneRate - rightOneRate || left.name.localeCompare(right.name);
-    });
-  const requestedPackageCode = state.package.packageCode || "package";
-  const selectedPackage = carrierPackages.find((item) => item.code === requestedPackageCode) || null;
-  const activePackageCode = selectedPackage?.code || "package";
-  const packageOptions = [
-    `<option value="package"${activePackageCode === "package" ? " selected" : ""}>Your own box</option>`,
-    ...carrierPackages.map((item) => `<option value="${escapeHtml(item.code)}"${activePackageCode === item.code ? " selected" : ""}>${escapeHtml(item.name)}</option>`),
-  ].join("");
-  const oneRateSelected = activePackageCode.includes("_onerate");
-  const packageHelp = selectedCarrier
-    ? carrierPackages.length
-      ? oneRateSelected
-        ? "FedEx One Rate packaging selected · live account pricing"
-        : `${carrierPackages.length} carrier package type${carrierPackages.length === 1 ? "" : "s"} available`
-      : "This carrier currently exposes custom packaging only"
-    : "Choose one carrier to unlock its branded packaging";
+  const selectedCarrier = phaseOneShippingCarrier(capabilities);
+  const selectedPackage = selectedCarrier?.packages.find((item) =>
+    item.code === PHASE_ONE_SHIPPING_POLICY.packageCode && item.domestic
+  ) || null;
+  const policyReady = Boolean(selectedCarrier && selectedPackage);
+  const oneRateSelected = true;
   const destination = state.rates?.destination;
   const rateCards = state.rates?.rates.length
     ? `<div class="shipping-rate-list">${state.rates.rates.map((rate, index) => {
@@ -4203,29 +4188,29 @@ function shippingWorkspaceMarkup(order: FulfillmentQueueEntry, state: Fulfillmen
       return `<button class="shipping-rate-card${selected ? " is-selected" : ""}" type="button" data-select-shipping-rate="${index}" aria-pressed="${selected}"><span class="shipping-carrier-mark">${escapeHtml(rate.carrierName.slice(0, 3).toUpperCase())}</span><span><strong>${escapeHtml(displayName)}</strong><small>${escapeHtml(rate.carrierName)} · ${escapeHtml(delivery + packageDetail)}</small></span><b>${formatCurrency(rate.amount, rate.currency)}</b><i>${selected ? "✓" : "Select"}</i></button>`;
     }).join("")}</div>`
     : state.rates
-      ? '<div class="shipping-empty-rates"><span>!</span><strong>No rates returned</strong><p>Try another carrier or confirm the package and destination details.</p></div>'
+      ? '<div class="shipping-empty-rates"><span>!</span><strong>FedEx One Rate Pak is unavailable</strong><p>Confirm this service is enabled on the connected FedEx account and try again.</p></div>'
       : "";
   const selectedRate = state.selectedRateIndex === null
     ? null
     : state.rates?.rates[state.selectedRateIndex] || null;
   return `<section class="shipping-workspace" data-fulfillment-id="${escapeHtml(fulfillmentId)}">
     <div class="shipping-flow-rail"><span class="is-done"><i>✓</i><b>Packed</b></span><em></em><span class="is-current"><i>2</i><b>Choose shipping</b></span><em></em><span><i>3</i><b>${capabilities.dataMode === "live" ? "Purchase label" : "Test label"}</b></span></div>
-    <header class="shipping-workspace-head"><div><p class="section-kicker">Shipping · ${escapeHtml(modeLabel)}</p><h3>Choose the best service</h3><p>Select the carrier package first, then compare the exact account rates.</p></div><span class="shipping-mode is-${capabilities.dataMode}">${capabilities.dataMode === "live" ? "CONNECTED" : "SAFE TEST MODE"}</span></header>
+    <header class="shipping-workspace-head"><div><p class="section-kicker">Shipping · ${escapeHtml(modeLabel)}</p><h3>FedEx One Rate Pak</h3><p>The approved warehouse service is locked in, so the worker only confirms the package weight and purchases the exact rate.</p></div><span class="shipping-mode is-${capabilities.dataMode}">${capabilities.dataMode === "live" ? "CONNECTED" : "SAFE TEST MODE"}</span></header>
     ${capabilities.dataMode === "mock"
       ? '<div class="shipping-test-banner"><span>i</span><p><strong>Test environment</strong> Carrier names, prices and label purchase are simulated. Nothing is sent to ShipStation.</p></div>'
       : purchaseUnlocked
         ? '<div class="shipping-test-banner is-purchase-live"><span>!</span><p><strong>Live postage enabled</strong> The displayed total is a persistent carrier quote. Final confirmation will charge the connected account and create one real label.</p></div>'
         : '<div class="shipping-test-banner is-live"><span>✓</span><p><strong>Live rates, purchase locked</strong> Prices come from connected carriers, but the server safety flag prevents every label charge.</p></div>'}
     <form class="shipping-rate-form" id="shipping-rate-form">
-      <label class="shipping-carrier-field"><span>Carrier</span><select name="carrierId">${carrierOptions}</select><small>${capabilities.carriers.length} connected carrier${capabilities.carriers.length === 1 ? "" : "s"} · ${escapeHtml(capabilities.originName || "Origin ready")}</small></label>
-      <label class="shipping-package-field"><span>Package type</span><select name="packageCode"${selectedCarrier ? "" : " disabled"}>${packageOptions}</select><small>${escapeHtml(packageHelp)}</small></label>
-      <fieldset class="${activePackageCode === "package" ? "" : "is-carrier-package"}"><legend>Package</legend><label><span>Weight</span><div><input name="weightOz" type="number" min="0.1" max="2400" step="0.1" value="${state.package.weightOz}" required><b>oz</b></div></label>${activePackageCode === "package" ? `<label><span>Length</span><div><input name="lengthIn" type="number" min="0.1" max="120" step="0.1" value="${state.package.lengthIn}" required><b>in</b></div></label><label><span>Width</span><div><input name="widthIn" type="number" min="0.1" max="120" step="0.1" value="${state.package.widthIn}" required><b>in</b></div></label><label><span>Height</span><div><input name="heightIn" type="number" min="0.1" max="120" step="0.1" value="${state.package.heightIn}" required><b>in</b></div></label>` : `<div class="shipping-carrier-package-note"><strong>${escapeHtml(selectedPackage?.name || "Carrier package")}</strong><small>Dimensions are supplied by the carrier package code.</small></div>`}</fieldset>
-      <button class="button button--primary" type="submit"${state.rateLoading ? " disabled" : ""}>${state.rateLoading ? "Comparing rates…" : "Compare rates"}</button>
+      <label class="shipping-carrier-field"><span>Carrier</span><select name="carrierId"${policyReady ? "" : " disabled"}><option value="${escapeHtml(selectedCarrier?.id || "")}" selected>FedEx</option></select><small>Only the approved carrier · ${escapeHtml(capabilities.originName || "Origin ready")}</small></label>
+      <label class="shipping-package-field"><span>Package type</span><select name="packageCode"${policyReady ? "" : " disabled"}><option value="${PHASE_ONE_SHIPPING_POLICY.packageCode}" selected>${PHASE_ONE_SHIPPING_POLICY.packageName}</option></select><small>Only FedEx One Rate Pak is enabled for fulfillment</small></label>
+      <fieldset class="is-carrier-package"><legend>Package</legend><label><span>Weight</span><div><input name="weightOz" type="number" min="0.1" max="2400" step="0.1" value="${state.package.weightOz}" required><b>oz</b></div></label><div class="shipping-carrier-package-note"><strong>${PHASE_ONE_SHIPPING_POLICY.packageName}</strong><small>FedEx supplies the Pak dimensions automatically.</small></div></fieldset>
+      <button class="button button--primary" type="submit"${state.rateLoading || !policyReady ? " disabled" : ""}>${state.rateLoading ? "Loading One Rate…" : "Load One Rate"}</button>
     </form>
     ${destination ? `<div class="shipping-destination"><span>SHIP TO</span><strong>${escapeHtml(destination.city)}, ${escapeHtml(destination.state)} ${escapeHtml(destination.postalCode)}</strong><small>${escapeHtml(destination.countryCode)} · Address remains sourced from the order</small></div>` : ""}
     ${state.error ? `<p class="shipping-error" role="alert"><span>!</span>${escapeHtml(state.error)}</p>` : ""}
     ${rateCards}
-    ${selectedRate ? `<div class="shipping-purchase-review"><div><p class="section-kicker">Selected service</p><h4>${escapeHtml(selectedRate.carrierName)} · ${escapeHtml(oneRateSelected && !/one\s*rate/i.test(selectedRate.serviceName) ? `${selectedRate.serviceName} One Rate` : selectedRate.serviceName)}</h4><p>${formatCurrency(selectedRate.amount, selectedRate.currency)}${selectedRate.isEstimate ? " estimated" : " final quoted total"} · ${escapeHtml(selectedPackage?.name || "Your own box")} · 4×6 PDF</p></div><div class="shipping-purchase-safety${purchaseUnlocked ? " is-live" : ""}"><span>${capabilities.dataMode === "mock" ? "TEST" : purchaseUnlocked ? "LIVE" : "LOCKED"}</span><p>${capabilities.dataMode === "mock" ? "Creates a local test label only. No postage or source order is changed." : purchaseUnlocked ? "Explicit confirmation purchases this exact rate once and writes tracking back safely." : "Live purchase is disabled on the server. Ask an administrator to complete the launch checklist."}</p></div><button class="button button--primary" type="button" ${capabilities.dataMode === "mock" ? "data-generate-shipping-label" : purchaseUnlocked ? "data-review-live-label" : "disabled"}${state.labelBusy ? " disabled" : ""}>${state.labelBusy ? "Processing safely…" : capabilities.dataMode === "mock" ? "Generate test label" : purchaseUnlocked ? `Review & purchase ${formatCurrency(selectedRate.amount, selectedRate.currency)}` : "Purchase locked"}</button></div>` : ""}
+    ${selectedRate ? `<div class="shipping-purchase-review"><div><p class="section-kicker">Approved service</p><h4>${PHASE_ONE_SHIPPING_POLICY.serviceName}</h4><p>${formatCurrency(selectedRate.amount, selectedRate.currency)}${selectedRate.isEstimate ? " estimated" : " final quoted total"} · ${PHASE_ONE_SHIPPING_POLICY.packageName} · 4×6 PDF</p></div><div class="shipping-purchase-safety${purchaseUnlocked ? " is-live" : ""}"><span>${capabilities.dataMode === "mock" ? "TEST" : purchaseUnlocked ? "LIVE" : "LOCKED"}</span><p>${capabilities.dataMode === "mock" ? "Creates a local test label only. No postage or source order is changed." : purchaseUnlocked ? "Explicit confirmation purchases this exact rate once and writes tracking back safely." : "Live purchase is disabled on the server. Ask an administrator to complete the launch checklist."}</p></div><button class="button button--primary" type="button" ${capabilities.dataMode === "mock" ? "data-generate-shipping-label" : purchaseUnlocked ? "data-review-live-label" : "disabled"}${state.labelBusy ? " disabled" : ""}>${state.labelBusy ? "Processing safely…" : capabilities.dataMode === "mock" ? "Generate test label" : purchaseUnlocked ? `Review & purchase ${formatCurrency(selectedRate.amount, selectedRate.currency)}` : "Purchase locked"}</button></div>` : ""}
   </section>`;
 }
 
@@ -4267,6 +4252,14 @@ async function loadFulfillmentShipping(order: FulfillmentQueueEntry, force = fal
         : "The shipping record could not be loaded.");
     }
     state.capabilities = capabilities as unknown as ShippingCapabilitiesPayload;
+    const policyCarrier = phaseOneShippingCarrier(state.capabilities);
+    if (policyCarrier) {
+      state.selectedCarrierId = policyCarrier.id;
+      state.package.packageCode = PHASE_ONE_SHIPPING_POLICY.packageCode;
+      state.package.packageName = PHASE_ONE_SHIPPING_POLICY.packageName;
+    } else if (!state.label) {
+      state.error = "FedEx One Rate Pak is not enabled on the connected ShipStation account.";
+    }
     state.label = isRecord(labelPayload.label)
       ? labelPayload.label as unknown as ShippingLabel
       : null;
@@ -4287,24 +4280,25 @@ async function compareShippingRates(): Promise<void> {
   const state = fulfillmentShippingStates.get(fulfillmentId);
   if (!state?.capabilities || state.rateLoading) return;
   const data = new FormData(form);
-  const selectedCarrierId = String(data.get("carrierId") || state.selectedCarrierId || "all");
-  const packageCode = String(data.get("packageCode") || state.package.packageCode || "package");
-  const packageCarrier = selectedCarrierId === "all"
-    ? null
-    : state.capabilities.carriers.find((carrier) => carrier.id === selectedCarrierId) || null;
-  const packageDefinition = packageCarrier?.packages.find((item) => item.code === packageCode) || null;
+  const packageCarrier = phaseOneShippingCarrier(state.capabilities);
+  const packageDefinition = packageCarrier?.packages.find(
+    (item) => item.code === PHASE_ONE_SHIPPING_POLICY.packageCode && item.domestic,
+  ) || null;
+  if (!packageCarrier || !packageDefinition) {
+    state.error = "FedEx One Rate Pak is not enabled on the connected ShipStation account.";
+    renderFulfillmentShipping(order);
+    return;
+  }
   state.package = {
     weightOz: Number(data.get("weightOz")),
-    lengthIn: data.get("lengthIn") === null ? state.package.lengthIn : Number(data.get("lengthIn")),
-    widthIn: data.get("widthIn") === null ? state.package.widthIn : Number(data.get("widthIn")),
-    heightIn: data.get("heightIn") === null ? state.package.heightIn : Number(data.get("heightIn")),
-    packageCode: packageDefinition?.code || "package",
-    packageName: packageDefinition?.name || "Your own box",
+    lengthIn: state.package.lengthIn,
+    widthIn: state.package.widthIn,
+    heightIn: state.package.heightIn,
+    packageCode: PHASE_ONE_SHIPPING_POLICY.packageCode,
+    packageName: PHASE_ONE_SHIPPING_POLICY.packageName,
   };
-  state.selectedCarrierId = selectedCarrierId;
-  const carrierIds = state.selectedCarrierId === "all"
-    ? state.capabilities.carriers.map((carrier) => carrier.id)
-    : [state.selectedCarrierId];
+  state.selectedCarrierId = packageCarrier.id;
+  const carrierIds = [packageCarrier.id];
   state.rateLoading = true;
   state.error = null;
   state.selectedRateIndex = null;
@@ -4323,6 +4317,7 @@ async function compareShippingRates(): Promise<void> {
         : "Rates could not be retrieved.");
     }
     state.rates = payload as unknown as ShippingRatesPayload;
+    state.selectedRateIndex = state.rates.rates.length === 1 ? 0 : null;
   } catch (error) {
     state.error = error instanceof Error ? error.message : "Rates could not be retrieved.";
   } finally {
@@ -4565,14 +4560,14 @@ function evidenceSlotMarkup(
   }
   return `<article class="evidence-capture-card${busy ? " is-busy" : ""}">
     <div class="evidence-empty-photo" aria-hidden="true"><span>${kind === "contents" ? "▦" : "▱"}</span></div>
-    <div class="evidence-capture-copy"><p><i>${step}</i><small>PHOTO ${step} · REQUIRED</small></p><h4>${escapeHtml(title)}</h4><span>${escapeHtml(help)}</span></div>
+    <div class="evidence-capture-copy"><p><i>${step}</i><small>PHOTO ${step} · CHOOSE ONE</small></p><h4>${escapeHtml(title)}</h4><span>${escapeHtml(help)}</span></div>
     <label class="evidence-capture-button${busy ? " is-disabled" : ""}"><span aria-hidden="true">${busy ? "···" : "+"}</span><b>${busy ? "Securing photo…" : "Take photo"}</b><small>Camera or photo library</small><input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" data-evidence-file="${kind}"${busy ? " disabled" : ""}></label>
   </article>`;
 }
 
 function evidenceWorkspaceMarkup(order: FulfillmentQueueEntry, state: FulfillmentEvidenceUiState): string {
   if (state.loading) {
-    return `<section class="packaging-evidence is-loading" aria-busy="true"><span class="evidence-loading-mark"></span><div><p class="section-kicker">Packaging evidence</p><h3>Opening the secure evidence vault…</h3><p>Your packing record is safe. Loading the two required photo slots.</p></div></section>`;
+    return `<section class="packaging-evidence is-loading" aria-busy="true"><span class="evidence-loading-mark"></span><div><p class="section-kicker">Packaging evidence</p><h3>Opening the secure evidence vault…</h3><p>Your packing record is safe. Loading the guided photo slots.</p></div></section>`;
   }
   if (!state.workspace) {
     return `<section class="packaging-evidence is-error" role="alert"><span>!</span><div><p class="section-kicker">Packaging evidence</p><h3>Evidence is temporarily unavailable</h3><p>${escapeHtml(state.error || "The secure vault could not be opened.")}</p><button class="button button--secondary" type="button" data-refresh-evidence>Try again</button></div></section>`;
@@ -4596,21 +4591,21 @@ function evidenceWorkspaceMarkup(order: FulfillmentQueueEntry, state: Fulfillmen
       : "";
     return `<section class="packaging-evidence is-confirmed">
       <div class="evidence-confirmed-mark" aria-hidden="true">✓</div>
-      <div class="evidence-confirmed-copy"><p class="section-kicker">Packaging evidence · Complete</p><h3>Order protected with verified photos</h3><p>Both photos are encrypted, audit-locked and connected to order #${escapeHtml(order.orderNumber)}.</p><small>Confirmed ${escapeHtml(formatCommerceTimestamp(workspace.confirmedAt))} · ${escapeHtml(workspace.notificationMessage)}</small></div>
+      <div class="evidence-confirmed-copy"><p class="section-kicker">Packaging evidence · Complete</p><h3>Order protected with verified evidence</h3><p>${workspace.files.length === 1 ? "The required photo is" : "Both photos are"} encrypted, audit-locked and connected to order #${escapeHtml(order.orderNumber)}.</p><small>Confirmed ${escapeHtml(formatCommerceTimestamp(workspace.confirmedAt))} · ${escapeHtml(workspace.notificationMessage)}</small></div>
       <div class="evidence-confirmed-thumbs">${workspace.files.map((file) => `<a href="${escapeHtml(file.contentUrl)}" target="_blank" rel="noopener" aria-label="Open ${escapeHtml(file.label)}"><img src="${escapeHtml(file.contentUrl)}&v=${encodeURIComponent(file.sha256.slice(0, 10))}" alt="" /><span>View</span></a>`).join("")}</div>
       <div class="evidence-confirmed-status"><span class="evidence-confirmed-badge">AUDIT LOCKED</span><span class="evidence-email-state is-${workspace.notificationState}">${emailLabel}</span>${retry}</div>
     </section>`;
   }
-  const canConfirm = completed === 2 && !state.busyKind && !state.confirming;
+  const canConfirm = completed >= 1 && !state.busyKind && !state.confirming;
   return `<section class="packaging-evidence">
-    <header class="evidence-workspace-head"><div><p class="section-kicker">Packaging evidence</p><h3>Protect this order in two photos</h3><p>A simple visual record of what left the warehouse. Photos are encrypted and never stored in the public media library.</p></div><div class="evidence-progress" aria-label="${completed} of 2 photos ready"><strong>${completed}<span>/2</span></strong><small>PHOTOS READY</small><i style="--evidence-progress:${completed / 2}"></i></div></header>
+    <header class="evidence-workspace-head"><div><p class="section-kicker">Packaging evidence</p><h3>One photo to keep the order moving</h3><p>Take either photo to continue. The second slot remains available as optional extra protection.</p></div><div class="evidence-progress" aria-label="${Math.min(completed, 1)} of 1 required photos ready"><strong>${Math.min(completed, 1)}<span>/1</span></strong><small>${completed === 2 ? "+ OPTIONAL SAVED" : "1 REQUIRED"}</small><i style="--evidence-progress:${Math.min(completed, 1)}"></i></div></header>
     <div class="evidence-privacy-note"><span aria-hidden="true">◇</span><p><strong>Private by design</strong> Location metadata is removed in the browser. The optimized photo is encrypted before it is stored.</p></div>
     <div class="evidence-capture-grid">
       ${evidenceSlotMarkup(state, "contents", 1)}
       ${evidenceSlotMarkup(state, "sealed_label", 2)}
     </div>
     ${state.error ? `<p class="evidence-inline-error" role="alert"><span>!</span>${escapeHtml(state.error)}</p>` : ""}
-    <footer class="evidence-confirm-bar"><div><span class="${canConfirm ? "is-ready" : ""}">${canConfirm ? "✓" : completed}</span><p><strong>${canConfirm ? "Both photos are ready" : `${2 - completed} photo${2 - completed === 1 ? "" : "s"} remaining`}</strong><small>${canConfirm ? "Confirm once to lock the permanent evidence record." : "Complete both guided photos to continue."}</small></p></div><button class="button button--primary" type="button" data-confirm-evidence${canConfirm ? "" : " disabled"}>${state.confirming ? "Locking evidence…" : "Confirm packaging evidence"}</button></footer>
+    <footer class="evidence-confirm-bar"><div><span class="${canConfirm ? "is-ready" : ""}">${canConfirm ? "✓" : "0"}</span><p><strong>${canConfirm ? completed === 2 ? "Both photos are ready" : "Required evidence is ready" : "1 photo remaining"}</strong><small>${canConfirm ? completed === 2 ? "Confirm once to lock both photos." : "You can continue now; the other photo is optional." : "Take either guided photo to continue."}</small></p></div><button class="button button--primary" type="button" data-confirm-evidence${canConfirm ? "" : " disabled"}>${state.confirming ? "Locking evidence…" : "Confirm and continue"}</button></footer>
   </section>`;
 }
 
@@ -4771,7 +4766,7 @@ async function confirmFulfillmentEvidence(): Promise<void> {
   const fulfillmentId = order?.session?.id;
   if (!order || !fulfillmentId) return;
   const state = fulfillmentEvidenceStates.get(fulfillmentId);
-  if (!state?.workspace || state.confirming || state.workspace.files.length < 2) return;
+  if (!state?.workspace || state.confirming || state.workspace.files.length < 1) return;
   state.confirming = true;
   state.error = null;
   renderFulfillmentEvidence(order);
@@ -4787,7 +4782,10 @@ async function confirmFulfillmentEvidence(): Promise<void> {
       throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "Evidence could not be confirmed.");
     }
     state.workspace = payload.workspace as unknown as FulfillmentEvidenceWorkspace;
-    showToast("Packaging evidence complete", "Both photos are encrypted, audit-locked and connected to this order.");
+    showToast(
+      "Packaging evidence complete",
+      `${state.workspace.files.length === 1 ? "The required photo is" : "Both photos are"} encrypted, audit-locked and connected to this order.`,
+    );
   } catch (error) {
     state.error = error instanceof Error ? error.message : "Evidence could not be confirmed.";
   } finally {
@@ -10051,14 +10049,13 @@ requiredElement<HTMLElement>("#fulfillment-detail-view").addEventListener("chang
     const state = fulfillmentId ? fulfillmentShippingStates.get(fulfillmentId) : undefined;
     if (!order || !state) return;
     if (shippingSelect.name === "carrierId") {
-      state.selectedCarrierId = shippingSelect.value || "all";
-      state.package.packageCode = "package";
-      state.package.packageName = "Your own box";
+      const policyCarrier = state.capabilities ? phaseOneShippingCarrier(state.capabilities) : null;
+      state.selectedCarrierId = policyCarrier?.id || "";
+      state.package.packageCode = PHASE_ONE_SHIPPING_POLICY.packageCode;
+      state.package.packageName = PHASE_ONE_SHIPPING_POLICY.packageName;
     } else if (shippingSelect.name === "packageCode") {
-      const carrier = state.capabilities?.carriers.find((item) => item.id === state.selectedCarrierId);
-      const carrierPackage = carrier?.packages.find((item) => item.code === shippingSelect.value);
-      state.package.packageCode = carrierPackage?.code || "package";
-      state.package.packageName = carrierPackage?.name || "Your own box";
+      state.package.packageCode = PHASE_ONE_SHIPPING_POLICY.packageCode;
+      state.package.packageName = PHASE_ONE_SHIPPING_POLICY.packageName;
     }
     delete state.rates;
     state.selectedRateIndex = null;

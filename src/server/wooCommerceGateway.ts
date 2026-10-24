@@ -629,8 +629,12 @@ function packagingEvidenceMultipart(input: {
     throw new Error("Packaging evidence email requires a stable UUID event id");
   }
   const kinds = new Set(input.attachments.map((attachment) => attachment.kind));
-  if (input.attachments.length !== 2 || !kinds.has("contents") || !kinds.has("sealed_label")) {
-    throw new Error("Both packaging evidence photos are required for customer email");
+  if (
+    input.attachments.length < 1 || input.attachments.length > 2 ||
+    kinds.size !== input.attachments.length ||
+    input.attachments.some((attachment) => attachment.kind !== "contents" && attachment.kind !== "sealed_label")
+  ) {
+    throw new Error("One or two unique packaging evidence photos are required for customer email");
   }
   const totalBytes = input.attachments.reduce((total, attachment) => {
     if (attachment.bytes.byteLength <= 0 || attachment.bytes.byteLength > 6 * 1024 * 1024) {

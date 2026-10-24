@@ -99,7 +99,12 @@ import type {
   FulfillmentPackingSnapshot,
   FulfillmentSession,
 } from "../shared/fulfillment.js";
-import type { ShippingLabel, ShippingRateQuote } from "../shared/shipping.js";
+import {
+  matchesPhaseOneShippingPolicy,
+  PHASE_ONE_SHIPPING_POLICY,
+  type ShippingLabel,
+  type ShippingRateQuote,
+} from "../shared/shipping.js";
 import {
   createShippingQuoteToken,
   ShippingQuoteTokenError,
@@ -2915,13 +2920,10 @@ export function createMonitorServer(
           : {};
         try {
           const fulfillmentId = typeof input.fulfillmentId === "string" ? input.fulfillmentId : "";
-          const carrierIds = Array.isArray(input.carrierIds)
+          const requestedCarrierIds = Array.isArray(input.carrierIds)
             ? input.carrierIds.filter((item): item is string => typeof item === "string")
               .map((item) => item.trim()).filter(Boolean)
             : [];
-          if (!carrierIds.length || carrierIds.length > 50 || new Set(carrierIds).size !== carrierIds.length) {
-            throw new FulfillmentShippingError("Choose one or more connected carriers", "invalid_input");
-          }
           let parcel = shippingPackageInput(input.package);
           const { destination, order } = await packedShippingOrder(fulfillmentId);
           const capabilities = await shipStation.capabilities();
@@ -2931,25 +2933,33 @@ export function createMonitorServer(
               capabilities.credentialConfigured ? "no_origin" : "not_configured",
             );
           }
-          if (parcel.packageCode !== "package") {
-            if (carrierIds.length !== 1) {
-              throw new FulfillmentShippingError(
-                "Choose one carrier before selecting its packaging",
-                "invalid_input",
-              );
-            }
-            const selectedCarrier = capabilities.carriers.find((carrier) => carrier.id === carrierIds[0]);
-            const selectedPackage = selectedCarrier?.packages.find(
-              (candidate) => candidate.code === parcel.packageCode,
+          const selectedCarrier = capabilities.carriers.find((carrier) =>
+            carrier.code.trim().toLowerCase() === PHASE_ONE_SHIPPING_POLICY.carrierCode &&
+            carrier.packages.some((candidate) =>
+              candidate.code === PHASE_ONE_SHIPPING_POLICY.packageCode && candidate.domestic
+            )
+          );
+          if (!selectedCarrier) {
+            throw new FulfillmentShippingError(
+              "FedEx One Rate Pak is not enabled on the connected ShipStation account",
+              "invalid_input",
             );
-            if (!selectedPackage) {
-              throw new FulfillmentShippingError(
-                "This package is not available for the selected carrier account",
-                "invalid_input",
-              );
-            }
-            parcel = { ...parcel, packageName: selectedPackage.name };
           }
+          if (
+            requestedCarrierIds.length !== 1 || requestedCarrierIds[0] !== selectedCarrier.id ||
+            parcel.packageCode !== PHASE_ONE_SHIPPING_POLICY.packageCode
+          ) {
+            throw new FulfillmentShippingError(
+              "Only FedEx One Rate Pak can be used for fulfillment",
+              "invalid_input",
+            );
+          }
+          const carrierIds = [selectedCarrier.id];
+          parcel = {
+            ...parcel,
+            packageCode: PHASE_ONE_SHIPPING_POLICY.packageCode,
+            packageName: PHASE_ONE_SHIPPING_POLICY.packageName,
+          };
           const reconciliation = capabilities.dataMode === "live"
             ? await shipStation.reconcileOrderByNumber(order.number)
             : { purchasedLabels: [], protectedShipmentFound: false, reusableShipmentId: null };
@@ -2959,14 +2969,18 @@ export function createMonitorServer(
               "order_ineligible",
             );
           }
-          const rates = await shipStation.rates({
+          const rates = (await shipStation.rates({
             carrierIds,
             package: parcel,
             destination,
             externalShipmentId: shippingExternalShipmentKey(fulfillmentId),
             orderNumber: order.number,
             existingShipmentId: reconciliation.reusableShipmentId,
-          });
+          })).filter((rate) => matchesPhaseOneShippingPolicy({
+            carrierCode: rate.carrierCode,
+            serviceCode: rate.serviceCode,
+            packageCode: parcel.packageCode,
+          }));
           const destinationHash = shippingDestinationHash(destination);
           const quotedRates: ShippingRateQuote[] = rates.map((rate) => ({
             ...rate,
@@ -3024,6 +3038,16 @@ export function createMonitorServer(
           const claims = verifyShippingQuoteToken(config.sessionSecret, quoteToken);
           if (claims.fulfillmentId !== fulfillmentId) {
             throw new ShippingQuoteTokenError("The selected rate belongs to another fulfillment", "invalid");
+          }
+          if (!matchesPhaseOneShippingPolicy({
+            carrierCode: claims.rate.carrierCode,
+            serviceCode: claims.rate.serviceCode,
+            packageCode: claims.package.packageCode,
+          })) {
+            throw new ShippingQuoteTokenError(
+              "Only FedEx One Rate Pak can be purchased from this workspace",
+              "invalid",
+            );
           }
           const { destination, order, sourceShipping } = await packedShippingOrder(fulfillmentId);
           if (shippingDestinationHash(destination) !== claims.destinationHash) {

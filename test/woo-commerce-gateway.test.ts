@@ -655,6 +655,36 @@ test("sends both packaging photos to the protected WordPress mail bridge as mult
   assert.equal(multipart.includes("cs_test"), false);
 });
 
+test("sends a single packaging photo when the worker skips the optional second photo", async () => {
+  let multipart = "";
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example",
+    consumerKey: "ck_test",
+    consumerSecret: "cs_test",
+  }, async (_input, init) => {
+    multipart = Buffer.from(init?.body as Uint8Array).toString("latin1");
+    return new Response(JSON.stringify({
+      state: "sent",
+      sent_at: "2026-10-17T18:00:00Z",
+      replayed: false,
+      message: "Customer email sent with one evidence photo.",
+    }), { status: 200 });
+  });
+
+  const result = await gateway.emailPackagingEvidence({
+    orderId: 109,
+    eventId: "11234567-89ab-4def-8123-456789abcdef",
+    confirmedAt: "2026-10-17T17:59:00Z",
+    attachments: [
+      { kind: "contents", mime: "image/jpeg", bytes: Buffer.from([0xff, 0xd8, 0xff, 0xd9]) },
+    ],
+  });
+
+  assert.equal(result.state, "sent");
+  assert.match(multipart, /name="contents"; filename="packed-contents\.jpg"/);
+  assert.equal(multipart.includes('name="sealed_label"'), false);
+});
+
 test("loads public COA and site-control modules without leaking catalog credentials", async () => {
   const requests: Array<{ path: string; authorization: string | null }> = [];
   const fetchImpl: typeof fetch = async (input, init) => {
