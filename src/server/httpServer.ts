@@ -4825,6 +4825,57 @@ export function createMonitorServer(
         return;
       }
 
+      if (url.pathname === "/api/inventory-operations/current-lot" && request.method === "POST") {
+        if (!isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Origin not allowed" });
+          return;
+        }
+        if (!canOperate) { json(response, 403, { error: "Operations access required" }); return; }
+        if (!customCoas || !commerce) {
+          json(response, 503, { error: "The governed COA and catalog services must be connected" });
+          return;
+        }
+        let payload: unknown;
+        try { payload = JSON.parse(await readBody(request)); } catch {
+          json(response, 400, { error: "Invalid JSON request" });
+          return;
+        }
+        const input = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+        const certificateId = typeof input.certificateId === "string" ? input.certificateId.trim() : "";
+        const productId = Math.max(0, Math.floor(Number(input.productId) || 0));
+        const variationId = Math.max(0, Math.floor(Number(input.variationId) || 0));
+        const expectedRevision = Math.max(0, Math.floor(Number(input.expectedRevision) || 0));
+        if (!certificateId || !productId) {
+          json(response, 400, { error: "Choose a valid product and shipping lot" });
+          return;
+        }
+        try {
+          const catalog = await fulfillmentCatalogRecord(productId, variationId);
+          if (coaNeedsExactVariation(catalog.product.type, "Available", variationId)) {
+            throw new ProductLocationError(
+              "Choose the exact presentation or strength before assigning its shipping lot",
+              "invalid_input",
+            );
+          }
+          const coa = await customCoas.setCurrentShippingLot({
+            certificateId,
+            productId,
+            variationId,
+            ...(expectedRevision ? { expectedRevision } : {}),
+          }, currentUser.id);
+          extensionsCache = undefined;
+          fulfillmentCoasCache = undefined;
+          await invalidateCommerceCache();
+          const lots = await customCoas.list({ publishedOnly: true, limit: 500 });
+          json(response, 200, { saved: true, coa, lots });
+        } catch (error: unknown) {
+          console.error("Current shipping lot assignment failed", error);
+          const message = error instanceof Error ? error.message : "The shipping lot could not be assigned";
+          json(response, message.includes("not found") ? 404 : message.includes("another session") ? 409 : 400, { error: message });
+        }
+        return;
+      }
+
       if (url.pathname === "/api/inventory-operations" && request.method === "GET") {
         if (!commerce || !config.wooCommerce) {
           json(response, 503, { error: "The live inventory service is not connected" });
@@ -4832,11 +4883,19 @@ export function createMonitorServer(
         }
         const products = Array.isArray(commerceCache?.payload.products) ? commerceCache?.payload.products : [];
         let bridgeAvailable = true;
-        const restocks = await commerce.listRestocks().catch((error: unknown) => {
-          bridgeAvailable = false;
-          console.error("Restock program fetch failed", error);
-          return [];
-        });
+        const [restocks, lots] = await Promise.all([
+          commerce.listRestocks().catch((error: unknown) => {
+            bridgeAvailable = false;
+            console.error("Restock program fetch failed", error);
+            return [];
+          }),
+          customCoas
+            ? customCoas.list({ publishedOnly: true, limit: 500 }).catch((error: unknown) => {
+                console.error("Inventory shipping lots fetch failed", error);
+                return [];
+              })
+            : Promise.resolve([]),
+        ]);
         const waitlistProductIds = [...new Set([
           ...restocks.map((item) => item.productId),
           ...products.flatMap((item) => {
@@ -4861,8 +4920,10 @@ export function createMonitorServer(
             waitlistCount: waitlistCounts[String(item.productId)] ?? item.waitlistCount,
           })),
           products,
+          lots,
           waitlistCounts,
           bridgeAvailable,
+          lotAssignmentsAvailable: Boolean(customCoas),
           syncedAt: new Date().toISOString(),
         });
         return;

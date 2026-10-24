@@ -150,6 +150,13 @@ export interface CoaUpdateInput extends Omit<CommerceCoaWrite, "wpPostId"> {
   expectedRevision?: number;
 }
 
+export interface CurrentShippingLotInput {
+  certificateId: string;
+  productId: number;
+  variationId: number;
+  expectedRevision?: number;
+}
+
 export interface StageResult {
   coa: CustomCoa;
   duplicate: boolean;
@@ -416,6 +423,56 @@ export class CoaRepository {
     }]));
   }
 
+  async setCurrentShippingLot(input: CurrentShippingLotInput, actorId: string): Promise<CustomCoa> {
+    const productId = Math.max(0, Math.floor(Number(input.productId || 0)));
+    const variationId = Math.max(0, Math.floor(Number(input.variationId || 0)));
+    if (!input.certificateId.trim() || !productId) throw new Error("A certificate and exact catalog product are required");
+
+    return this.database.transaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`coa-shipping-lot:${productId}:${variationId}`]);
+      const selected = await client.query<CoaRow>(`${SELECT_COA} WHERE id = $1 FOR UPDATE`, [input.certificateId]);
+      const row = selected.rows[0];
+      if (!row) throw new Error("COA record not found");
+      if (input.expectedRevision && Number(row.revision) !== input.expectedRevision) {
+        throw new Error("This COA changed in another session. Reload it before assigning the lot");
+      }
+      if (row.status !== "Available" || !row.published_at) {
+        throw new Error("Only a reviewed Available certificate can be assigned as the shipping lot");
+      }
+      if (Math.max(0, Number(row.matched_product_id || 0)) !== productId ||
+          Math.max(0, Number(row.matched_variation_id || 0)) !== variationId) {
+        throw new Error("This lot is not mapped to the exact product and presentation selected");
+      }
+
+      await client.query(
+        `UPDATE coa_certificates SET current_shipping_lot = false, revision = revision + 1,
+           updated_at = now(), updated_by = $4
+         WHERE id <> $1 AND matched_product_id = $2 AND matched_variation_id = $3
+           AND current_shipping_lot = true`,
+        [input.certificateId, productId, variationId, actorId],
+      );
+      const updated = await client.query<CoaRow>(
+        `UPDATE coa_certificates SET current_shipping_lot = true, revision = revision + 1,
+           updated_at = now(), updated_by = $2
+         WHERE id = $1
+         RETURNING id, legacy_wp_post_id, coa_number, product_name, compound,
+           family_name, family_key, strength, batch, lot, certificate_date::text, status,
+           purity, laboratory, method, tested, testing_cost_total, batch_unit_count,
+           current_shipping_lot, external_file_url, verify_url, file_attachment_id,
+           matched_product_id, matched_variation_id, skus, aliases, keywords, panel_types,
+           current_coa, history, source, document_id, revision, created_at, updated_at,
+           published_at, intake_analysis`,
+        [input.certificateId, actorId],
+      );
+      await this.event(client, input.certificateId, "current_shipping_lot_selected", actorId, {
+        productId,
+        variationId,
+        lot: row.lot || row.batch,
+      });
+      return rowToCoa(updated.rows[0]!, this.publicOrigin);
+    });
+  }
+
   async stageLinks(links: string[], suggestCurrent: boolean, actorId: string): Promise<StageResult[]> {
     const normalized = [...new Set(links.map(normalizedCoaLink))].slice(0, 40);
     const results: StageResult[] = [];
@@ -637,13 +694,26 @@ export class CoaRepository {
         throw new Error("Only an Available certificate can be the current shipping lot");
       }
       if (input.currentShippingLot) {
-        await client.query(
-          `UPDATE coa_certificates SET current_shipping_lot = false, revision = revision + 1,
-             updated_at = now(), updated_by = $4
-           WHERE id <> $1 AND lower(family_name) = lower($2) AND lower(strength) = lower($3)
-             AND current_shipping_lot = true`,
-          [input.id, familyName || productName, input.strength.trim(), actorId],
-        );
+        const productId = Math.max(0, input.matchedProductId || 0);
+        const variationId = Math.max(0, input.matchedVariationId || 0);
+        if (productId) {
+          await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`coa-shipping-lot:${productId}:${variationId}`]);
+          await client.query(
+            `UPDATE coa_certificates SET current_shipping_lot = false, revision = revision + 1,
+               updated_at = now(), updated_by = $4
+             WHERE id <> $1 AND matched_product_id = $2 AND matched_variation_id = $3
+               AND current_shipping_lot = true`,
+            [input.id, productId, variationId, actorId],
+          );
+        } else {
+          await client.query(
+            `UPDATE coa_certificates SET current_shipping_lot = false, revision = revision + 1,
+               updated_at = now(), updated_by = $4
+             WHERE id <> $1 AND lower(family_name) = lower($2) AND lower(strength) = lower($3)
+               AND current_shipping_lot = true`,
+            [input.id, familyName || productName, input.strength.trim(), actorId],
+          );
+        }
       }
       const result = await client.query<CoaRow>(
         `UPDATE coa_certificates SET

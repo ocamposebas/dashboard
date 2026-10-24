@@ -343,8 +343,10 @@ interface InventoryOperationsPayload {
     waitlistCount: number | null;
   }>;
   products: CommerceProduct[];
+  lots: CommerceCoa[];
   waitlistCounts: Record<string, number | null>;
   bridgeAvailable: boolean;
+  lotAssignmentsAvailable: boolean;
   syncedAt: string;
 }
 
@@ -950,6 +952,8 @@ const skuStockLoading = new Set<number>();
 let inventoryOperations: InventoryOperationsPayload | undefined;
 let inventoryOperationsLoading = false;
 let inventoryView: "attention" | "stock" | "restocks" = "attention";
+let lotAssignmentTarget: { productId: number; variationId: number; label: string; sku: string; strength: string } | null = null;
+let lotAssignmentBusy = false;
 const waitlistSubscribers = new Map<number, WaitlistSubscriber[]>();
 const waitlistCoverageComplete = new Map<number, boolean>();
 let activeWaitlistProductId: number | null = null;
@@ -3203,6 +3207,25 @@ function stockQuantityLabel(quantity: number | null, status: string): string {
   return status === "instock" ? "In stock" : "Not tracked";
 }
 
+function exactInventoryLots(productId: number, variationId: number): CommerceCoa[] {
+  return (inventoryOperations?.lots || [])
+    .filter((coa) => coa.status === "Available" && coa.matchedProductId === productId && coa.matchedVariationId === variationId)
+    .sort((left, right) => Number(right.currentShippingLot) - Number(left.currentShippingLot) ||
+      String(right.date || "").localeCompare(String(left.date || "")));
+}
+
+function shippingLotCell(productId: number, variationId: number, variableGroup = false): string {
+  if (variableGroup) {
+    return '<div class="shipping-lot-cell shipping-lot-cell--group"><strong>Assigned per variation</strong><small>Expand to manage each strength</small></div>';
+  }
+  const current = exactInventoryLots(productId, variationId).find((coa) => coa.currentShippingLot);
+  if (!current) {
+    return '<div class="shipping-lot-cell shipping-lot-cell--empty"><strong>No lot assigned</strong><small>Profit uses no testing allocation yet</small></div>';
+  }
+  const perUnit = Math.max(0, Number(current.testingCostPerUnit || 0));
+  return `<div class="shipping-lot-cell"><strong>${escapeHtml(current.lot || current.batch || current.coaNumber)}</strong><small>${perUnit ? `${escapeHtml(formatCurrency(perUnit))} testing / unit` : "Testing cost not recorded"} · ${escapeHtml(current.date || "No test date")}</small></div>`;
+}
+
 function renderSkuStockLedger(): void {
   const body = document.querySelector<HTMLElement>("#sku-stock-body");
   if (!body) return;
@@ -3223,23 +3246,23 @@ function renderSkuStockLedger(): void {
     const variable = product.type === "variable" || product.variationIds.length > 0;
     const expanded = skuStockExpanded.has(product.id);
     const details = skuStockDetails.get(product.id);
-    const base = `<tr class="sku-stock-parent${expanded ? " is-expanded" : ""}"><td><div class="sku-stock-product"><span>${product.thumbnailUrl || product.imageUrl ? `<img src="${escapeHtml(product.thumbnailUrl || product.imageUrl || "")}" alt="" loading="lazy" decoding="async" />` : escapeHtml((product.name[0] || "P").toUpperCase())}</span><div><strong>${escapeHtml(product.name)}</strong><small>${variable ? `${formatNumber(product.variationIds.length)} variation${product.variationIds.length === 1 ? "" : "s"}` : "Simple product"}</small></div></div></td><td><code>${escapeHtml(product.sku || "—")}</code></td><td>${escapeHtml(stockStrength(product.attributes))}</td><td><strong>${escapeHtml(stockQuantityLabel(product.stockQuantity, product.stockStatus))}</strong></td><td><span class="inventory-risk inventory-risk--${state.tone}">${escapeHtml(state.label)}</span></td><td><div class="sku-stock-actions">${variable ? `<button type="button" data-toggle-sku-product="${product.id}" aria-expanded="${expanded}">${expanded ? "Hide SKUs" : "View SKUs"}</button>` : ""}<button type="button" data-edit-stock-product="${product.id}">Edit</button></div></td></tr>`;
+    const base = `<tr class="sku-stock-parent${expanded ? " is-expanded" : ""}"><td><div class="sku-stock-product"><span>${product.thumbnailUrl || product.imageUrl ? `<img src="${escapeHtml(product.thumbnailUrl || product.imageUrl || "")}" alt="" loading="lazy" decoding="async" />` : escapeHtml((product.name[0] || "P").toUpperCase())}</span><div><strong>${escapeHtml(product.name)}</strong><small>${variable ? `${formatNumber(product.variationIds.length)} variation${product.variationIds.length === 1 ? "" : "s"}` : "Simple product"}</small></div></div></td><td><code>${escapeHtml(product.sku || "—")}</code></td><td>${escapeHtml(stockStrength(product.attributes))}</td><td><strong>${escapeHtml(stockQuantityLabel(product.stockQuantity, product.stockStatus))}</strong></td><td><span class="inventory-risk inventory-risk--${state.tone}">${escapeHtml(state.label)}</span></td><td>${shippingLotCell(product.id, 0, variable)}</td><td><div class="sku-stock-actions">${variable ? `<button type="button" data-toggle-sku-product="${product.id}" aria-expanded="${expanded}">${expanded ? "Hide SKUs" : "View SKUs"}</button>` : `<button type="button" data-assign-lot-product="${product.id}" data-assign-lot-variation="0">${exactInventoryLots(product.id, 0).some((coa) => coa.currentShippingLot) ? "Change lot" : "Assign lot"}</button>`}<button type="button" data-edit-stock-product="${product.id}">Edit</button></div></td></tr>`;
     if (!expanded) return [base];
     if (skuStockLoading.has(product.id)) {
-      return [base, '<tr class="sku-stock-child"><td colspan="6"><div class="table-loading">Loading variation stock…</div></td></tr>'];
+      return [base, '<tr class="sku-stock-child"><td colspan="7"><div class="table-loading">Loading variation stock…</div></td></tr>'];
     }
     if (!details?.variations.length) {
-      return [base, '<tr class="sku-stock-child"><td colspan="6"><div class="operations-empty"><strong>No variation records returned</strong><span>Refresh the product connection or open the product editor.</span></div></td></tr>'];
+      return [base, '<tr class="sku-stock-child"><td colspan="7"><div class="operations-empty"><strong>No variation records returned</strong><span>Refresh the product connection or open the product editor.</span></div></td></tr>'];
     }
     return [base, ...details.variations.map((variation) => {
       const variationState = inventoryState(variation);
       const variationName = variation.attributes.map((attribute) => attribute.option).filter(Boolean).join(" · ") || `Variation ${variation.id}`;
-      return `<tr class="sku-stock-child"><td><div class="sku-stock-product sku-stock-product--variation"><span>${variation.image?.thumbnailUrl || variation.image?.src ? `<img src="${escapeHtml(variation.image.thumbnailUrl || variation.image.src)}" alt="" loading="lazy" decoding="async" />` : "↳"}</span><div><strong>${escapeHtml(variationName)}</strong><small>Variation ${variation.id}</small></div></div></td><td><code>${escapeHtml(variation.sku || "—")}</code></td><td>${escapeHtml(stockStrength(variation.attributes))}</td><td><strong>${escapeHtml(stockQuantityLabel(variation.stockQuantity, variation.stockStatus))}</strong></td><td><span class="inventory-risk inventory-risk--${variationState.tone}">${escapeHtml(variationState.label)}</span></td><td><button class="sku-stock-edit" type="button" data-edit-stock-product="${product.id}">Edit product</button></td></tr>`;
+      return `<tr class="sku-stock-child"><td><div class="sku-stock-product sku-stock-product--variation"><span>${variation.image?.thumbnailUrl || variation.image?.src ? `<img src="${escapeHtml(variation.image.thumbnailUrl || variation.image.src)}" alt="" loading="lazy" decoding="async" />` : "↳"}</span><div><strong>${escapeHtml(variationName)}</strong><small>Variation ${variation.id}</small></div></div></td><td><code>${escapeHtml(variation.sku || "—")}</code></td><td>${escapeHtml(stockStrength(variation.attributes))}</td><td><strong>${escapeHtml(stockQuantityLabel(variation.stockQuantity, variation.stockStatus))}</strong></td><td><span class="inventory-risk inventory-risk--${variationState.tone}">${escapeHtml(variationState.label)}</span></td><td>${shippingLotCell(product.id, variation.id)}</td><td><div class="sku-stock-actions"><button type="button" data-assign-lot-product="${product.id}" data-assign-lot-variation="${variation.id}">${exactInventoryLots(product.id, variation.id).some((coa) => coa.currentShippingLot) ? "Change lot" : "Assign lot"}</button><button class="sku-stock-edit" type="button" data-edit-stock-product="${product.id}">Edit product</button></div></td></tr>`;
     })];
   });
   body.innerHTML = rows.length
     ? rows.join("")
-    : '<tr><td colspan="6"><div class="operations-empty"><strong>No stock records match</strong><span>Try another product name, SKU or strength.</span></div></td></tr>';
+    : '<tr><td colspan="7"><div class="operations-empty"><strong>No stock records match</strong><span>Try another product name, SKU or strength.</span></div></td></tr>';
 }
 
 async function toggleSkuStockProduct(productId: number): Promise<void> {
@@ -3363,19 +3386,132 @@ async function loadInventoryOperations(force = false): Promise<void> {
   try {
     const response = await fetch("/api/inventory-operations", { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
     const payload: unknown = await response.json();
-    if (!response.ok || !isRecord(payload) || !Array.isArray(payload.restocks)) throw new Error("Inventory operations are unavailable");
+    if (!response.ok || !isRecord(payload) || !Array.isArray(payload.restocks) || !Array.isArray(payload.lots)) throw new Error("Inventory operations are unavailable");
     inventoryOperations = payload as unknown as InventoryOperationsPayload;
   } catch {
     inventoryOperations = {
       restocks: [],
       products: commerceData?.products || [],
+      lots: extensionsData?.coas?.filter((coa) => coa.status === "Available") || [],
       waitlistCounts: {},
       bridgeAvailable: false,
+      lotAssignmentsAvailable: Boolean(extensionsData?.coaWriteEnabled),
       syncedAt: new Date().toISOString(),
     };
   } finally {
     inventoryOperationsLoading = false;
     renderInventoryOperations();
+  }
+}
+
+function renderLotAssignmentDrawer(): void {
+  const target = lotAssignmentTarget;
+  if (!target) return;
+  const candidates = exactInventoryLots(target.productId, target.variationId);
+  const current = candidates.find((coa) => coa.currentShippingLot);
+  lotAssignmentTargetElement.innerHTML = `<span>LOT</span><div><strong>${escapeHtml(target.label)}</strong><small>${escapeHtml(target.sku || `Product ${target.productId}`)}${target.strength && target.strength !== "—" ? ` · ${escapeHtml(target.strength)}` : ""}</small></div><b>${current ? "Active lot" : "Needs assignment"}</b>`;
+  lotAssignmentOptions.innerHTML = candidates.length
+    ? candidates.map((coa, index) => {
+      const checked = current ? coa.id === current.id : index === 0;
+      const perUnit = Math.max(0, Number(coa.testingCostPerUnit || 0));
+      const testing = perUnit
+        ? `${formatCurrency(coa.testingCostTotal || 0)} test ÷ ${formatNumber(coa.batchUnitCount || 0)} units`
+        : "Testing expense not recorded";
+      return `<label class="lot-assignment-option"><input type="radio" name="inventoryShippingLot" value="${escapeHtml(coa.id)}" data-lot-revision="${Math.max(0, Number(coa.revision || 0))}"${checked ? " checked" : ""} /><span><div><strong>${escapeHtml(coa.lot || coa.batch || coa.coaNumber)}</strong><small>${escapeHtml(coa.coaNumber)} · Tested ${escapeHtml(coa.date || "date not recorded")}</small></div><em>${perUnit ? `${escapeHtml(formatCurrency(perUnit))} / unit` : "No allocation"}<small>${escapeHtml(testing)}</small></em></span></label>`;
+    }).join("")
+    : `<div class="lot-assignment-empty"><span>!</span><strong>No Available lot is mapped to this exact item.</strong><p>Upload or open a COA, map it to this product${target.variationId ? " and exact variation" : ""}, record its testing cost and approve it. It will then appear here.</p></div>`;
+  lotAssignmentSave.disabled = lotAssignmentBusy || !candidates.length || !workspaceSession?.permissions.operate;
+  lotAssignmentOpenCoa.textContent = candidates.length ? "Manage COAs" : "Upload or map a COA";
+  lotAssignmentSave.textContent = lotAssignmentBusy ? "Assigning safely…" : current ? "Confirm shipping lot" : "Use selected lot";
+}
+
+function openLotAssignment(productId: number, variationId: number): void {
+  const product = (inventoryOperations?.products || commerceData?.products || []).find((item) => item.id === productId);
+  if (!product) {
+    showToast("Product unavailable", "Refresh inventory and try again.", false);
+    return;
+  }
+  const variation = variationId ? skuStockDetails.get(productId)?.variations.find((item) => item.id === variationId) : undefined;
+  if (variationId && !variation) {
+    showToast("Presentation unavailable", "Expand the product again and retry the exact variation.", false);
+    return;
+  }
+  const strength = variation ? stockStrength(variation.attributes) : stockStrength(product.attributes);
+  const variationLabel = variation?.attributes.map((attribute) => attribute.option).filter(Boolean).join(" · ");
+  lotAssignmentTarget = {
+    productId,
+    variationId,
+    label: variation ? `${product.name} · ${variationLabel || `Variation ${variation.id}`}` : product.name,
+    sku: variation?.sku || product.sku,
+    strength,
+  };
+  lotAssignmentBusy = false;
+  requiredElement<HTMLElement>("#lot-assignment-title").textContent = exactInventoryLots(productId, variationId).some((coa) => coa.currentShippingLot)
+    ? "Change shipping lot"
+    : "Assign shipping lot";
+  renderLotAssignmentDrawer();
+  lotAssignmentDrawer.hidden = false;
+  lotAssignmentBackdrop.hidden = false;
+  document.body.classList.add("drawer-open");
+  lotAssignmentDrawer.querySelector<HTMLInputElement>('input[name="inventoryShippingLot"]:checked')?.focus();
+}
+
+function closeLotAssignment(): void {
+  lotAssignmentDrawer.hidden = true;
+  lotAssignmentBackdrop.hidden = true;
+  lotAssignmentTarget = null;
+  lotAssignmentBusy = false;
+  document.body.classList.remove("drawer-open");
+}
+
+async function saveLotAssignment(): Promise<void> {
+  if (!lotAssignmentTarget || lotAssignmentBusy) return;
+  const selected = lotAssignmentForm.querySelector<HTMLInputElement>('input[name="inventoryShippingLot"]:checked');
+  if (!selected) {
+    showToast("Choose a lot", "Select the exact Available batch that is being shipped.", false);
+    return;
+  }
+  lotAssignmentBusy = true;
+  renderLotAssignmentDrawer();
+  try {
+    const response = await fetch("/api/inventory-operations/current-lot", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        certificateId: selected.value,
+        productId: lotAssignmentTarget.productId,
+        variationId: lotAssignmentTarget.variationId,
+        expectedRevision: Number(selected.dataset.lotRevision) || 0,
+      }),
+    });
+    const payload: unknown = await response.json();
+    if (!response.ok || !isRecord(payload) || !Array.isArray(payload.lots)) {
+      throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The shipping lot could not be assigned");
+    }
+    const lots = payload.lots as CommerceCoa[];
+    if (inventoryOperations) inventoryOperations.lots = lots;
+    if (extensionsData) {
+      const publishedById = new Map(lots.map((coa) => [coa.id, coa]));
+      const preserved = extensionsData.coas.map((coa) => publishedById.get(coa.id) || coa);
+      const knownIds = new Set(preserved.map((coa) => coa.id));
+      extensionsData.coas = [...preserved, ...lots.filter((coa) => !knownIds.has(coa.id))];
+    }
+    const selectedLot = lots.find((coa) => coa.id === selected.value);
+    closeLotAssignment();
+    await loadCommerce();
+    if (inventoryOperations && commerceData) inventoryOperations.products = commerceData.products;
+    renderInventoryOperations();
+    renderLabelWorkspace(false);
+    showToast(
+      "Shipping lot assigned",
+      `${selectedLot?.lot || selectedLot?.batch || "The selected lot"} is now the planning lot. Fulfillment will still preserve the exact scanned vial lot.`,
+    );
+  } catch (error) {
+    showToast("Unable to assign the lot", error instanceof Error ? error.message : "Refresh inventory and try again.", false);
+  } finally {
+    lotAssignmentBusy = false;
+    if (!lotAssignmentDrawer.hidden) renderLotAssignmentDrawer();
   }
 }
 
@@ -7339,6 +7475,13 @@ const coaFamilyKeyInput = requiredElement<HTMLInputElement>("#coa-family-key");
 const coaSkusInput = requiredElement<HTMLTextAreaElement>("#coa-skus");
 const coaAliasesInput = requiredElement<HTMLTextAreaElement>("#coa-aliases");
 const coaKeywordsInput = requiredElement<HTMLTextAreaElement>("#coa-keywords");
+const lotAssignmentDrawer = requiredElement<HTMLElement>("#lot-assignment-drawer");
+const lotAssignmentBackdrop = requiredElement<HTMLButtonElement>("#lot-assignment-backdrop");
+const lotAssignmentForm = requiredElement<HTMLFormElement>("#lot-assignment-form");
+const lotAssignmentTargetElement = requiredElement<HTMLElement>("#lot-assignment-target");
+const lotAssignmentOptions = requiredElement<HTMLElement>("#lot-assignment-options");
+const lotAssignmentSave = requiredElement<HTMLButtonElement>("#lot-assignment-save");
+const lotAssignmentOpenCoa = requiredElement<HTMLButtonElement>("#lot-assignment-open-coa");
 
 function syncCoaTestingCost(): void {
   const total = Math.max(0, Number(coaTestingCostInput.value) || 0);
@@ -8563,6 +8706,7 @@ function openProductDrawer(product?: CommerceProduct): void {
   productFeeInput.value = String(product?.cost?.feeRate ?? 3.5);
   productAffiliateRateInput.value = String(product?.cost?.affiliateRate ?? 0);
   trashProductButton.hidden = !product || Boolean(product.localDraft);
+  requiredElement<HTMLElement>(".product-lot-onboarding").hidden = Boolean(product);
   trashProductButton.classList.remove("is-confirming");
   trashProductButton.textContent = "Move to Trash";
   delete trashProductButton.dataset.confirming;
@@ -9306,6 +9450,13 @@ requiredElement<HTMLInputElement>("#sku-stock-search").addEventListener("input",
 });
 requiredElement<HTMLElement>("#sku-stock-body").addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
+  const lotButton = target?.closest<HTMLElement>("[data-assign-lot-product]");
+  const lotProductId = Number(lotButton?.dataset.assignLotProduct);
+  const lotVariationId = Number(lotButton?.dataset.assignLotVariation || 0);
+  if (Number.isSafeInteger(lotProductId) && lotProductId > 0 && Number.isSafeInteger(lotVariationId) && lotVariationId >= 0) {
+    openLotAssignment(lotProductId, lotVariationId);
+    return;
+  }
   const toggleId = Number(target?.closest<HTMLElement>("[data-toggle-sku-product]")?.dataset.toggleSkuProduct);
   if (Number.isSafeInteger(toggleId) && toggleId > 0) {
     void toggleSkuStockProduct(toggleId);
@@ -9314,6 +9465,17 @@ requiredElement<HTMLElement>("#sku-stock-body").addEventListener("click", (event
   const editId = Number(target?.closest<HTMLElement>("[data-edit-stock-product]")?.dataset.editStockProduct);
   const product = commerceData?.products.find((item) => item.id === editId);
   if (product) openProductDrawer(product);
+});
+requiredElement<HTMLButtonElement>("#lot-assignment-close").addEventListener("click", closeLotAssignment);
+lotAssignmentBackdrop.addEventListener("click", closeLotAssignment);
+lotAssignmentForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveLotAssignment();
+});
+lotAssignmentOpenCoa.addEventListener("click", () => {
+  closeLotAssignment();
+  navigate("coa");
+  showToast("Map the exact product", "Open or upload the certificate, choose the exact product and strength, then approve it as Available.");
 });
 const handleInventoryAction = (event: Event) => {
   const element = event.target instanceof Element ? event.target : null;
@@ -9458,10 +9620,16 @@ productForm.addEventListener("submit", (event) => {
     const payload: unknown = await response.json();
     if (!response.ok) throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The product could not be saved");
     await loadCommerce();
+    inventoryOperations = undefined;
+    skuStockDetails.clear();
+    skuStockExpanded.clear();
+    if (productsWorkspace === "inventory") await loadInventoryOperations(true);
     const warning = isRecord(payload) && typeof payload.warning === "string" ? payload.warning : "";
     showToast(
       editingProductId ? "Product updated" : "Product created",
-      warning || "SKU, category, visibility, inventory, pricing and variants are now synchronized.",
+      warning || (editingProductId
+        ? "SKU, category, visibility, inventory, pricing and variants are now synchronized."
+        : "The product is ready. Assign its shipping lot from Inventory once its COA is mapped and approved."),
       !warning,
     );
   });
@@ -9934,6 +10102,7 @@ window.addEventListener("keydown", (event) => {
   if (!requiredElement<HTMLElement>("#password-reset-dialog").hidden) closePasswordResetDialog();
   if (!mediaPicker.hidden) closeMediaPicker();
   if (!requiredElement<HTMLElement>("#orders-report-dialog").hidden) closeOrdersReportDialog();
+  if (!lotAssignmentDrawer.hidden) closeLotAssignment();
   if (!requiredElement<HTMLElement>("#waitlist-drawer").hidden) closeWaitlistDrawer();
   if (!refundDialog.hidden) closeRefundDialog();
   if (!orderActionDialog.hidden) closeOrderActionDialog();

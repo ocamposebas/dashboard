@@ -42,6 +42,12 @@ before(async () => {
   if (!intakeColumn.rows[0]?.exists) {
     await database.query(await readFile(new URL("../migrations/014_coa_intake_review.up.sql", import.meta.url), "utf8"));
   }
+  const testingCostColumn = await database.query<{ exists: boolean }>(
+    "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='coa_certificates' AND column_name='testing_cost_total') AS exists",
+  );
+  if (!testingCostColumn.rows[0]?.exists) {
+    await database.query(await readFile(new URL("../migrations/017_coa_testing_costs.up.sql", import.meta.url), "utf8"));
+  }
   repository = new CoaRepository(database, "https://coas.phaseone.test");
 });
 
@@ -136,6 +142,30 @@ test("publication is blocked until the laboratory test or analysis date is confi
       skus: ["P1-TESA-10"], aliases: [], keywords: [], panelTypes: ["standard"],
     }, "operator-test"),
     /test or analysis date/i,
+  );
+});
+
+test("inventory shipping lot assignment is isolated to the exact product variation", { skip: !testDatabaseUrl }, async () => {
+  await repository!.importLegacy([
+    legacy({ id: "lot-20-old", wpPostId: 601, coaNumber: "COA-20-OLD", matchedProductId: 900, matchedVariationId: 920, strength: "20mg", lot: "LOT-20-OLD", batch: "LOT-20-OLD", verifyUrl: "https://portal.ils-lab.com/verify/20-old", fileUrl: "https://portal.ils-lab.com/verify/20-old", currentShippingLot: true }),
+    legacy({ id: "lot-20-new", wpPostId: 602, coaNumber: "COA-20-NEW", matchedProductId: 900, matchedVariationId: 920, strength: "20mg", lot: "LOT-20-NEW", batch: "LOT-20-NEW", verifyUrl: "https://portal.ils-lab.com/verify/20-new", fileUrl: "https://portal.ils-lab.com/verify/20-new", currentShippingLot: false }),
+    legacy({ id: "lot-60", wpPostId: 603, coaNumber: "COA-60", matchedProductId: 900, matchedVariationId: 960, strength: "60mg", lot: "LOT-60", batch: "LOT-60", verifyUrl: "https://portal.ils-lab.com/verify/60", fileUrl: "https://portal.ils-lab.com/verify/60", currentShippingLot: true }),
+  ], "import-test");
+  const before = await repository!.list({ productId: 900, publishedOnly: true });
+  const next = before.find((coa) => coa.coaNumber === "COA-20-NEW")!;
+  await repository!.setCurrentShippingLot({
+    certificateId: next.id,
+    productId: 900,
+    variationId: 920,
+    expectedRevision: next.revision,
+  }, "operator-test");
+  const after = await repository!.list({ productId: 900, publishedOnly: true });
+  assert.equal(after.find((coa) => coa.coaNumber === "COA-20-OLD")?.currentShippingLot, false);
+  assert.equal(after.find((coa) => coa.coaNumber === "COA-20-NEW")?.currentShippingLot, true);
+  assert.equal(after.find((coa) => coa.coaNumber === "COA-60")?.currentShippingLot, true);
+  await assert.rejects(
+    repository!.setCurrentShippingLot({ certificateId: next.id, productId: 900, variationId: 960 }, "operator-test"),
+    /not mapped to the exact product and presentation/i,
   );
 });
 
