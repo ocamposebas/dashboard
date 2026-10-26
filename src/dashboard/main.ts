@@ -696,6 +696,27 @@ interface WorkspaceSession {
   user: WorkspaceUser;
   permissions: { administer: boolean; operate: boolean };
 }
+interface MarketingEmailTemplate {
+  key: string; name: string; description: string; subject: string; preheader: string;
+  heading: string; message: string; buttonLabel: string; buttonUrl: string; accent: string;
+}
+interface MarketingEmailContact {
+  id: string; email: string; displayName: string; source: string;
+  status: "subscribed" | "unconfirmed" | "unsubscribed" | "bounced"; tags: string[];
+  lastEmailedAt: string | null;
+}
+interface MarketingEmailCampaign {
+  id: string; name: string; templateKey: string; subject: string; preheader: string;
+  heading: string; message: string; buttonLabel: string; buttonUrl: string; audienceTag: string;
+  status: string; recipientCount: number; sentCount: number; failedCount: number;
+  uncertainCount: number; createdAt: string;
+}
+interface MarketingEmailCenterPayload {
+  counts: { total: number; subscribed: number; unconfirmed: number; unsubscribed: number; bounced: number };
+  contacts: MarketingEmailContact[]; campaigns: MarketingEmailCampaign[];
+  tags: Array<{ tag: string; contacts: number }>; templates: MarketingEmailTemplate[];
+  smtpOwner: "wordpress";
+}
 interface WorkspaceNotification {
   id: string; type: "order" | "seo" | "security" | "system";
   severity: "info" | "success" | "warning" | "critical";
@@ -899,6 +920,14 @@ const marketingCartList = requiredElement<HTMLElement>("#marketing-cart-list");
 const marketingSearchList = requiredElement<HTMLElement>("#marketing-search-list");
 const marketingSearchTotal = requiredElement<HTMLElement>("#marketing-search-total");
 const marketingRecentSearches = requiredElement<HTMLElement>("#marketing-recent-searches");
+const emailTemplateStrip = requiredElement<HTMLElement>("#email-template-strip");
+const emailCampaignList = requiredElement<HTMLElement>("#email-campaign-list");
+const emailContactList = requiredElement<HTMLElement>("#email-contact-list");
+const emailContactSearch = requiredElement<HTMLInputElement>("#email-contact-search");
+const emailContactFilter = requiredElement<HTMLSelectElement>("#email-contact-filter");
+const emailComposer = requiredElement<HTMLDialogElement>("#email-composer");
+const emailComposerForm = requiredElement<HTMLFormElement>("#email-composer-form");
+const emailLaunchConfirm = requiredElement<HTMLDialogElement>("#email-launch-confirm");
 const monitorIntentKpis = requiredElement<HTMLElement>("#monitor-intent-kpis");
 const monitorCartCount = requiredElement<HTMLElement>("#monitor-cart-count");
 const monitorCartStream = requiredElement<HTMLElement>("#monitor-cart-stream");
@@ -1102,6 +1131,10 @@ let workspaceNotifications: WorkspaceNotification[] = [];
 let catchupOrderNotifications: WorkspaceNotification[] = [];
 let notificationFilter = "all";
 let marketingCartFilter: "open" | "abandoned" | "all" = "open";
+let marketingEmailCenter: MarketingEmailCenterPayload | undefined;
+let marketingEmailLoading = false;
+let marketingEmailSearchTimer: number | undefined;
+let pendingEmailLaunchId = "";
 const SESSION_PAGE_SIZE = 5;
 const CUSTOMER_PAGE_SIZE = 50;
 const ORDER_ALERTS_STORAGE_KEY = "phaseone:order-alerts";
@@ -1695,6 +1728,163 @@ function renderMarketing(snapshot: DashboardSnapshot): void {
       }).join("")
     : '<p class="empty-state">No recent searches yet.</p>';
   renderMonitorIntent(snapshot);
+}
+
+function renderMarketingEmailCenter(): void {
+  const center = marketingEmailCenter;
+  if (!center) return;
+  requiredElement<HTMLElement>("#email-subscribed-count").textContent = formatNumber(center.counts.subscribed);
+  requiredElement<HTMLElement>("#email-unconfirmed-count").textContent = formatNumber(center.counts.unconfirmed);
+  requiredElement<HTMLElement>("#email-total-count").textContent = formatNumber(center.counts.total);
+  requiredElement<HTMLElement>("#email-delivered-count").textContent = formatNumber(center.campaigns.reduce((sum, campaign) => sum + campaign.sentCount, 0));
+  requiredElement<HTMLElement>("#email-center-updated").textContent = "Audience and campaign ledger up to date";
+  requiredElement<HTMLElement>("#email-campaign-count").textContent = `${center.campaigns.length} campaign${center.campaigns.length === 1 ? "" : "s"}`;
+
+  emailTemplateStrip.innerHTML = center.templates.map((template) => `<button class="email-template-card" type="button" data-email-template="${escapeHtml(template.key)}" style="--template-accent:${escapeHtml(template.accent)}"><span>READY TEMPLATE</span><strong>${escapeHtml(template.name)}</strong><small>${escapeHtml(template.description)}</small></button>`).join("");
+  emailCampaignList.innerHTML = center.campaigns.length ? center.campaigns.map((campaign) => {
+    const progress = campaign.status === "draft" ? "Not sent" : `${formatNumber(campaign.sentCount)} of ${formatNumber(campaign.recipientCount)} sent`;
+    const actions = campaign.status === "draft" && workspaceSession?.permissions.administer
+      ? `<button type="button" data-email-test="${campaign.id}">Send test</button><button type="button" data-email-launch="${campaign.id}">Approve</button>`
+      : ["queued", "sending"].includes(campaign.status) && workspaceSession?.permissions.administer
+        ? `<button type="button" data-email-cancel="${campaign.id}">Cancel queue</button>` : "";
+    return `<article class="email-campaign-row"><span>✦</span><div class="email-campaign-copy"><strong>${escapeHtml(campaign.name)}</strong><small>${escapeHtml(campaign.subject)} · ${progress} · ${relativeDate(campaign.createdAt)}</small></div><i class="email-state email-state--${escapeHtml(campaign.status)}">${escapeHtml(campaign.status)}</i><footer>${actions}</footer></article>`;
+  }).join("") : '<p class="empty-state">Choose a template to prepare the first campaign. Nothing is sent while it remains a draft.</p>';
+
+  emailContactList.innerHTML = center.contacts.length ? center.contacts.map((contact) => `<article class="email-contact-row"><span class="email-contact-avatar">${escapeHtml(contact.displayName.slice(0, 2).toUpperCase())}</span><div class="email-contact-copy"><strong>${escapeHtml(contact.displayName)}</strong><small>${escapeHtml(contact.email)} · ${escapeHtml(contact.source)}${contact.tags.length ? ` · ${escapeHtml(contact.tags.join(", "))}` : ""}</small></div><em data-status="${contact.status}">${escapeHtml(contact.status === "unconfirmed" ? "needs consent" : contact.status)}</em></article>`).join("") : '<p class="empty-state">No contacts match this view.</p>';
+
+  const templateSelect = requiredElement<HTMLSelectElement>("#email-template-select");
+  templateSelect.innerHTML = center.templates.map((template) => `<option value="${escapeHtml(template.key)}">${escapeHtml(template.name)}</option>`).join("");
+  const audience = requiredElement<HTMLSelectElement>("#email-audience-tag");
+  audience.innerHTML = `<option value="">All confirmed subscribers (${formatNumber(center.counts.subscribed)})</option>${center.tags.map((tag) => `<option value="${escapeHtml(tag.tag)}">${escapeHtml(tag.tag)} (${formatNumber(tag.contacts)})</option>`).join("")}`;
+}
+
+async function loadMarketingEmailCenter(): Promise<void> {
+  if (marketingEmailLoading) return;
+  marketingEmailLoading = true;
+  try {
+    const query = new URLSearchParams({ search: emailContactSearch.value.trim(), status: emailContactFilter.value });
+    const response = await fetch(`/api/marketing/email-center?${query.toString()}`, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
+    const payload: unknown = await response.json();
+    if (!response.ok || !isRecord(payload) || !Array.isArray(payload.contacts) || !Array.isArray(payload.campaigns) || !Array.isArray(payload.templates)) {
+      throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "Email center unavailable");
+    }
+    marketingEmailCenter = payload as unknown as MarketingEmailCenterPayload;
+    renderMarketingEmailCenter();
+  } catch (error) {
+    requiredElement<HTMLElement>("#email-center-updated").textContent = error instanceof Error ? error.message : "Email center unavailable";
+  } finally {
+    marketingEmailLoading = false;
+  }
+}
+
+function updateEmailPreview(): void {
+  requiredElement<HTMLElement>("#email-preview-preheader").textContent = requiredElement<HTMLInputElement>("#email-preheader").value || "Research updates from Phase One Labz";
+  requiredElement<HTMLElement>("#email-preview-heading").textContent = requiredElement<HTMLInputElement>("#email-heading").value || "A precise update, made for your research.";
+  requiredElement<HTMLElement>("#email-preview-message").textContent = requiredElement<HTMLTextAreaElement>("#email-message").value || "Your campaign message will appear here.";
+  const button = requiredElement<HTMLElement>("#email-preview-button");
+  button.textContent = `${requiredElement<HTMLInputElement>("#email-button-label").value || "EXPLORE NOW"} →`;
+  button.hidden = requiredElement<HTMLInputElement>("#email-button-label").value.trim() === "";
+}
+
+function openEmailComposer(templateKey?: string): void {
+  const center = marketingEmailCenter;
+  if (!center?.templates.length) {
+    showToast("Email studio is loading", "Try again in a moment.", false);
+    return;
+  }
+  const template = center.templates.find((item) => item.key === templateKey) || center.templates[0]!;
+  requiredElement<HTMLInputElement>("#email-campaign-name").value = `${template.name} · ${new Date().toLocaleDateString()}`;
+  requiredElement<HTMLSelectElement>("#email-template-select").value = template.key;
+  requiredElement<HTMLInputElement>("#email-subject").value = template.subject;
+  requiredElement<HTMLInputElement>("#email-preheader").value = template.preheader;
+  requiredElement<HTMLInputElement>("#email-heading").value = template.heading;
+  requiredElement<HTMLTextAreaElement>("#email-message").value = template.message;
+  requiredElement<HTMLInputElement>("#email-button-label").value = template.buttonLabel;
+  requiredElement<HTMLInputElement>("#email-button-url").value = template.buttonUrl;
+  requiredElement<HTMLSelectElement>("#email-audience-tag").value = "";
+  updateEmailPreview();
+  emailComposer.showModal();
+}
+
+function emailCampaignPayload(): Record<string, string> {
+  return {
+    name: requiredElement<HTMLInputElement>("#email-campaign-name").value,
+    templateKey: requiredElement<HTMLSelectElement>("#email-template-select").value,
+    subject: requiredElement<HTMLInputElement>("#email-subject").value,
+    preheader: requiredElement<HTMLInputElement>("#email-preheader").value,
+    heading: requiredElement<HTMLInputElement>("#email-heading").value,
+    message: requiredElement<HTMLTextAreaElement>("#email-message").value,
+    buttonLabel: requiredElement<HTMLInputElement>("#email-button-label").value,
+    buttonUrl: requiredElement<HTMLInputElement>("#email-button-url").value,
+    audienceTag: requiredElement<HTMLSelectElement>("#email-audience-tag").value,
+  };
+}
+
+async function saveEmailCampaign(sendTest = false): Promise<void> {
+  if (!emailComposerForm.reportValidity()) return;
+  const saveButton = requiredElement<HTMLButtonElement>(sendTest ? "#email-save-test" : "#email-save-draft");
+  let testRecipient = "";
+  if (sendTest) {
+    testRecipient = window.prompt("Where should the private test email be sent?", workspaceSession?.user.email || "")?.trim() || "";
+    if (!testRecipient) return;
+  }
+  saveButton.disabled = true;
+  try {
+    const response = await fetch("/api/marketing/campaigns", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(emailCampaignPayload()) });
+    const payload: unknown = await response.json();
+    if (!response.ok || !isRecord(payload) || !isRecord(payload.campaign) || typeof payload.campaign.id !== "string") throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "Campaign could not be saved");
+    if (sendTest) {
+      const testResponse = await fetch(`/api/marketing/campaigns/${encodeURIComponent(payload.campaign.id)}/test`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ recipient: testRecipient }) });
+      const testPayload: unknown = await testResponse.json();
+      if (!testResponse.ok) throw new Error(isRecord(testPayload) && typeof testPayload.error === "string" ? testPayload.error : "Test email could not be sent");
+      showToast("Test email accepted", `WordPress SMTP accepted the private test for ${testRecipient}.`);
+    } else {
+      showToast("Draft saved", "No email was sent. Review it from the campaign ledger.");
+    }
+    emailComposer.close();
+    await loadMarketingEmailCenter();
+  } catch (error) {
+    showToast("Unable to save campaign", error instanceof Error ? error.message : "Try again.", false);
+  } finally {
+    saveButton.disabled = false;
+  }
+}
+
+function parseMarketingCsv(contents: string): Array<Record<string, string>> {
+  const rows: string[][] = [];
+  let row: string[] = [], cell = "", quoted = false;
+  for (let index = 0; index < contents.length; index += 1) {
+    const character = contents[index]!;
+    if (character === '"' && quoted && contents[index + 1] === '"') { cell += '"'; index += 1; }
+    else if (character === '"') quoted = !quoted;
+    else if (character === "," && !quoted) { row.push(cell); cell = ""; }
+    else if ((character === "\n" || character === "\r") && !quoted) {
+      if (character === "\r" && contents[index + 1] === "\n") index += 1;
+      row.push(cell); if (row.some((value) => value.trim())) rows.push(row); row = []; cell = "";
+    } else cell += character;
+  }
+  row.push(cell); if (row.some((value) => value.trim())) rows.push(row);
+  const headers = (rows.shift() || []).map((value) => value.trim().toLowerCase().replace(/[^a-z0-9]/g, ""));
+  return rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index]?.trim() || ""])));
+}
+
+async function importOmnisendContacts(file: File): Promise<void> {
+  const rows = parseMarketingCsv(await file.text());
+  const contacts = rows.map((row) => {
+    const rawStatus = (row.status || row.subscriptionstatus || row.emailstatus || "").toLowerCase();
+    const status = rawStatus.includes("unsub") ? "unsubscribed" : rawStatus.includes("bounce") ? "bounced" : rawStatus === "subscribed" || rawStatus === "active" ? "subscribed" : "unconfirmed";
+    return { email: row.email || row.emailaddress || row.contactemail || "", firstName: row.firstname || row.first || "", lastName: row.lastname || row.last || "", source: "omnisend", status, tags: (row.tags || row.tag || "").split(/[;|]/).map((tag) => tag.trim()).filter(Boolean), consentRecordedAt: status === "subscribed" ? new Date().toISOString() : null };
+  }).filter((contact) => contact.email);
+  if (!contacts.length) throw new Error("No email column was found in this Omnisend CSV");
+  let imported = 0, skipped = 0;
+  for (let offset = 0; offset < contacts.length; offset += 500) {
+    const response = await fetch("/api/marketing/contacts/import", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ contacts: contacts.slice(offset, offset + 500) }) });
+    const payload: unknown = await response.json();
+    if (!response.ok || !isRecord(payload)) throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "Contact import failed");
+    imported += Number(payload.imported) || 0; skipped += Number(payload.skipped) || 0;
+  }
+  showToast("Omnisend import complete", `${formatNumber(imported)} contacts updated${skipped ? ` · ${formatNumber(skipped)} invalid rows skipped` : ""}.`);
+  await loadMarketingEmailCenter();
 }
 
 function timestampMatchesMonitorRange(value: string, snapshot: DashboardSnapshot): boolean {
@@ -7724,6 +7914,108 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-marketi
   });
 }
 
+requiredElement<HTMLButtonElement>("#email-new-campaign").addEventListener("click", () => openEmailComposer());
+emailTemplateStrip.addEventListener("click", (event) => {
+  const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-email-template]") : null;
+  if (button?.dataset.emailTemplate) openEmailComposer(button.dataset.emailTemplate);
+});
+requiredElement<HTMLButtonElement>("#email-composer-close").addEventListener("click", () => emailComposer.close());
+emailComposerForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveEmailCampaign(false);
+});
+requiredElement<HTMLButtonElement>("#email-save-test").addEventListener("click", () => void saveEmailCampaign(true));
+for (const input of emailComposerForm.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")) {
+  input.addEventListener("input", updateEmailPreview);
+}
+requiredElement<HTMLSelectElement>("#email-template-select").addEventListener("change", (event) => {
+  const template = marketingEmailCenter?.templates.find((item) => item.key === (event.currentTarget as HTMLSelectElement).value);
+  if (!template) return;
+  requiredElement<HTMLInputElement>("#email-subject").value = template.subject;
+  requiredElement<HTMLInputElement>("#email-preheader").value = template.preheader;
+  requiredElement<HTMLInputElement>("#email-heading").value = template.heading;
+  requiredElement<HTMLTextAreaElement>("#email-message").value = template.message;
+  requiredElement<HTMLInputElement>("#email-button-label").value = template.buttonLabel;
+  requiredElement<HTMLInputElement>("#email-button-url").value = template.buttonUrl;
+  updateEmailPreview();
+});
+requiredElement<HTMLButtonElement>("#email-sync-woo").addEventListener("click", async (event) => {
+  const button = event.currentTarget as HTMLButtonElement;
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/marketing/contacts/sync", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: "{}" });
+    const payload: unknown = await response.json();
+    if (!response.ok || !isRecord(payload)) throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "Store contacts could not be synchronized");
+    showToast("Store contacts synchronized", `${formatNumber(Number(payload.imported) || 0)} contacts are available. They remain protected until marketing consent is confirmed.`);
+    await loadMarketingEmailCenter();
+  } catch (error) {
+    showToast("Contact sync failed", error instanceof Error ? error.message : "Try again.", false);
+  } finally { button.disabled = false; }
+});
+requiredElement<HTMLButtonElement>("#email-import-omnisend").addEventListener("click", () => requiredElement<HTMLInputElement>("#email-import-file").click());
+requiredElement<HTMLInputElement>("#email-import-file").addEventListener("change", async (event) => {
+  const input = event.currentTarget as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  try { await importOmnisendContacts(file); }
+  catch (error) { showToast("Omnisend import failed", error instanceof Error ? error.message : "Check the CSV and try again.", false); }
+  finally { input.value = ""; }
+});
+emailContactSearch.addEventListener("input", () => {
+  if (marketingEmailSearchTimer) window.clearTimeout(marketingEmailSearchTimer);
+  marketingEmailSearchTimer = window.setTimeout(() => void loadMarketingEmailCenter(), 300);
+});
+emailContactFilter.addEventListener("change", () => void loadMarketingEmailCenter());
+emailCampaignList.addEventListener("click", async (event) => {
+  const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button") : null;
+  if (!target) return;
+  const launchId = target.dataset.emailLaunch;
+  const testId = target.dataset.emailTest;
+  const cancelId = target.dataset.emailCancel;
+  if (launchId) {
+    pendingEmailLaunchId = launchId;
+    const campaign = marketingEmailCenter?.campaigns.find((item) => item.id === launchId);
+    requiredElement<HTMLElement>("#email-launch-copy").textContent = `“${campaign?.name || "This campaign"}” will be queued for up to ${formatNumber(marketingEmailCenter?.counts.subscribed || 0)} confirmed subscribers. Unsubscribed and unconfirmed contacts stay excluded.`;
+    emailLaunchConfirm.showModal();
+    return;
+  }
+  if (testId) {
+    const recipient = window.prompt("Where should the private test email be sent?", workspaceSession?.user.email || "")?.trim();
+    if (!recipient) return;
+    target.disabled = true;
+    try {
+      const response = await fetch(`/api/marketing/campaigns/${encodeURIComponent(testId)}/test`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ recipient }) });
+      const payload: unknown = await response.json();
+      if (!response.ok) throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "Test email failed");
+      showToast("Test email accepted", `WordPress SMTP accepted the private test for ${recipient}.`);
+    } catch (error) { showToast("Test email failed", error instanceof Error ? error.message : "Try again.", false); }
+    finally { target.disabled = false; }
+    return;
+  }
+  if (cancelId) {
+    target.disabled = true;
+    try {
+      const response = await fetch(`/api/marketing/campaigns/${encodeURIComponent(cancelId)}/cancel`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: "{}" });
+      if (!response.ok) throw new Error("The queue could not be cancelled");
+      showToast("Campaign cancelled", "Any recipient not already processed was removed from the queue.");
+      await loadMarketingEmailCenter();
+    } catch (error) { showToast("Unable to cancel", error instanceof Error ? error.message : "Try again.", false); }
+    finally { target.disabled = false; }
+  }
+});
+requiredElement<HTMLButtonElement>("#email-launch-approve").addEventListener("click", async () => {
+  const campaignId = pendingEmailLaunchId;
+  pendingEmailLaunchId = "";
+  if (!campaignId) return;
+  try {
+    const response = await fetch(`/api/marketing/campaigns/${encodeURIComponent(campaignId)}/launch`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: "{}" });
+    const payload: unknown = await response.json();
+    if (!response.ok || !isRecord(payload)) throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "Campaign could not be launched");
+    showToast("Campaign approved", `${formatNumber(Number(payload.queued) || 0)} confirmed recipients were added to the protected queue.`);
+    await loadMarketingEmailCenter();
+  } catch (error) { showToast("Launch stopped", error instanceof Error ? error.message : "Try again.", false); }
+});
+
 sessionListElement.addEventListener("click", (event) => {
   const target = event.target instanceof Element
     ? event.target.closest<HTMLButtonElement>("[data-session-id]")
@@ -7969,6 +8261,7 @@ function navigate(view: string): void {
   if (view === "customers") void loadCustomerDirectory();
   if (view === "insurance") void loadInsuranceFund();
   if (view === "affiliates") void loadAffiliateAdmin();
+  if (view === "marketing") void loadMarketingEmailCenter();
   if (view === "loyalty") void loadLoyalty();
   if (view === "seo") void loadSeo();
   if (view === "settings") showSettingsView(requestedTeamSettings ? "team" : "general");

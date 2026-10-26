@@ -26,6 +26,13 @@ import {
 import type { AppConfig } from "./config.js";
 import type { Database } from "./database.js";
 import { InsuranceFundRepository } from "./insuranceFundRepository.js";
+import {
+  MarketingEmailRepository,
+  type MarketingContactInput,
+  type MarketingContactSource,
+  type MarketingContactStatus,
+} from "./marketingEmailRepository.js";
+import { MarketingEmailService } from "./marketingEmailService.js";
 import { BarcodeLabelError, BarcodeLabelService } from "./barcodeLabels.js";
 import {
   BarcodeRegistryError,
@@ -472,6 +479,18 @@ export function createMonitorServer(
   const insuranceFund = dependencies.fulfillmentDatabase
     ? new InsuranceFundRepository(dependencies.fulfillmentDatabase)
     : undefined;
+  const marketingEmailRepository = dependencies.fulfillmentDatabase
+    ? new MarketingEmailRepository(dependencies.fulfillmentDatabase)
+    : undefined;
+  const marketingEmails = marketingEmailRepository && commerce
+    ? new MarketingEmailService(
+        marketingEmailRepository,
+        commerce,
+        config.dashboardOrigin,
+        config.sessionSecret,
+      )
+    : undefined;
+  marketingEmails?.start();
   const affiliateLoginAttempts = new LoginAttemptThrottle();
   let affiliateLegacySyncAt = 0;
   const shipStation = dependencies.shipStationGateway || new ShipStationGateway(config.shipStation);
@@ -1672,6 +1691,23 @@ export function createMonitorServer(
         return;
       }
 
+      if (url.pathname === "/api/public/marketing/unsubscribe" && request.method === "GET") {
+        const token = url.searchParams.get("token") || "";
+        const contactId = marketingEmails?.contactIdFromToken(token) || null;
+        if (!contactId || !marketingEmailRepository) {
+          response.statusCode = 400;
+          response.setHeader("Content-Type", "text/html; charset=utf-8");
+          response.end("<!doctype html><title>Invalid link</title><main><h1>This unsubscribe link is invalid.</h1></main>");
+          return;
+        }
+        await marketingEmailRepository.unsubscribe(contactId);
+        response.statusCode = 200;
+        response.setHeader("Content-Type", "text/html; charset=utf-8");
+        response.setHeader("Cache-Control", "no-store");
+        response.end("<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Email preferences updated</title><main><h1>You are unsubscribed.</h1><p>Phase One Labz will no longer send marketing emails to this address.</p></main>");
+        return;
+      }
+
       if (url.pathname === "/api/public/site-control" && request.method === "GET") {
         const suppliedOrigin = firstHeaderValue(request.headers.origin);
         const normalizedOrigin = suppliedOrigin ? normalizeOrigin(suppliedOrigin) : null;
@@ -2289,6 +2325,174 @@ export function createMonitorServer(
 
       if (url.pathname === "/api/session" && request.method === "GET") {
         json(response, 200, { authenticated: true, user: publicUser(currentUser), permissions: { administer: canAdminister, operate: canOperate } });
+        return;
+      }
+
+      if (url.pathname === "/api/marketing/email-center" && request.method === "GET") {
+        if (!canOperate) {
+          json(response, 403, { error: "Operations access is required" });
+          return;
+        }
+        if (!marketingEmailRepository || !marketingEmails) {
+          json(response, 503, { error: "The email center is not configured" });
+          return;
+        }
+        json(response, 200, {
+          ...(await marketingEmailRepository.dashboard(
+            url.searchParams.get("search") || "",
+            url.searchParams.get("status") || "all",
+          )),
+          templates: marketingEmails.templates(),
+          smtpOwner: "wordpress",
+        });
+        return;
+      }
+
+      if (url.pathname === "/api/marketing/contacts/sync" && request.method === "POST") {
+        if (!canOperate || !isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Operations access is required" });
+          return;
+        }
+        if (!marketingEmailRepository || !commerce) {
+          json(response, 503, { error: "Contact synchronization is not configured" });
+          return;
+        }
+        const directory = await commerce.getCustomerDirectory();
+        const contacts: MarketingContactInput[] = directory.customers
+          .filter((customer) => customer.email.trim() !== "")
+          .map((customer) => ({
+            email: customer.email,
+            firstName: customer.firstName,
+            lastName: customer.lastName,
+            source: "woocommerce",
+            status: "unconfirmed",
+            tags: customer.orderCount > 0 ? ["customer"] : ["account"],
+            wpCustomerId: customer.id,
+          }));
+        const result = await marketingEmailRepository.upsertContacts(contacts);
+        json(response, 200, { synced: true, ...result, unconfirmed: true });
+        return;
+      }
+
+      if (url.pathname === "/api/marketing/contacts/import" && request.method === "POST") {
+        if (!canOperate || !isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Operations access is required" });
+          return;
+        }
+        if (!marketingEmailRepository) {
+          json(response, 503, { error: "The contact directory is not configured" });
+          return;
+        }
+        let input: Record<string, unknown>;
+        try { input = JSON.parse(await readBody(request)) as Record<string, unknown>; }
+        catch { json(response, 400, { error: "Invalid JSON request" }); return; }
+        if (!Array.isArray(input.contacts) || input.contacts.length === 0 || input.contacts.length > 500) {
+          json(response, 400, { error: "Import between 1 and 500 contacts per batch" });
+          return;
+        }
+        const allowedSources = new Set<MarketingContactSource>(["omnisend", "manual"]);
+        const allowedStatuses = new Set<MarketingContactStatus>(["subscribed", "unconfirmed", "unsubscribed", "bounced"]);
+        const contacts: MarketingContactInput[] = input.contacts.flatMap((value) => {
+          if (!value || typeof value !== "object") return [];
+          const row = value as Record<string, unknown>;
+          const source = typeof row.source === "string" && allowedSources.has(row.source as MarketingContactSource)
+            ? row.source as MarketingContactSource : "omnisend";
+          const status = typeof row.status === "string" && allowedStatuses.has(row.status as MarketingContactStatus)
+            ? row.status as MarketingContactStatus : "unconfirmed";
+          return [{
+            email: typeof row.email === "string" ? row.email : "",
+            firstName: typeof row.firstName === "string" ? row.firstName : "",
+            lastName: typeof row.lastName === "string" ? row.lastName : "",
+            source,
+            status,
+            tags: Array.isArray(row.tags) ? row.tags.filter((tag): tag is string => typeof tag === "string") : [],
+            consentRecordedAt: status === "subscribed"
+              ? (typeof row.consentRecordedAt === "string" ? row.consentRecordedAt : new Date().toISOString())
+              : null,
+          }];
+        });
+        json(response, 200, await marketingEmailRepository.upsertContacts(contacts));
+        return;
+      }
+
+      if (url.pathname === "/api/marketing/campaigns" && request.method === "POST") {
+        if (!canOperate || !isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Operations access is required" });
+          return;
+        }
+        if (!marketingEmailRepository) {
+          json(response, 503, { error: "The campaign workspace is not configured" });
+          return;
+        }
+        let input: Record<string, unknown>;
+        try { input = JSON.parse(await readBody(request)) as Record<string, unknown>; }
+        catch { json(response, 400, { error: "Invalid JSON request" }); return; }
+        const field = (key: string, max: number) => typeof input[key] === "string" ? input[key].trim().slice(0, max) : "";
+        const buttonUrl = field("buttonUrl", 1000);
+        if (buttonUrl) {
+          try {
+            const target = new URL(buttonUrl);
+            if (target.protocol !== "https:" || !["phaseonelabz.com", "www.phaseonelabz.com"].includes(target.hostname.toLowerCase())) {
+              throw new Error("invalid host");
+            }
+          } catch {
+            json(response, 400, { error: "The button must use a secure phaseonelabz.com link" });
+            return;
+          }
+        }
+        const campaignInput = {
+          name: field("name", 160), templateKey: field("templateKey", 40), subject: field("subject", 180),
+          preheader: field("preheader", 240), heading: field("heading", 180), message: field("message", 5000),
+          buttonLabel: field("buttonLabel", 80), buttonUrl, audienceTag: field("audienceTag", 80).toLowerCase(),
+          actorId: currentUser.id, actorName: currentUser.displayName,
+        };
+        if (campaignInput.name.length < 2 || campaignInput.subject.length < 2 || campaignInput.heading.length < 2 || campaignInput.message.length < 2) {
+          json(response, 400, { error: "Name, subject, heading and message are required" });
+          return;
+        }
+        json(response, 201, { saved: true, campaign: await marketingEmailRepository.createCampaign(campaignInput) });
+        return;
+      }
+
+      const marketingCampaignAction = url.pathname.match(/^\/api\/marketing\/campaigns\/([a-f0-9-]{36})\/(test|launch|cancel)$/i);
+      if (marketingCampaignAction && request.method === "POST") {
+        if (!canAdminister || !isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Administrator approval is required" });
+          return;
+        }
+        if (!marketingEmailRepository || !marketingEmails) {
+          json(response, 503, { error: "The campaign workspace is not configured" });
+          return;
+        }
+        const campaignId = marketingCampaignAction[1]!;
+        const action = marketingCampaignAction[2]!;
+        if (action === "launch") {
+          json(response, 200, { launched: true, ...(await marketingEmailRepository.launchCampaign(campaignId)) });
+          return;
+        }
+        if (action === "cancel") {
+          json(response, 200, { cancelled: await marketingEmailRepository.cancelCampaign(campaignId) });
+          return;
+        }
+        let input: Record<string, unknown>;
+        try { input = JSON.parse(await readBody(request)) as Record<string, unknown>; }
+        catch { json(response, 400, { error: "Invalid JSON request" }); return; }
+        const recipient = typeof input.recipient === "string" ? input.recipient.trim().toLowerCase() : "";
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+          json(response, 400, { error: "Enter a valid test email" });
+          return;
+        }
+        const campaign = await marketingEmailRepository.campaign(campaignId);
+        if (!campaign) {
+          json(response, 404, { error: "Campaign not found" });
+          return;
+        }
+        const result = await marketingEmails.sendTest({
+          recipient, subject: campaign.subject, preheader: campaign.preheader,
+          heading: campaign.heading, message: campaign.message, buttonLabel: campaign.buttonLabel,
+          buttonUrl: campaign.buttonUrl, templateKey: campaign.templateKey,
+        });
+        json(response, 200, { sent: result.state === "sent", result });
         return;
       }
 

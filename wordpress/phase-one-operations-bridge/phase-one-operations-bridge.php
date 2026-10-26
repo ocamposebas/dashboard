@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Phase One Operations Bridge
  * Description: Secure bridge between Phase One Operations Suite, storefront controls, customer rewards and existing COA Manager records.
- * Version: 2.0.1
+ * Version: 2.1.0
  * Author: Phase One Labz
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -99,6 +99,12 @@ final class Phase_One_Operations_Bridge {
             'permission_callback' => [__CLASS__, 'authenticate_write_key'],
         ]);
 
+        register_rest_route(self::REST_NAMESPACE, '/marketing/email', [
+            'methods' => WP_REST_Server::CREATABLE,
+            'callback' => [__CLASS__, 'send_marketing_email'],
+            'permission_callback' => [__CLASS__, 'authenticate_write_key'],
+        ]);
+
         register_rest_route(self::REST_NAMESPACE, '/orders/(?P<id>\d+)/evidence/(?P<evidence>[a-f0-9-]{36})', [
             'methods' => WP_REST_Server::DELETABLE,
             'callback' => [__CLASS__, 'delete_order_evidence'],
@@ -157,7 +163,7 @@ final class Phase_One_Operations_Bridge {
     public static function status() {
         return rest_ensure_response([
             'connected' => true,
-            'version' => '2.0.1',
+            'version' => '2.1.0',
             'capabilities' => array_values(array_filter([
                 'edit_coa',
                 'read_customer_rewards',
@@ -173,8 +179,89 @@ final class Phase_One_Operations_Bridge {
                 'inventory_restock',
                 'waitlist_subscribers',
                 'waitlist_notifications',
+                'send_marketing_email',
             ])),
         ]);
+    }
+
+    public static function send_marketing_email(WP_REST_Request $request) {
+        $input = $request->get_json_params();
+        $input = is_array($input) ? $input : [];
+        $event_id = isset($input['eventId']) ? sanitize_text_field((string) $input['eventId']) : '';
+        $recipient = isset($input['recipient']) ? sanitize_email((string) $input['recipient']) : '';
+        $subject = isset($input['subject']) ? sanitize_text_field((string) $input['subject']) : '';
+        $raw_html = isset($input['html']) ? (string) $input['html'] : '';
+        $unsubscribe_url = isset($input['unsubscribeUrl']) ? esc_url_raw((string) $input['unsubscribeUrl']) : '';
+
+        if (!preg_match('/^[a-f0-9-]{36}$/i', $event_id)) {
+            return new WP_Error('phaseone_marketing_event', 'A valid delivery event is required.', ['status' => 400]);
+        }
+        if (!$recipient || !is_email($recipient)) {
+            return new WP_Error('phaseone_marketing_recipient', 'A valid recipient is required.', ['status' => 400]);
+        }
+        if (strlen($subject) < 2 || strlen($subject) > 180 || strlen($raw_html) < 2 || strlen($raw_html) > 500000) {
+            return new WP_Error('phaseone_marketing_content', 'The email content is invalid.', ['status' => 400]);
+        }
+        $unsubscribe_host = strtolower((string) wp_parse_url($unsubscribe_url, PHP_URL_HOST));
+        if (!$unsubscribe_url || !in_array($unsubscribe_host, ['phaseonelabz.com', 'www.phaseonelabz.com', 'phaseonelabz.is', 'www.phaseonelabz.is'], true)) {
+            return new WP_Error('phaseone_marketing_unsubscribe', 'A Phase One unsubscribe link is required.', ['status' => 400]);
+        }
+
+        $fingerprint = hash('sha256', $event_id);
+        $ledger_key = 'phaseone_marketing_sent_' . $fingerprint;
+        $previous = get_transient($ledger_key);
+        if (is_array($previous) && !empty($previous['sentAt'])) {
+            return rest_ensure_response([
+                'state' => 'sent',
+                'sentAt' => $previous['sentAt'],
+                'replayed' => true,
+                'message' => 'This email was already accepted by WordPress.',
+            ]);
+        }
+
+        $lock_key = 'phaseone_marketing_lock_' . $fingerprint;
+        if (!add_option($lock_key, time(), '', false)) {
+            $locked_at = (int) get_option($lock_key, 0);
+            if ($locked_at > 0 && $locked_at < time() - 120) {
+                delete_option($lock_key);
+            }
+            if (!add_option($lock_key, time(), '', false)) {
+                return new WP_Error('phaseone_marketing_busy', 'This delivery is already being processed.', ['status' => 409]);
+            }
+        }
+
+        $headers = [
+            'Content-Type: text/html; charset=UTF-8',
+            'List-Unsubscribe: <' . $unsubscribe_url . '>',
+        ];
+        $address_parts = array_filter([
+            get_option('woocommerce_store_address', ''),
+            get_option('woocommerce_store_address_2', ''),
+            get_option('woocommerce_store_city', ''),
+            get_option('woocommerce_default_country', ''),
+            get_option('woocommerce_store_postcode', ''),
+        ]);
+        $business_address = $address_parts ? implode(', ', array_map('sanitize_text_field', $address_parts)) : 'Phase One Labz';
+        $mail_html = str_replace('{{PHASEONE_BUSINESS_ADDRESS}}', esc_html($business_address), $raw_html);
+        try {
+            $accepted = wp_mail($recipient, $subject, wp_kses_post($mail_html), $headers);
+            if (!$accepted) {
+                delete_option($lock_key);
+                return new WP_Error('phaseone_marketing_mail', 'WordPress did not accept the email.', ['status' => 502]);
+            }
+            $sent_at = gmdate('c');
+            set_transient($ledger_key, ['sentAt' => $sent_at], 90 * DAY_IN_SECONDS);
+            delete_option($lock_key);
+            return rest_ensure_response([
+                'state' => 'sent',
+                'sentAt' => $sent_at,
+                'replayed' => false,
+                'message' => 'Accepted by the configured WordPress mail transport.',
+            ]);
+        } catch (Throwable $error) {
+            delete_option($lock_key);
+            return new WP_Error('phaseone_marketing_exception', 'The configured mail transport failed.', ['status' => 502]);
+        }
     }
 
     public static function customer_password_reset_link(WP_REST_Request $request) {

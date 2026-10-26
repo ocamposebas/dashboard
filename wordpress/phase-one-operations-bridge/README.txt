@@ -74,3 +74,8 @@ Version 2.0.1 sends customer recovery links to the public Phase One Labz passwor
 portal instead of exposing the private WordPress staging login. The Operations Suite
 also normalizes older bridge responses to the same public one-use reset experience.
 
+Version 2.1.0 adds a protected, idempotent marketing-email transport. The Operations
+Suite owns contacts, consent, templates and the durable delivery queue, while WordPress
+continues to send through the SMTP plugin already configured on the site. No SMTP
+password or provider secret is exposed to the dashboard.
+

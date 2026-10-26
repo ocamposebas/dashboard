@@ -2260,6 +2260,38 @@ export class WooCommerceGateway {
     };
   }
 
+  async sendMarketingEmail(input: {
+    eventId: string;
+    recipient: string;
+    subject: string;
+    html: string;
+    text: string;
+    unsubscribeUrl: string;
+  }): Promise<{ state: "sent" | "uncertain"; sentAt: string | null; replayed: boolean; message: string }> {
+    const payload = record(await this.requestRoute("/wp-json/phaseone-ops/v1/marketing/email", {
+      method: "POST",
+      body: {
+        eventId: input.eventId,
+        recipient: input.recipient,
+        subject: input.subject,
+        html: input.html,
+        text: input.text,
+        unsubscribeUrl: input.unsubscribeUrl,
+      },
+      headers: this.operationsHeaders(),
+    }, false));
+    const state = text(payload.state);
+    if (state !== "sent" && state !== "uncertain") {
+      throw new Error("WordPress returned an invalid marketing email state");
+    }
+    return {
+      state,
+      sentAt: isoDate(payload.sentAt ?? payload.sent_at),
+      replayed: Boolean(payload.replayed),
+      message: decodedText(payload.message),
+    };
+  }
+
   async saveNativeShippingLabel(input: {
     orderId: number;
     eventId: string;

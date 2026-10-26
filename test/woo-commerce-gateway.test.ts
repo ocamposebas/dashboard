@@ -811,6 +811,45 @@ test("writes and voids native shipping metadata through the protected bridge", a
   assert.equal(requests[1]?.body.label_id, "se-label-1");
 });
 
+test("sends marketing email only through the protected WordPress SMTP bridge", async () => {
+  const requests: Array<{ path: string; method: string; body: Record<string, unknown>; key: string | null }> = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    const headers = new Headers(init?.headers);
+    requests.push({
+      path: url.pathname,
+      method: init?.method || "GET",
+      body: JSON.parse(String(init?.body || "{}")) as Record<string, unknown>,
+      key: headers.get("x-phaseone-consumer-key"),
+    });
+    return new Response(JSON.stringify({
+      state: "sent", sentAt: "2026-10-26T15:00:00Z", replayed: false,
+      message: "Accepted by WordPress SMTP",
+    }), { status: 200 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example", consumerKey: "ck_test", consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  const result = await gateway.sendMarketingEmail({
+    eventId: "11111111-1111-4111-8111-111111111111",
+    recipient: "subscriber@example.test",
+    subject: "Phase One update",
+    html: "<p>Safe email</p>",
+    text: "Safe email",
+    unsubscribeUrl: "https://phaseonelabz.is/api/public/marketing/unsubscribe?token=safe",
+  });
+
+  assert.equal(result.state, "sent");
+  assert.equal(result.sentAt, "2026-10-26T15:00:00.000Z");
+  assert.equal(requests[0]?.path, "/wp-json/phaseone-ops/v1/marketing/email");
+  assert.equal(requests[0]?.method, "POST");
+  assert.equal(requests[0]?.key, "ck_test");
+  assert.equal(requests[0]?.body.eventId, "11111111-1111-4111-8111-111111111111");
+  assert.equal(requests[0]?.body.recipient, "subscriber@example.test");
+  assert.equal(requests[0]?.body.unsubscribeUrl, "https://phaseonelabz.is/api/public/marketing/unsubscribe?token=safe");
+});
+
 test("repeats an order idempotently and generates a customer recovery link through the protected bridge", async () => {
   const requests: Array<{ path: string; method: string; body: Record<string, unknown>; key: string | null }> = [];
   const fetchImpl: typeof fetch = async (input, init) => {
