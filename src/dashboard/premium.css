@@ -36,7 +36,7 @@
 
 /* Internal protection reserve */
 .insurance-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-bottom:18px; }
-.insurance-kpis article { min-height:138px; padding:22px; border:1px solid var(--border); border-radius:18px; background:var(--surface); display:flex; flex-direction:column; gap:8px; }
+.insurance-kpis article { min-height:138px; padding:22px; border:1px solid var(--line); border-radius:18px; background:var(--surface); display:flex; flex-direction:column; gap:8px; }
 .insurance-kpis span { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.08em; }
 .insurance-kpis strong { font-size:clamp(25px,3vw,38px); letter-spacing:-.04em; }
 .insurance-kpis small { color:var(--muted); margin-top:auto; }
@@ -46,22 +46,22 @@
 .insurance-search { display:grid; gap:8px; margin:20px 0 14px; }
 .insurance-search>span,.customer-recovery-result label>span { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
 .insurance-search>div { display:flex; gap:10px; }
-.insurance-search input,.customer-recovery-result input { width:100%; min-height:46px; padding:0 14px; border:1px solid var(--border); border-radius:12px; background:var(--field); color:var(--text); }
+.insurance-search input,.customer-recovery-result input { width:100%; min-height:46px; padding:0 14px; border:1px solid var(--line); border-radius:12px; background:var(--field); color:var(--ink); }
 .insurance-order-results { display:grid; gap:8px; max-height:310px; overflow:auto; }
-.insurance-order-option { width:100%; display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:14px; align-items:center; padding:14px; border:1px solid var(--border); border-radius:14px; background:transparent; color:var(--text); text-align:left; }
+.insurance-order-option { width:100%; display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:14px; align-items:center; padding:14px; border:1px solid var(--line); border-radius:14px; background:transparent; color:var(--ink); text-align:left; }
 .insurance-order-option:hover { border-color:var(--accent); transform:translateY(-1px); }
 .insurance-order-option span { display:grid; gap:4px; min-width:0; }
 .insurance-order-option small { color:var(--muted); overflow:hidden; text-overflow:ellipsis; }
 .insurance-order-option b { color:var(--success); white-space:nowrap; }
 .insurance-order-option i { font-style:normal; color:var(--muted); }
-#insurance-claim-form { margin-top:18px; padding-top:18px; border-top:1px solid var(--border); }
+#insurance-claim-form { margin-top:18px; padding-top:18px; border-top:1px solid var(--line); }
 .insurance-selected-order { display:grid; gap:5px; padding:14px; margin-bottom:16px; border-radius:14px; background:rgba(80,196,158,.08); border:1px solid rgba(80,196,158,.28); }
 .insurance-selected-order span,.insurance-selected-order small { color:var(--muted); }
 .insurance-tabs { display:flex; gap:6px; padding:5px; margin:16px 0; border-radius:12px; background:var(--field); width:max-content; }
 .insurance-tabs button { padding:9px 14px; border:0; border-radius:9px; background:transparent; color:var(--muted); }
-.insurance-tabs button.is-active { background:var(--surface); color:var(--text); box-shadow:0 1px 4px rgba(0,0,0,.14); }
+.insurance-tabs button.is-active { background:var(--surface); color:var(--ink); box-shadow:0 1px 4px rgba(0,0,0,.14); }
 .insurance-ledger { max-height:620px; overflow:auto; }
-.insurance-ledger-row { display:grid; grid-template-columns:36px minmax(0,1fr) auto; gap:12px; align-items:center; padding:14px 4px; border-bottom:1px solid var(--border); }
+.insurance-ledger-row { display:grid; grid-template-columns:36px minmax(0,1fr) auto; gap:12px; align-items:center; padding:14px 4px; border-bottom:1px solid var(--line); }
 .insurance-ledger-icon { width:32px; height:32px; display:grid; place-items:center; border-radius:50%; background:rgba(80,196,158,.1); color:var(--success); font-weight:800; }
 .insurance-ledger-row div { display:grid; gap:4px; min-width:0; }
 .insurance-ledger-row small { color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

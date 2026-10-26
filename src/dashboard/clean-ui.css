@@ -774,3 +774,66 @@ kbd {
   .product-campaign-editor .featured-promo { grid-template-columns: auto minmax(0, 1fr); }
   .product-campaign-editor .promo-price { grid-column: 1 / -1; justify-items: start; padding-top: 8px; border-top: 1px solid var(--line); }
 }
+
+/* Refined dark workspace: softer blacks, clearer elevation and calmer status colors. */
+html[data-theme="dark"] {
+  --sidebar: #0b100e;
+  --sidebar-soft: #121916;
+  --ink: #f2f6f3;
+  --ink-soft: #c7d0cc;
+  --muted: #8e9d96;
+  --line: #29352f;
+  --line-strong: #3d4d46;
+  --canvas: #0e1412;
+  --surface: #171e1b;
+  --surface-soft: #1b2420;
+  --surface-hover: #22302a;
+  --field: #111815;
+  --accent: #7bc0ad;
+  --accent-dark: #9dd5c6;
+  --accent-soft: #1b352d;
+  --topbar: rgba(17, 24, 21, .96);
+  --success: #67c69a;
+  --success-soft: #163127;
+  --warning: #d8aa61;
+  --warning-soft: #302719;
+  --danger: #e58b80;
+  --danger-soft: #341f1d;
+}
+
+html[data-theme="dark"] .topbar {
+  border-bottom-color: var(--line) !important;
+  background: var(--topbar) !important;
+  backdrop-filter: blur(18px);
+}
+
+html[data-theme="dark"] .sidebar {
+  border-right-color: var(--line) !important;
+  background: linear-gradient(180deg, #0b100e 0%, #0d1310 100%) !important;
+}
+
+html[data-theme="dark"] .surface,
+html[data-theme="dark"] .kpi-card,
+html[data-theme="dark"] .today-strip,
+html[data-theme="dark"] .insurance-kpis article,
+html[data-theme="dark"] .insurance-claim-card,
+html[data-theme="dark"] .insurance-activity-card {
+  border-color: var(--line) !important;
+  background-color: var(--surface) !important;
+}
+
+html[data-theme="dark"] .insurance-kpi-balance {
+  border-color: color-mix(in srgb, var(--success) 42%, var(--line)) !important;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--success-soft) 78%, var(--surface)), var(--surface)) !important;
+}
+
+html[data-theme="dark"] .insurance-tabs,
+html[data-theme="dark"] .insurance-order-option:hover {
+  background: var(--surface-soft);
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea {
+  caret-color: var(--accent);
+}

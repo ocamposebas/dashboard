@@ -2427,9 +2427,21 @@ export class WooCommerceGateway {
         "X-PhaseOne-Consumer-Secret": this.config.consumerSecret,
       },
     }, false));
-    const url = text(payload.url);
-    if (!url) throw new Error("WordPress did not return a password recovery link");
-    return { url, expiresAt: isoDate(payload.expires_at) };
+    const sourceUrl = text(payload.url);
+    if (!sourceUrl) throw new Error("WordPress did not return a password recovery link");
+    let parsed: URL;
+    try {
+      parsed = new URL(sourceUrl);
+    } catch {
+      throw new Error("WordPress returned an invalid password recovery link");
+    }
+    const key = parsed.searchParams.get("key")?.trim() || "";
+    const login = parsed.searchParams.get("login")?.trim() || "";
+    if (!key || !login) throw new Error("WordPress returned an incomplete password recovery link");
+    const publicUrl = new URL("/set-password/", "https://phaseonelabz.com");
+    publicUrl.searchParams.set("key", key);
+    publicUrl.searchParams.set("login", login);
+    return { url: publicUrl.toString(), expiresAt: isoDate(payload.expires_at) };
   }
   async approveOrderPayment(orderId: number): Promise<CommerceOrder> {
     const approvedAt = new Date().toISOString();

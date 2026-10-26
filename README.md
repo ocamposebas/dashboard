@@ -103,7 +103,7 @@ sin editar código:
 - auditoría completa de cambios de política y movimientos de saldo.
 
 Instala o actualiza `wordpress/phase-one-operations-bridge.zip` a la versión
-2.0.0 y usa `WOOCOMMERCE_ACCESS_MODE=read_write` para habilitar publicación,
+2.0.1 y usa `WOOCOMMERCE_ACCESS_MODE=read_write` para habilitar publicación,
 pedidos operativos repetidos, tracking y enlaces seguros de recuperación. Los
 puntos existentes, los pedidos ya premiados, el crédito y las redenciones
 históricas no se recalculan ni se eliminan al cambiar una regla.

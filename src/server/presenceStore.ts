@@ -440,6 +440,8 @@ export class PresenceStore {
   private readonly productCostsKey: string;
   private readonly commerceCacheKey: string;
   private readonly customerCacheKey: string;
+  private readonly insuranceOrdersCacheKey: string;
+  private readonly salesReportCachePrefix: string;
   private readonly upstreamSnapshotKey: string;
   private readonly usersKey: string;
   private readonly passwordResetMarkerKey: string;
@@ -498,6 +500,8 @@ export class PresenceStore {
     this.productCostsKey = `${keyPrefix}:commerce:product-costs`;
     this.commerceCacheKey = `${keyPrefix}:commerce:dashboard-cache:v1`;
     this.customerCacheKey = `${keyPrefix}:commerce:customer-directory-cache:v1`;
+    this.insuranceOrdersCacheKey = `${keyPrefix}:commerce:insurance-orders-cache:v1`;
+    this.salesReportCachePrefix = `${keyPrefix}:commerce:sales-report-cache:v1:`;
     this.upstreamSnapshotKey = `${keyPrefix}:analytics:upstream-snapshot:v1`;
     this.usersKey = `${keyPrefix}:access:users:v1`;
     this.passwordResetMarkerKey = `${keyPrefix}:access:password-reset:v1`;
@@ -996,6 +1000,58 @@ export class PresenceStore {
 
   async setCustomerCache(payload: Record<string, unknown>, updatedAt: number): Promise<void> {
     await this.client.set(this.customerCacheKey, JSON.stringify({ payload, updatedAt }), { EX: 86_400 });
+  }
+
+  async getInsuranceOrdersCache(): Promise<{ orders: Record<string, unknown>[]; updatedAt: number } | null> {
+    const raw = await this.client.get(this.insuranceOrdersCacheKey);
+    if (!raw) return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return null;
+      const value = parsed as Record<string, unknown>;
+      if (!Array.isArray(value.orders) || typeof value.updatedAt !== "number") return null;
+      const orders = value.orders.filter(
+        (order): order is Record<string, unknown> => Boolean(order) && typeof order === "object" && !Array.isArray(order),
+      );
+      return { orders, updatedAt: value.updatedAt };
+    } catch {
+      return null;
+    }
+  }
+
+  async setInsuranceOrdersCache(orders: Record<string, unknown>[], updatedAt: number): Promise<void> {
+    await this.client.set(
+      this.insuranceOrdersCacheKey,
+      JSON.stringify({ orders, updatedAt }),
+      { EX: 7 * 86_400 },
+    );
+  }
+
+  async getSalesReportCache(periodKey: string): Promise<{ orders: Record<string, unknown>[]; updatedAt: number } | null> {
+    if (!/^\d{4}-\d{2}-\d{2}:\d{4}-\d{2}-\d{2}$/.test(periodKey)) return null;
+    const raw = await this.client.get(`${this.salesReportCachePrefix}${periodKey}`);
+    if (!raw) return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return null;
+      const value = parsed as Record<string, unknown>;
+      if (!Array.isArray(value.orders) || typeof value.updatedAt !== "number") return null;
+      const orders = value.orders.filter(
+        (order): order is Record<string, unknown> => Boolean(order) && typeof order === "object" && !Array.isArray(order),
+      );
+      return { orders, updatedAt: value.updatedAt };
+    } catch {
+      return null;
+    }
+  }
+
+  async setSalesReportCache(periodKey: string, orders: Record<string, unknown>[], updatedAt: number): Promise<void> {
+    if (!/^\d{4}-\d{2}-\d{2}:\d{4}-\d{2}-\d{2}$/.test(periodKey)) return;
+    await this.client.set(
+      `${this.salesReportCachePrefix}${periodKey}`,
+      JSON.stringify({ orders, updatedAt }),
+      { EX: 86_400 },
+    );
   }
 
   async getIndependentSiteControls(): Promise<IndependentSiteControlsRecord | null> {

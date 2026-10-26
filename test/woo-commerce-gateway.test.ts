@@ -827,7 +827,7 @@ test("repeats an order idempotently and generates a customer recovery link throu
     }
     if (url.pathname.endsWith("/password-reset-link")) {
       return new Response(JSON.stringify({
-        url: "https://shop.example/wp-login.php?action=rp&key=one-use&login=customer",
+        url: "https://staging.phaseonelabz.com/wp-login.php?action=rp&key=one-use&login=customer",
         expires_at: "2026-10-27T10:00:00Z",
       }), { status: 201 });
     }
@@ -862,6 +862,7 @@ test("repeats an order idempotently and generates a customer recovery link throu
   assert.equal(repeated.id, 4100);
   assert.equal(repeated.repeatOperations.operationalRepeat, true);
   assert.equal(repeated.repeatOperations.sourceOrderId, 3180);
+  assert.equal(recovery.url, "https://phaseonelabz.com/set-password/?key=one-use&login=customer");
   assert.equal(recovery.expiresAt, "2026-10-27T10:00:00.000Z");
   assert.deepEqual(requests.map((request) => request.path), [
     "/wp-json/phaseone-ops/v1/orders/3180/repeat",

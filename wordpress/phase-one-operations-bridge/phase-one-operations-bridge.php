@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Phase One Operations Bridge
  * Description: Secure bridge between Phase One Operations Suite, storefront controls, customer rewards and existing COA Manager records.
- * Version: 2.0.0
+ * Version: 2.0.1
  * Author: Phase One Labz
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -157,7 +157,7 @@ final class Phase_One_Operations_Bridge {
     public static function status() {
         return rest_ensure_response([
             'connected' => true,
-            'version' => '2.0.0',
+            'version' => '2.0.1',
             'capabilities' => array_values(array_filter([
                 'edit_coa',
                 'read_customer_rewards',
@@ -190,10 +190,10 @@ final class Phase_One_Operations_Bridge {
             return $key;
         }
         $expiration = (int) apply_filters('password_reset_expiration', DAY_IN_SECONDS, $user);
-        $url = network_site_url(
-            'wp-login.php?action=rp&key=' . rawurlencode($key) . '&login=' . rawurlencode($user->user_login),
-            'login'
-        );
+        $url = add_query_arg([
+            'key' => $key,
+            'login' => $user->user_login,
+        ], 'https://phaseonelabz.com/set-password/');
         return rest_ensure_response([
             'url' => $url,
             'expires_at' => gmdate('c', time() + max(300, $expiration)),

@@ -567,14 +567,68 @@ export function createMonitorServer(
   let fulfillmentCoasCache: { coas: CommerceCoa[]; updatedAt: number } | undefined;
   let fulfillmentCoasRefresh: Promise<CommerceCoa[]> | undefined;
   let insuranceOrdersCache: { orders: CommerceOrder[]; updatedAt: number } | undefined;
+  let insuranceOrdersRefresh: Promise<CommerceOrder[]> | undefined;
+  let insuranceOrdersCacheRestored = false;
+  let insuranceOrdersCacheRestore: Promise<void> | undefined;
+
+  async function restoreInsuranceOrdersCache(): Promise<void> {
+    if (insuranceOrdersCacheRestored) return;
+    if (insuranceOrdersCacheRestore) return insuranceOrdersCacheRestore;
+    insuranceOrdersCacheRestore = (async () => {
+      try {
+        const cached = await store.getInsuranceOrdersCache();
+        if (cached && !insuranceOrdersCache) {
+          insuranceOrdersCache = {
+            orders: cached.orders as unknown as CommerceOrder[],
+            updatedAt: cached.updatedAt,
+          };
+        }
+      } catch (error: unknown) {
+        console.error("Insurance order cache restore failed", error);
+      } finally {
+        insuranceOrdersCacheRestored = true;
+        insuranceOrdersCacheRestore = undefined;
+      }
+    })();
+    return insuranceOrdersCacheRestore;
+  }
+
+  async function refreshInsuranceOrders(): Promise<CommerceOrder[]> {
+    if (!commerce) throw new Error("The live order service is not connected");
+    if (insuranceOrdersRefresh) return insuranceOrdersRefresh;
+    insuranceOrdersRefresh = (async () => {
+      const before = new Date(Date.now() + 86_400_000).toISOString();
+      const orders = await commerce.listOrdersForPeriod("2020-01-01T00:00:00.000Z", before);
+      const updatedAt = Date.now();
+      insuranceOrdersCache = { orders, updatedAt };
+      try {
+        await store.setInsuranceOrdersCache(
+          orders as unknown as Record<string, unknown>[],
+          updatedAt,
+        );
+      } catch (error: unknown) {
+        console.error("Insurance order cache persistence failed", error);
+      }
+      return orders;
+    })().finally(() => {
+      insuranceOrdersRefresh = undefined;
+    });
+    return insuranceOrdersRefresh;
+  }
 
   async function insuranceFundPayload(force = false) {
     if (!commerce || !insuranceFund) throw new Error("Insurance fund services are not configured");
-    if (force || !insuranceOrdersCache || Date.now() - insuranceOrdersCache.updatedAt > 300_000) {
-      const before = new Date(Date.now() + 86_400_000).toISOString();
-      const orders = await commerce.listOrdersForPeriod("2020-01-01T00:00:00.000Z", before);
-      insuranceOrdersCache = { orders, updatedAt: Date.now() };
+    await restoreInsuranceOrdersCache();
+    const stale = !insuranceOrdersCache || Date.now() - insuranceOrdersCache.updatedAt > 300_000;
+    const refreshingInBackground = stale && Boolean(insuranceOrdersCache) && !force;
+    if (force || !insuranceOrdersCache) {
+      await refreshInsuranceOrders();
+    } else if (stale) {
+      void refreshInsuranceOrders().catch((error: unknown) => {
+        console.error("Insurance order background refresh failed", error);
+      });
     }
+    if (!insuranceOrdersCache) throw new Error("Insurance order history is unavailable");
     const excludedStatuses = new Set(["cancelled", "failed", "refunded", "trash"]);
     const contributions = insuranceOrdersCache.orders.flatMap((order) => {
       if (
@@ -612,6 +666,7 @@ export function createMonitorServer(
       contributions,
       claims,
       syncedAt: new Date(insuranceOrdersCache.updatedAt).toISOString(),
+      refreshing: refreshingInBackground,
     };
   }
 
@@ -701,9 +756,84 @@ export function createMonitorServer(
   const productDetailCache = new Map<number, { payload: Record<string, unknown>; updatedAt: number }>();
   const orderDetailCache = new Map<number, { payload: Record<string, unknown>; updatedAt: number }>();
   const salesReportCache = new Map<string, { orders: CommerceOrder[]; updatedAt: number }>();
+  const salesReportRefreshes = new Map<string, Promise<{ orders: CommerceOrder[]; updatedAt: number }>>();
   let reconciledProductCampaign: { revision: number; controls: IndependentSiteControls } | undefined;
   let productCampaignReconciliation: Promise<IndependentSiteControls> | undefined;
   let productCampaignRetryAt = 0;
+
+  function salesReportPeriodKey(after: Date, before: Date): string {
+    return `${after.toISOString().slice(0, 10)}:${before.toISOString().slice(0, 10)}`;
+  }
+
+  async function refreshSalesReport(
+    after: Date,
+    before: Date,
+    cacheKey: string,
+  ): Promise<{ orders: CommerceOrder[]; updatedAt: number }> {
+    const activeRefresh = salesReportRefreshes.get(cacheKey);
+    if (activeRefresh) return activeRefresh;
+    const refresh = (async () => {
+      if (!commerce) throw new Error("The live order service is not connected");
+      const sourceOrders = await commerce.listOrdersForPeriod(after.toISOString(), before.toISOString());
+      const orders = await Promise.all(sourceOrders.map(orderWithProfitability));
+      const updatedAt = Date.now();
+      const result = { orders, updatedAt };
+      salesReportCache.set(cacheKey, result);
+      try {
+        await store.setSalesReportCache(
+          cacheKey,
+          orders as unknown as Record<string, unknown>[],
+          updatedAt,
+        );
+      } catch (error: unknown) {
+        console.error("Sales report cache persistence failed", error);
+      }
+      if (salesReportCache.size > 24) {
+        const oldest = [...salesReportCache.entries()]
+          .sort((left, right) => left[1].updatedAt - right[1].updatedAt)[0]?.[0];
+        if (oldest) salesReportCache.delete(oldest);
+      }
+      return result;
+    })().finally(() => {
+      salesReportRefreshes.delete(cacheKey);
+    });
+    salesReportRefreshes.set(cacheKey, refresh);
+    return refresh;
+  }
+
+  async function cachedSalesReport(
+    after: Date,
+    before: Date,
+    forceRefresh: boolean,
+  ): Promise<{ orders: CommerceOrder[]; updatedAt: number; stale: boolean }> {
+    const cacheKey = salesReportPeriodKey(after, before);
+    let cached = salesReportCache.get(cacheKey);
+    if (!cached && !forceRefresh) {
+      try {
+        const persisted = await store.getSalesReportCache(cacheKey);
+        if (persisted) {
+          cached = {
+            orders: persisted.orders as unknown as CommerceOrder[],
+            updatedAt: persisted.updatedAt,
+          };
+          salesReportCache.set(cacheKey, cached);
+        }
+      } catch (error: unknown) {
+        console.error("Sales report cache restore failed", error);
+      }
+    }
+    if (cached && !forceRefresh) {
+      const stale = Date.now() - cached.updatedAt >= 5 * 60_000;
+      if (stale) {
+        void refreshSalesReport(after, before, cacheKey).catch((error: unknown) => {
+          console.error("Sales report background refresh failed", error);
+        });
+      }
+      return { ...cached, stale };
+    }
+    const refreshed = await refreshSalesReport(after, before, cacheKey);
+    return { ...refreshed, stale: false };
+  }
 
   async function independentSiteControls(): Promise<IndependentSiteControls> {
     const durable = await siteControlRepository?.get().catch((error: unknown) => {
@@ -3873,27 +4003,15 @@ export function createMonitorServer(
           json(response, 400, { error: "A valid reporting period of 370 days or less is required" });
           return;
         }
-        const cacheKey = `${after.toISOString()}:${before.toISOString()}`;
-        const cached = salesReportCache.get(cacheKey);
         const forceRefresh = url.searchParams.get("fresh") === "1";
-        if (!forceRefresh && cached && Date.now() - cached.updatedAt < 5 * 60_000) {
-          json(response, 200, {
-            orders: cached.orders,
-            generatedAt: new Date(cached.updatedAt).toISOString(),
-            cacheAgeSeconds: Math.floor((Date.now() - cached.updatedAt) / 1_000),
-          });
-          return;
-        }
         try {
-          const sourceOrders = await commerce.listOrdersForPeriod(after.toISOString(), before.toISOString());
-          const orders = await Promise.all(sourceOrders.map(orderWithProfitability));
-          const updatedAt = Date.now();
-          salesReportCache.set(cacheKey, { orders, updatedAt });
-          if (salesReportCache.size > 24) {
-            const oldest = [...salesReportCache.entries()].sort((left, right) => left[1].updatedAt - right[1].updatedAt)[0]?.[0];
-            if (oldest) salesReportCache.delete(oldest);
-          }
-          json(response, 200, { orders, generatedAt: new Date(updatedAt).toISOString(), cacheAgeSeconds: 0 });
+          const report = await cachedSalesReport(after, before, forceRefresh);
+          json(response, 200, {
+            orders: report.orders,
+            generatedAt: new Date(report.updatedAt).toISOString(),
+            cacheAgeSeconds: Math.max(0, Math.floor((Date.now() - report.updatedAt) / 1_000)),
+            refreshing: report.stale,
+          });
         } catch (error: unknown) {
           console.error("Sales report fetch failed", error);
           json(response, 502, { error: "The complete sales period could not be loaded" });

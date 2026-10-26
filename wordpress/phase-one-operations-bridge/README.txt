@@ -70,3 +70,7 @@ addresses into a zero-charge Processing order, remain visibly linked to the sour
 order and cannot inflate revenue. Recovery links use WordPress core one-use reset
 keys, expire automatically and are never stored by the Operations Suite.
 
+Version 2.0.1 sends customer recovery links to the public Phase One Labz password
+portal instead of exposing the private WordPress staging login. The Operations Suite
+also normalizes older bridge responses to the same public one-use reset experience.
+

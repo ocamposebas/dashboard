@@ -35,7 +35,7 @@ disabled, while Coupon Affiliates remains the affiliate balance authority.
 ### Gate 2 — WordPress bridge and commerce (blocking)
 
 - [ ] Install and activate `wordpress/phase-one-operations-bridge.zip` version
-  **1.5.0** after taking a WordPress database and `wp-content` backup.
+  **2.0.1** after taking a WordPress database and `wp-content` backup.
 - [ ] Configure a dedicated server-side WooCommerce Read/Write REST key and
   verify that it never reaches browser code or logs.
 - [ ] Confirm COA Manager, Site Controls and Points & Rewards remain active when

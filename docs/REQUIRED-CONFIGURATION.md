@@ -79,7 +79,7 @@ needed for store operations. It must never be exposed to the browser.
 ### Operations Bridge
 
 - [ ] Install and activate `wordpress/phase-one-operations-bridge.zip` version
-  **1.6.0** on the WordPress site.
+  **2.0.1** on the WordPress site.
 - [ ] Confirm its PHP file passes `php -l` before packaging/deployment.
 - [ ] Confirm the bridge reports the required capabilities: COA editing, Site
   Controls, loyalty policy, customer-point adjustments, order evidence and
