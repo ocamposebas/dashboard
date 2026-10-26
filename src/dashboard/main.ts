@@ -705,9 +705,14 @@ interface MarketingEmailContact {
   status: "subscribed" | "unconfirmed" | "unsubscribed" | "bounced"; tags: string[];
   lastEmailedAt: string | null;
 }
+interface MarketingEmailProduct {
+  productId: number; name: string; sku: string; price: number; regularPrice: number;
+  imageUrl: string; productUrl: string;
+}
 interface MarketingEmailCampaign {
   id: string; name: string; templateKey: string; subject: string; preheader: string;
   heading: string; message: string; buttonLabel: string; buttonUrl: string; audienceTag: string;
+  products: MarketingEmailProduct[];
   status: string; recipientCount: number; sentCount: number; failedCount: number;
   uncertainCount: number; createdAt: string;
 }
@@ -1140,6 +1145,7 @@ let marketingEmailLoading = false;
 let marketingEmailSearchTimer: number | undefined;
 let marketingEmailSyncRefreshTimer: number | undefined;
 let marketingEmailCampaignFilter: "all" | "draft" | "sent" = "all";
+let marketingEmailSelectedProducts: MarketingEmailProduct[] = [];
 let pendingEmailLaunchId = "";
 const SESSION_PAGE_SIZE = 5;
 const CUSTOMER_PAGE_SIZE = 50;
@@ -1763,7 +1769,9 @@ function renderMarketingEmailCenter(): void {
 
   emailTemplateStrip.innerHTML = center.templates.map((template) => `<button class="email-template-card" type="button" data-email-template="${escapeHtml(template.key)}" style="--template-accent:${escapeHtml(template.accent)}"><span>USE TEMPLATE</span><strong>${escapeHtml(template.name)}</strong><small>${escapeHtml(template.description)}</small></button>`).join("");
   emailCampaignList.innerHTML = visibleCampaigns.length ? visibleCampaigns.map((campaign) => {
-    const progress = campaign.status === "draft" ? "Safe draft · nobody emailed" : `${formatNumber(campaign.sentCount)} of ${formatNumber(campaign.recipientCount)} delivered`;
+    const productCount = Array.isArray(campaign.products) ? campaign.products.length : 0;
+    const productSummary = productCount ? ` · ${productCount} product${productCount === 1 ? "" : "s"}` : "";
+    const progress = campaign.status === "draft" ? `Safe draft · nobody emailed${productSummary}` : `${formatNumber(campaign.sentCount)} of ${formatNumber(campaign.recipientCount)} delivered${productSummary}`;
     const actions = campaign.status === "draft" && workspaceSession?.permissions.administer
       ? `<button type="button" data-email-test="${campaign.id}">Test first</button><button type="button" data-email-launch="${campaign.id}">Send to ${formatNumber(center.counts.subscribed)}</button>`
       : ["queued", "sending"].includes(campaign.status) && workspaceSession?.permissions.administer
@@ -1778,6 +1786,7 @@ function renderMarketingEmailCenter(): void {
   templateSelect.innerHTML = center.templates.map((template) => `<option value="${escapeHtml(template.key)}">${escapeHtml(template.name)}</option>`).join("");
   const audience = requiredElement<HTMLSelectElement>("#email-audience-tag");
   audience.innerHTML = `<option value="">All confirmed subscribers (${formatNumber(center.counts.subscribed)})</option>${center.tags.map((tag) => `<option value="${escapeHtml(tag.tag)}">${escapeHtml(tag.tag)} (${formatNumber(tag.contacts)})</option>`).join("")}`;
+  renderEmailProductSelector();
 }
 
 async function loadMarketingEmailCenter(): Promise<void> {
@@ -1803,6 +1812,45 @@ async function loadMarketingEmailCenter(): Promise<void> {
   }
 }
 
+function emailCatalogProducts(): CommerceProduct[] {
+  return (commerceData?.products || [])
+    .filter((product) => product.status === "publish" && product.visibility !== "draft" && product.visibility !== "private")
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function emailProductSnapshot(product: CommerceProduct): MarketingEmailProduct {
+  const price = Math.max(0, product.price || product.salePrice || product.regularPrice || 0);
+  return {
+    productId: product.id,
+    name: product.name,
+    sku: product.sku,
+    price,
+    regularPrice: Math.max(price, product.regularPrice || price),
+    imageUrl: product.thumbnailUrl || product.imageUrl || "",
+    productUrl: `https://phaseonelabz.com/product/${encodeURIComponent(product.slug || String(product.id))}/`,
+  };
+}
+
+function renderEmailProductSelector(): void {
+  const select = requiredElement<HTMLSelectElement>("#email-product-select");
+  const current = select.value;
+  const selectedIds = new Set(marketingEmailSelectedProducts.map((product) => product.productId));
+  const available = emailCatalogProducts().filter((product) => !selectedIds.has(product.id));
+  select.innerHTML = `<option value="">Choose a product…</option>${available.map((product) => `<option value="${product.id}">${escapeHtml(product.name)} · ${escapeHtml(formatCurrency(product.price || product.salePrice || product.regularPrice || 0))}</option>`).join("")}`;
+  if (available.some((product) => String(product.id) === current)) select.value = current;
+  select.disabled = marketingEmailSelectedProducts.length >= 4 || !available.length;
+  requiredElement<HTMLButtonElement>("#email-add-product").disabled = select.disabled;
+}
+
+function renderEmailSelectedProducts(): void {
+  requiredElement<HTMLElement>("#email-product-limit").textContent = `${marketingEmailSelectedProducts.length} / 4`;
+  requiredElement<HTMLElement>("#email-selected-products").innerHTML = marketingEmailSelectedProducts.length
+    ? marketingEmailSelectedProducts.map((product) => `<article><span>${product.imageUrl ? `<img src="${escapeHtml(product.imageUrl)}" alt="" loading="lazy" />` : "P1"}</span><div><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(formatCurrency(product.price))}${product.sku ? ` · ${escapeHtml(product.sku)}` : ""}</small></div><button type="button" data-email-remove-product="${product.productId}" aria-label="Remove ${escapeHtml(product.name)}">×</button></article>`).join("")
+    : "<p>No products added.</p>";
+  requiredElement<HTMLElement>("#email-preview-products").innerHTML = marketingEmailSelectedProducts.map((product) => `<article>${product.imageUrl ? `<img src="${escapeHtml(product.imageUrl)}" alt="" />` : ""}<div><strong>${escapeHtml(product.name)}</strong><span>${escapeHtml(formatCurrency(product.price))}</span><small>VIEW PRODUCT →</small></div></article>`).join("");
+  renderEmailProductSelector();
+}
+
 function updateEmailPreview(): void {
   const subject = requiredElement<HTMLInputElement>("#email-subject").value.trim();
   const message = requiredElement<HTMLTextAreaElement>("#email-message").value.trim();
@@ -1817,6 +1865,7 @@ function updateEmailPreview(): void {
   const button = requiredElement<HTMLElement>("#email-preview-button");
   button.textContent = `${requiredElement<HTMLInputElement>("#email-button-label").value || "EXPLORE NOW"} →`;
   button.hidden = requiredElement<HTMLInputElement>("#email-button-label").value.trim() === "";
+  renderEmailSelectedProducts();
 }
 
 function openEmailComposer(templateKey?: string): void {
@@ -1835,11 +1884,12 @@ function openEmailComposer(templateKey?: string): void {
   requiredElement<HTMLInputElement>("#email-button-label").value = template.buttonLabel;
   requiredElement<HTMLInputElement>("#email-button-url").value = template.buttonUrl;
   requiredElement<HTMLSelectElement>("#email-audience-tag").value = "";
+  marketingEmailSelectedProducts = [];
   updateEmailPreview();
   emailComposer.showModal();
 }
 
-function emailCampaignPayload(): Record<string, string> {
+function emailCampaignPayload(): Record<string, unknown> {
   return {
     name: requiredElement<HTMLInputElement>("#email-campaign-name").value,
     templateKey: requiredElement<HTMLSelectElement>("#email-template-select").value,
@@ -1850,6 +1900,7 @@ function emailCampaignPayload(): Record<string, string> {
     buttonLabel: requiredElement<HTMLInputElement>("#email-button-label").value,
     buttonUrl: requiredElement<HTMLInputElement>("#email-button-url").value,
     audienceTag: requiredElement<HTMLSelectElement>("#email-audience-tag").value,
+    productIds: marketingEmailSelectedProducts.map((product) => product.productId),
   };
 }
 
@@ -7967,6 +8018,21 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-marketi
 }
 
 requiredElement<HTMLButtonElement>("#email-new-campaign").addEventListener("click", () => openEmailComposer());
+requiredElement<HTMLButtonElement>("#email-add-product").addEventListener("click", () => {
+  if (marketingEmailSelectedProducts.length >= 4) return;
+  const productId = Number(requiredElement<HTMLSelectElement>("#email-product-select").value);
+  const product = emailCatalogProducts().find((item) => item.id === productId);
+  if (!product || marketingEmailSelectedProducts.some((item) => item.productId === productId)) return;
+  marketingEmailSelectedProducts.push(emailProductSnapshot(product));
+  renderEmailSelectedProducts();
+});
+requiredElement<HTMLElement>("#email-selected-products").addEventListener("click", (event) => {
+  const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-email-remove-product]") : null;
+  const productId = Number(button?.dataset.emailRemoveProduct);
+  if (!Number.isSafeInteger(productId) || productId <= 0) return;
+  marketingEmailSelectedProducts = marketingEmailSelectedProducts.filter((product) => product.productId !== productId);
+  renderEmailSelectedProducts();
+});
 for (const button of document.querySelectorAll<HTMLButtonElement>("[data-email-campaign-filter]")) {
   button.addEventListener("click", () => {
     const filter = button.dataset.emailCampaignFilter;

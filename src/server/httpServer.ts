@@ -61,6 +61,7 @@ import {
 } from "../shared/coaAutomaticPublishing.js";
 import { productVariantSku } from "../shared/productSku.js";
 import type { MonthlyFinanceOrder } from "../shared/monthlyFinance.js";
+import type { MarketingEmailProduct } from "../shared/marketingEmail.js";
 import { fulfillmentAccessForRole } from "./fulfillmentAccess.js";
 import {
   FulfillmentRepository,
@@ -2483,10 +2484,49 @@ export function createMonitorServer(
             return;
           }
         }
+        const productIds = Array.isArray(input.productIds)
+          ? [...new Set(input.productIds.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))].slice(0, 4)
+          : [];
+        const products: MarketingEmailProduct[] = [];
+        if (productIds.length) {
+          if (!commerce) {
+            json(response, 503, { error: "The live product catalog is not connected" });
+            return;
+          }
+          try {
+            for (const productId of productIds) {
+              const product = await commerce.getProduct(productId);
+              if (product.status !== "publish" || product.visibility === "draft" || product.visibility === "private") {
+                throw new Error("Only published products can be included in an email");
+              }
+              const rawImageUrl = product.thumbnailUrl || product.imageUrl || "";
+              let imageUrl = "";
+              if (rawImageUrl) {
+                try {
+                  const image = new URL(rawImageUrl);
+                  if (image.protocol === "https:") imageUrl = image.toString().slice(0, 1_000);
+                } catch { /* A missing product image should not block the campaign. */ }
+              }
+              products.push({
+                productId: product.id,
+                name: product.name.slice(0, 240),
+                sku: product.sku.slice(0, 120),
+                price: Math.max(0, product.price || product.salePrice || product.regularPrice || 0),
+                regularPrice: Math.max(0, product.regularPrice || product.price || 0),
+                imageUrl,
+                productUrl: `https://phaseonelabz.com/product/${encodeURIComponent(product.slug || String(product.id))}/`,
+              });
+            }
+          } catch (error: unknown) {
+            json(response, 400, { error: error instanceof Error ? error.message : "The selected products could not be verified" });
+            return;
+          }
+        }
         const campaignInput = {
           name: field("name", 160), templateKey: field("templateKey", 40), subject: field("subject", 180),
           preheader: field("preheader", 240), heading: field("heading", 180), message: field("message", 5000),
-          buttonLabel: field("buttonLabel", 80), buttonUrl, audienceTag: field("audienceTag", 80).toLowerCase(),
+          buttonLabel: field("buttonLabel", 80), buttonUrl, products,
+          audienceTag: field("audienceTag", 80).toLowerCase(),
           actorId: currentUser.id, actorName: currentUser.displayName,
         };
         if (campaignInput.name.length < 2 || campaignInput.subject.length < 2 || campaignInput.heading.length < 2 || campaignInput.message.length < 2) {
@@ -2533,7 +2573,7 @@ export function createMonitorServer(
         const result = await marketingEmails.sendTest({
           recipient, subject: campaign.subject, preheader: campaign.preheader,
           heading: campaign.heading, message: campaign.message, buttonLabel: campaign.buttonLabel,
-          buttonUrl: campaign.buttonUrl, templateKey: campaign.templateKey,
+          buttonUrl: campaign.buttonUrl, templateKey: campaign.templateKey, products: campaign.products,
         });
         json(response, 200, { sent: result.state === "sent", result });
         return;

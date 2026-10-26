@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import type { MarketingEmailProduct } from "../shared/marketingEmail.js";
 import type { Database, SqlExecutor } from "./database.js";
 
 export type MarketingContactStatus = "subscribed" | "unconfirmed" | "unsubscribed" | "bounced";
@@ -25,6 +26,7 @@ export interface MarketingCampaignInput {
   message: string;
   buttonLabel: string;
   buttonUrl: string;
+  products: MarketingEmailProduct[];
   audienceTag: string;
   actorId: string;
   actorName: string;
@@ -41,10 +43,32 @@ interface ContactRow {
 interface CampaignRow {
   id: string; name: string; template_key: string; subject: string; preheader: string;
   heading: string; message: string; button_label: string; button_url: string;
+  products: unknown;
   audience_tag: string; status: string; recipient_count: number; sent_count: number;
   failed_count: number; uncertain_count: number; created_by_name: string;
   created_at: Date | string; updated_at: Date | string;
   launched_at: Date | string | null; completed_at: Date | string | null;
+}
+
+function mapProducts(value: unknown): MarketingEmailProduct[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 4).flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const product = item as Record<string, unknown>;
+    const productId = Number(product.productId);
+    const name = typeof product.name === "string" ? product.name.trim() : "";
+    const productUrl = typeof product.productUrl === "string" ? product.productUrl.trim() : "";
+    if (!Number.isSafeInteger(productId) || productId <= 0 || !name || !productUrl) return [];
+    return [{
+      productId,
+      name: name.slice(0, 240),
+      sku: typeof product.sku === "string" ? product.sku.trim().slice(0, 120) : "",
+      price: Math.max(0, Number(product.price) || 0),
+      regularPrice: Math.max(0, Number(product.regularPrice) || 0),
+      imageUrl: typeof product.imageUrl === "string" ? product.imageUrl.trim().slice(0, 1_000) : "",
+      productUrl: productUrl.slice(0, 1_000),
+    }];
+  });
 }
 
 interface DeliveryRow extends CampaignRow {
@@ -93,6 +117,7 @@ function mapCampaign(row: CampaignRow) {
     message: row.message,
     buttonLabel: row.button_label,
     buttonUrl: row.button_url,
+    products: mapProducts(row.products),
     audienceTag: row.audience_tag,
     status: row.status,
     recipientCount: Number(row.recipient_count) || 0,
@@ -212,13 +237,13 @@ export class MarketingEmailRepository {
     const result = await this.database.query<CampaignRow>(`
       INSERT INTO marketing_email_campaigns (
         id, name, template_key, subject, preheader, heading, message, button_label,
-        button_url, audience_tag, created_by, created_by_name
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        button_url, products, audience_tag, created_by, created_by_name
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13)
       RETURNING *
     `, [
       randomUUID(), input.name, input.templateKey, input.subject, input.preheader,
       input.heading, input.message, input.buttonLabel, input.buttonUrl,
-      input.audienceTag, input.actorId, input.actorName,
+      JSON.stringify(input.products), input.audienceTag, input.actorId, input.actorName,
     ]);
     return mapCampaign(result.rows[0]!);
   }

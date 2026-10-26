@@ -26,3 +26,31 @@ test("renders branded email content safely with an unsubscribe link", () => {
   assert.match(rendered.html, /&lt;script&gt;/);
   assert.match(rendered.text, /Line one\nLine two & more/);
 });
+
+test("renders the real Phase One logo and governed catalog product cards", () => {
+  const rendered = renderPhaseOneEmail({
+    preheader: "Product preview",
+    heading: "Selected research products",
+    message: "Review the current catalog.",
+    buttonLabel: "",
+    buttonUrl: "",
+    recipientName: "Research partner",
+    unsubscribeUrl: "https://phaseonelabz.is/api/public/marketing/unsubscribe?token=safe",
+    logoUrl: "https://phaseonelabz.is/assets/phase-one-email-logo.webp",
+    products: [{
+      productId: 42,
+      name: "KPV <30MG>",
+      sku: "KPV-30-MG",
+      price: 40,
+      regularPrice: 50,
+      imageUrl: "https://phaseonelabz.com/wp-content/uploads/kpv.webp",
+      productUrl: "https://phaseonelabz.com/product/kpv-30mg/",
+    }],
+  });
+  assert.match(rendered.html, /phase-one-email-logo\.webp/);
+  assert.match(rendered.html, /<img[^>]+kpv\.webp/);
+  assert.match(rendered.html, /\$50\.00/);
+  assert.match(rendered.html, /\$40\.00/);
+  assert.match(rendered.html, /KPV &lt;30MG&gt;/);
+  assert.match(rendered.text, /KPV <30MG> — \$40\.00/);
+});

@@ -1,6 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
-import { PHASE_ONE_EMAIL_TEMPLATES, renderPhaseOneEmail } from "../shared/marketingEmail.js";
+import { PHASE_ONE_EMAIL_TEMPLATES, renderPhaseOneEmail, type MarketingEmailProduct } from "../shared/marketingEmail.js";
 import type { MarketingEmailRepository } from "./marketingEmailRepository.js";
 
 export interface MarketingEmailTransport {
@@ -45,12 +45,14 @@ export class MarketingEmailService {
     buttonLabel: string;
     buttonUrl: string;
     templateKey: string;
+    products: MarketingEmailProduct[];
   }) {
     const template = PHASE_ONE_EMAIL_TEMPLATES.find((item) => item.key === input.templateKey);
     const rendered = renderPhaseOneEmail({
       ...input,
       recipientName: "Phase One team",
       unsubscribeUrl: "https://phaseonelabz.com/",
+      logoUrl: `${this.publicOrigin}/assets/phase-one-email-logo.webp`,
       ...(template?.accent ? { accent: template.accent } : {}),
     });
     return this.transport.sendMarketingEmail({
@@ -101,6 +103,8 @@ export class MarketingEmailService {
         buttonUrl: delivery.campaign.buttonUrl,
         recipientName: delivery.firstName || delivery.lastName || "Research partner",
         unsubscribeUrl,
+        logoUrl: `${this.publicOrigin}/assets/phase-one-email-logo.webp`,
+        products: delivery.campaign.products,
         ...(template?.accent ? { accent: template.accent } : {}),
       });
       try {
