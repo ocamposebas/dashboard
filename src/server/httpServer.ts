@@ -172,6 +172,7 @@ const dashboardDirectory = fileURLToPath(
 );
 const MAX_LOGIN_BODY_BYTES = 8_192;
 const MAX_EVIDENCE_BODY_BYTES = 20 * 1024 * 1024;
+const MAX_MARKETING_IMPORT_BODY_BYTES = 2 * 1024 * 1024;
 
 const CONTENT_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -2428,8 +2429,19 @@ export function createMonitorServer(
           return;
         }
         let input: Record<string, unknown>;
-        try { input = JSON.parse(await readBody(request)) as Record<string, unknown>; }
-        catch { json(response, 400, { error: "Invalid JSON request" }); return; }
+        try {
+          input = JSON.parse(
+            (await readBodyBuffer(request, MAX_MARKETING_IMPORT_BODY_BYTES)).toString("utf8"),
+          ) as Record<string, unknown>;
+        } catch (error) {
+          const requestTooLarge = error instanceof Error && error.message === "Request body too large";
+          json(response, requestTooLarge ? 413 : 400, {
+            error: requestTooLarge
+              ? "This contact batch is too large. Export a smaller CSV and try again."
+              : "Invalid contact import request",
+          });
+          return;
+        }
         if (!Array.isArray(input.contacts) || input.contacts.length === 0 || input.contacts.length > 500) {
           json(response, 400, { error: "Import between 1 and 500 contacts per batch" });
           return;
