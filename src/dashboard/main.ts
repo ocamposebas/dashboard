@@ -718,6 +718,7 @@ interface MarketingEmailCampaign {
 }
 interface MarketingEmailCenterPayload {
   counts: { total: number; subscribed: number; unconfirmed: number; unsubscribed: number; bounced: number };
+  contactPage: { page: number; pageSize: number; total: number; pages: number };
   contacts: MarketingEmailContact[]; campaigns: MarketingEmailCampaign[];
   tags: Array<{ tag: string; contacts: number }>; templates: MarketingEmailTemplate[];
   smtpOwner: "wordpress";
@@ -934,6 +935,9 @@ const emailCampaignList = requiredElement<HTMLElement>("#email-campaign-list");
 const emailContactList = requiredElement<HTMLElement>("#email-contact-list");
 const emailContactSearch = requiredElement<HTMLInputElement>("#email-contact-search");
 const emailContactFilter = requiredElement<HTMLSelectElement>("#email-contact-filter");
+const emailContactDrawer = requiredElement<HTMLDetailsElement>("#email-contact-drawer");
+const emailContactPrevious = requiredElement<HTMLButtonElement>("#email-contact-previous");
+const emailContactNext = requiredElement<HTMLButtonElement>("#email-contact-next");
 const emailComposer = requiredElement<HTMLDialogElement>("#email-composer");
 const emailComposerForm = requiredElement<HTMLFormElement>("#email-composer-form");
 const emailLaunchConfirm = requiredElement<HTMLDialogElement>("#email-launch-confirm");
@@ -1142,10 +1146,12 @@ let notificationFilter = "all";
 let marketingCartFilter: "open" | "abandoned" | "all" = "open";
 let marketingEmailCenter: MarketingEmailCenterPayload | undefined;
 let marketingEmailLoading = false;
+let marketingEmailReloadRequested = false;
 let marketingEmailSearchTimer: number | undefined;
 let marketingEmailSyncRefreshTimer: number | undefined;
 let marketingEmailCampaignFilter: "all" | "draft" | "sent" = "all";
 let marketingEmailSelectedProducts: MarketingEmailProduct[] = [];
+let marketingEmailContactPage = 1;
 let pendingEmailLaunchId = "";
 const SESSION_PAGE_SIZE = 5;
 const CUSTOMER_PAGE_SIZE = 50;
@@ -1781,6 +1787,16 @@ function renderMarketingEmailCenter(): void {
   }).join("") : `<p class="empty-state">${marketingEmailCampaignFilter === "sent" ? "No sent campaigns yet." : marketingEmailCampaignFilter === "draft" ? "No drafts waiting for review." : "No campaigns created yet."}</p>`;
 
   emailContactList.innerHTML = center.contacts.length ? center.contacts.map((contact) => `<article class="email-contact-row"><span class="email-contact-avatar">${escapeHtml(contact.displayName.slice(0, 2).toUpperCase())}</span><div class="email-contact-copy"><strong>${escapeHtml(contact.displayName)}</strong><small>${escapeHtml(contact.email)} · ${escapeHtml(contact.source === "woocommerce" ? "WordPress" : contact.source)}${contact.tags.length ? ` · ${escapeHtml(contact.tags.join(", "))}` : ""}</small></div><em data-status="${contact.status}">${escapeHtml(contact.status === "subscribed" ? "ready" : contact.status === "unconfirmed" ? "protected" : contact.status)}</em></article>`).join("") : '<p class="empty-state">No contacts match this view.</p>';
+  const contactPage = center.contactPage;
+  const contactStart = contactPage.total ? ((contactPage.page - 1) * contactPage.pageSize) + 1 : 0;
+  const contactEnd = Math.min(contactPage.page * contactPage.pageSize, contactPage.total);
+  requiredElement<HTMLElement>("#email-contact-drawer-count").textContent = `${formatNumber(center.counts.total)} contacts`;
+  requiredElement<HTMLElement>("#email-contact-page-summary").textContent = contactPage.total
+    ? `Showing ${formatNumber(contactStart)}–${formatNumber(contactEnd)} of ${formatNumber(contactPage.total)} matching contacts.`
+    : "No contacts match this search or status.";
+  requiredElement<HTMLElement>("#email-contact-page-label").textContent = `Page ${formatNumber(contactPage.page)} of ${formatNumber(contactPage.pages)}`;
+  emailContactPrevious.disabled = contactPage.page <= 1;
+  emailContactNext.disabled = contactPage.page >= contactPage.pages;
 
   const templateSelect = requiredElement<HTMLSelectElement>("#email-template-select");
   templateSelect.innerHTML = center.templates.map((template) => `<option value="${escapeHtml(template.key)}">${escapeHtml(template.name)}</option>`).join("");
@@ -1790,10 +1806,13 @@ function renderMarketingEmailCenter(): void {
 }
 
 async function loadMarketingEmailCenter(): Promise<void> {
-  if (marketingEmailLoading) return;
+  if (marketingEmailLoading) {
+    marketingEmailReloadRequested = true;
+    return;
+  }
   marketingEmailLoading = true;
   try {
-    const query = new URLSearchParams({ search: emailContactSearch.value.trim(), status: emailContactFilter.value });
+    const query = new URLSearchParams({ search: emailContactSearch.value.trim(), status: emailContactFilter.value, contactPage: String(marketingEmailContactPage) });
     const response = await fetch(`/api/marketing/email-center?${query.toString()}`, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
     const payload: unknown = await response.json();
     if (!response.ok || !isRecord(payload) || !Array.isArray(payload.contacts) || !Array.isArray(payload.campaigns) || !Array.isArray(payload.templates)) {
@@ -1809,6 +1828,10 @@ async function loadMarketingEmailCenter(): Promise<void> {
     requiredElement<HTMLElement>("#email-center-updated").textContent = error instanceof Error ? error.message : "Email center unavailable";
   } finally {
     marketingEmailLoading = false;
+    if (marketingEmailReloadRequested) {
+      marketingEmailReloadRequested = false;
+      void loadMarketingEmailCenter();
+    }
   }
 }
 
@@ -1976,6 +1999,10 @@ async function importOmnisendContacts(file: File): Promise<void> {
     imported += Number(payload.imported) || 0; skipped += Number(payload.skipped) || 0;
   }
   showToast("Omnisend import complete", `${formatNumber(imported)} contacts updated${skipped ? ` · ${formatNumber(skipped)} invalid rows skipped` : ""}.`);
+  emailContactSearch.value = "";
+  emailContactFilter.value = "all";
+  marketingEmailContactPage = 1;
+  emailContactDrawer.open = true;
   await loadMarketingEmailCenter();
 }
 
@@ -8100,9 +8127,24 @@ requiredElement<HTMLInputElement>("#email-import-file").addEventListener("change
 });
 emailContactSearch.addEventListener("input", () => {
   if (marketingEmailSearchTimer) window.clearTimeout(marketingEmailSearchTimer);
+  marketingEmailContactPage = 1;
   marketingEmailSearchTimer = window.setTimeout(() => void loadMarketingEmailCenter(), 300);
 });
-emailContactFilter.addEventListener("change", () => void loadMarketingEmailCenter());
+emailContactFilter.addEventListener("change", () => {
+  marketingEmailContactPage = 1;
+  void loadMarketingEmailCenter();
+});
+emailContactPrevious.addEventListener("click", () => {
+  if (marketingEmailContactPage <= 1) return;
+  marketingEmailContactPage -= 1;
+  void loadMarketingEmailCenter();
+});
+emailContactNext.addEventListener("click", () => {
+  const pages = marketingEmailCenter?.contactPage.pages || 1;
+  if (marketingEmailContactPage >= pages) return;
+  marketingEmailContactPage += 1;
+  void loadMarketingEmailCenter();
+});
 emailCampaignList.addEventListener("click", async (event) => {
   const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button") : null;
   if (!target) return;

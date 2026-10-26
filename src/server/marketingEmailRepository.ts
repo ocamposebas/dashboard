@@ -135,10 +135,12 @@ function mapCampaign(row: CampaignRow) {
 export class MarketingEmailRepository {
   constructor(private readonly database: Database) {}
 
-  async dashboard(search = "", status = "all") {
+  async dashboard(search = "", status = "all", contactPage = 1, contactPageSize = 100) {
     const normalizedSearch = search.trim().slice(0, 120);
     const normalizedStatus = ["subscribed", "unconfirmed", "unsubscribed", "bounced"].includes(status) ? status : "all";
-    const [counts, contacts, campaigns, tags] = await Promise.all([
+    const normalizedPageSize = Math.min(150, Math.max(25, Math.trunc(contactPageSize) || 100));
+    const normalizedPage = Math.max(1, Math.trunc(contactPage) || 1);
+    const [counts, contactMatches, contacts, campaigns, tags] = await Promise.all([
       this.database.query<{ total: string; subscribed: string; unconfirmed: string; unsubscribed: string; bounced: string }>(`
         SELECT count(*)::text AS total,
           count(*) FILTER (WHERE status = 'subscribed')::text AS subscribed,
@@ -147,12 +149,17 @@ export class MarketingEmailRepository {
           count(*) FILTER (WHERE status = 'bounced')::text AS bounced
         FROM marketing_contacts
       `),
+      this.database.query<{ total: string }>(`
+        SELECT count(*)::text AS total FROM marketing_contacts
+        WHERE ($1 = '' OR email ILIKE '%' || $1 || '%' OR first_name ILIKE '%' || $1 || '%' OR last_name ILIKE '%' || $1 || '%')
+          AND ($2 = 'all' OR status = $2)
+      `, [normalizedSearch, normalizedStatus]),
       this.database.query<ContactRow>(`
         SELECT * FROM marketing_contacts
         WHERE ($1 = '' OR email ILIKE '%' || $1 || '%' OR first_name ILIKE '%' || $1 || '%' OR last_name ILIKE '%' || $1 || '%')
           AND ($2 = 'all' OR status = $2)
-        ORDER BY updated_at DESC LIMIT 150
-      `, [normalizedSearch, normalizedStatus]),
+        ORDER BY updated_at DESC LIMIT $3 OFFSET $4
+      `, [normalizedSearch, normalizedStatus, normalizedPageSize, (normalizedPage - 1) * normalizedPageSize]),
       this.database.query<CampaignRow>(`
         SELECT * FROM marketing_email_campaigns ORDER BY created_at DESC LIMIT 40
       `),
@@ -164,6 +171,7 @@ export class MarketingEmailRepository {
       `),
     ]);
     const count = counts.rows[0] || { total: "0", subscribed: "0", unconfirmed: "0", unsubscribed: "0", bounced: "0" };
+    const matchingContacts = Number(contactMatches.rows[0]?.total) || 0;
     return {
       counts: {
         total: Number(count.total) || 0,
@@ -171,6 +179,12 @@ export class MarketingEmailRepository {
         unconfirmed: Number(count.unconfirmed) || 0,
         unsubscribed: Number(count.unsubscribed) || 0,
         bounced: Number(count.bounced) || 0,
+      },
+      contactPage: {
+        page: normalizedPage,
+        pageSize: normalizedPageSize,
+        total: matchingContacts,
+        pages: Math.max(1, Math.ceil(matchingContacts / normalizedPageSize)),
       },
       contacts: contacts.rows.map(mapContact),
       campaigns: campaigns.rows.map(mapCampaign),

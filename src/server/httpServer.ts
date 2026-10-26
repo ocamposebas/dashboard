@@ -2397,6 +2397,7 @@ export function createMonitorServer(
           ...(await marketingEmailRepository.dashboard(
             url.searchParams.get("search") || "",
             url.searchParams.get("status") || "all",
+            Number(url.searchParams.get("contactPage")) || 1,
           )),
           templates: marketingEmails.templates(),
           smtpOwner: "wordpress",
