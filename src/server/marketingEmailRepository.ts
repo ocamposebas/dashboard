@@ -169,7 +169,7 @@ export class MarketingEmailRepository {
           INSERT INTO marketing_contacts (
             id, email, first_name, last_name, source, status, tags, wp_customer_id,
             consent_recorded_at, unsubscribed_at, created_at, updated_at
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,CASE WHEN $6 = 'unsubscribed' THEN now() ELSE NULL END,now(),now())
+          ) VALUES ($1,$2,$3,$4,$5::varchar(32),$6::varchar(24),$7,$8,$9,CASE WHEN $6::varchar(24) = 'unsubscribed' THEN now() ELSE NULL END,now(),now())
           ON CONFLICT (lower(email)) DO UPDATE SET
             first_name = CASE WHEN EXCLUDED.first_name <> '' THEN EXCLUDED.first_name ELSE marketing_contacts.first_name END,
             last_name = CASE WHEN EXCLUDED.last_name <> '' THEN EXCLUDED.last_name ELSE marketing_contacts.last_name END,
