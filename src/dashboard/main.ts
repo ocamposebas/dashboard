@@ -2958,6 +2958,10 @@ function renderInsuranceFund(): void {
       ? "Last verified totals ready · loading live activity…"
       : "Not synchronized";
   const contributions = requiredElement<HTMLElement>("#insurance-contributions");
+  const contributionTab = document.querySelector<HTMLButtonElement>('[data-insurance-tab="contributions"]');
+  const claimsTab = document.querySelector<HTMLButtonElement>('[data-insurance-tab="claims"]');
+  if (contributionTab) contributionTab.textContent = `Collections ${formatNumber(data?.contributions.length || 0)}`;
+  if (claimsTab) claimsTab.textContent = `Claims ${formatNumber(data?.claims.length || 0)}`;
   contributions.innerHTML = data?.contributions.length
     ? data.contributions.slice(0, 100).map((item) => insuranceLedgerRow({
       label: `Order #${item.orderNumber} · ${item.customerName}`,
@@ -3052,7 +3056,7 @@ function findInsuranceOrders(): void {
   const query = requiredElement<HTMLInputElement>("#insurance-order-search").value.trim().toLocaleLowerCase("en").replace(/^#/, "");
   const host = requiredElement<HTMLElement>("#insurance-order-results");
   if (!query) {
-    host.innerHTML = '<div class="operations-empty"><strong>Enter an order or customer</strong><span>Use the order number, name or email address.</span></div>';
+    host.innerHTML = '<div class="insurance-claim-empty"><span>⌕</span><strong>Enter an order or customer</strong><small>Use the order number, name or email address.</small></div>';
     return;
   }
   const matches = (insuranceFund?.contributions || []).filter((item) =>
@@ -3060,7 +3064,7 @@ function findInsuranceOrders(): void {
     item.customerName.toLocaleLowerCase("en").includes(query) ||
     item.customerEmail.toLocaleLowerCase("en").includes(query)
   ).slice(0, 12);
-  host.innerHTML = matches.length ? matches.map((item) => `<button type="button" class="insurance-order-option" data-insurance-order="${item.orderId}"><span><strong>#${escapeHtml(item.orderNumber)} · ${escapeHtml(item.customerName)}</strong><small>${escapeHtml(item.customerEmail || "No email")} · ${escapeHtml(formatCurrency(item.orderTotal, item.currency))} order</small></span><b>${escapeHtml(formatCurrency(item.amount, item.currency))} collected</b><i>Choose →</i></button>`).join("") : '<div class="operations-empty"><strong>No protected order matched</strong><span>Only orders that collected Phase One protection are shown.</span></div>';
+  host.innerHTML = matches.length ? matches.map((item) => `<button type="button" class="insurance-order-option" data-insurance-order="${item.orderId}"><span><strong>#${escapeHtml(item.orderNumber)} · ${escapeHtml(item.customerName)}</strong><small>${escapeHtml(item.customerEmail || "No email")} · ${escapeHtml(formatCurrency(item.orderTotal, item.currency))} order</small></span><b>${escapeHtml(formatCurrency(item.amount, item.currency))} collected</b><i>Choose →</i></button>`).join("") : '<div class="insurance-claim-empty"><span>!</span><strong>No protected order matched</strong><small>Only orders that collected Phase One protection are shown.</small></div>';
 }
 
 function selectInsuranceOrder(orderId: number): void {
@@ -3099,7 +3103,7 @@ async function submitInsuranceClaim(): Promise<void> {
     insuranceFund = payload.fund as unknown as InsuranceFundPayload;
     form.reset();
     form.hidden = true;
-    requiredElement<HTMLElement>("#insurance-order-results").innerHTML = '<div class="operations-empty"><strong>Claim recorded</strong><span>Search another protected order when needed.</span></div>';
+    requiredElement<HTMLElement>("#insurance-order-results").innerHTML = '<div class="insurance-claim-empty"><span>✓</span><strong>Claim recorded</strong><small>Search another protected order only when needed.</small></div>';
     renderInsuranceFund();
     showToast("Claim deducted", "The lost-order amount is now reflected in the available insurance reserve.");
   } catch (error) {
