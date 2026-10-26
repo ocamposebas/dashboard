@@ -1339,6 +1339,7 @@ export function createMonitorServer(
         marketingContactSyncState.lastSyncedAt = new Date().toISOString();
         marketingContactSyncState.imported = result.imported;
         marketingContactSyncState.skipped = result.skipped;
+        console.log(`WordPress contact sync completed: ${result.imported} contacts updated, ${result.skipped} skipped`);
         return result;
       })
       .catch((error: unknown) => {
