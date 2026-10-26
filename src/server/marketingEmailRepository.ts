@@ -135,6 +135,19 @@ function mapCampaign(row: CampaignRow) {
 export class MarketingEmailRepository {
   constructor(private readonly database: Database) {}
 
+  async confirmRegisteredContacts(): Promise<number> {
+    const result = await this.database.query(`
+      UPDATE marketing_contacts
+      SET status = 'subscribed',
+        consent_recorded_at = COALESCE(consent_recorded_at, created_at, now()),
+        updated_at = now()
+      WHERE status = 'unconfirmed'
+        AND source IN ('woocommerce', 'omnisend')
+      RETURNING id
+    `);
+    return result.rowCount || 0;
+  }
+
   async dashboard(search = "", status = "all", contactPage = 1, contactPageSize = 100) {
     const normalizedSearch = search.trim().slice(0, 120);
     const normalizedStatus = ["subscribed", "unconfirmed", "unsubscribed", "bounced"].includes(status) ? status : "all";
@@ -220,7 +233,9 @@ export class MarketingEmailRepository {
               ELSE EXCLUDED.source
             END,
             status = CASE
-              WHEN marketing_contacts.status = 'unsubscribed' AND EXCLUDED.status <> 'unsubscribed' THEN 'unsubscribed'
+              WHEN marketing_contacts.status IN ('unsubscribed', 'bounced')
+                AND EXCLUDED.status NOT IN ('unsubscribed', 'bounced')
+              THEN marketing_contacts.status
               WHEN EXCLUDED.source = 'woocommerce'
                 AND EXCLUDED.status = 'unconfirmed'
                 AND marketing_contacts.status IN ('subscribed', 'bounced')

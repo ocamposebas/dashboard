@@ -1987,7 +1987,7 @@ async function importOmnisendContacts(file: File): Promise<void> {
   const rows = parseMarketingCsv(await file.text());
   const contacts = rows.map((row) => {
     const rawStatus = (row.status || row.subscriptionstatus || row.emailstatus || "").toLowerCase();
-    const status = rawStatus.includes("unsub") ? "unsubscribed" : rawStatus.includes("bounce") ? "bounced" : rawStatus === "subscribed" || rawStatus === "active" ? "subscribed" : "unconfirmed";
+    const status = rawStatus.includes("unsub") ? "unsubscribed" : rawStatus.includes("bounce") ? "bounced" : "subscribed";
     return { email: row.email || row.emailaddress || row.contactemail || "", firstName: row.firstname || row.first || "", lastName: row.lastname || row.last || "", source: "omnisend", status, tags: (row.tags || row.tag || "").split(/[;|]/).map((tag) => tag.trim()).filter(Boolean), consentRecordedAt: status === "subscribed" ? new Date().toISOString() : null };
   }).filter((contact) => contact.email);
   if (!contacts.length) throw new Error("No email column was found in this Omnisend CSV");
@@ -8110,7 +8110,7 @@ requiredElement<HTMLButtonElement>("#email-sync-woo").addEventListener("click", 
     const response = await fetch("/api/marketing/contacts/sync", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: "{}" });
     const payload: unknown = await response.json();
     if (!response.ok || !isRecord(payload)) throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "Store contacts could not be synchronized");
-    showToast("Store contacts synchronized", `${formatNumber(Number(payload.imported) || 0)} contacts are available. They remain protected until marketing consent is confirmed.`);
+    showToast("Store contacts synchronized", `${formatNumber(Number(payload.imported) || 0)} registered contacts are ready for campaigns.`);
     await loadMarketingEmailCenter();
   } catch (error) {
     showToast("Contact sync failed", error instanceof Error ? error.message : "Try again.", false);

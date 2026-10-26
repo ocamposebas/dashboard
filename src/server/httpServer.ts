@@ -1332,9 +1332,10 @@ export function createMonitorServer(
             firstName: customer.firstName,
             lastName: customer.lastName,
             source: "woocommerce" as const,
-            status: "unconfirmed" as const,
+            status: "subscribed" as const,
             tags: customer.orderCount > 0 ? ["customer"] : ["account"],
             wpCustomerId: customer.id && customer.id > 0 ? customer.id : null,
+            consentRecordedAt: customer.registeredAt || new Date().toISOString(),
           }));
         const result = await marketingEmailRepository.upsertContacts(contacts);
         marketingContactSyncState.state = "ready";
@@ -1354,6 +1355,13 @@ export function createMonitorServer(
   }
 
   if (marketingEmailRepository && commerce) {
+    void marketingEmailRepository.confirmRegisteredContacts()
+      .then((updated) => {
+        if (updated > 0) console.log(`Confirmed ${updated} registered marketing contacts`);
+      })
+      .catch((error: unknown) => {
+        console.error("Registered contact confirmation failed", error);
+      });
     setTimeout(() => void syncMarketingContactsFromWordPress().catch((error: unknown) => {
       console.error("Automatic WordPress contact sync failed", error);
     }), 1_500).unref();
@@ -2416,7 +2424,7 @@ export function createMonitorServer(
           return;
         }
         const result = await syncMarketingContactsFromWordPress();
-        json(response, 200, { synced: true, ...result, unconfirmed: true, contactSync: { ...marketingContactSyncState } });
+        json(response, 200, { synced: true, ...result, consented: true, contactSync: { ...marketingContactSyncState } });
         return;
       }
 
