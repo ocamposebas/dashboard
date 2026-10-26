@@ -270,6 +270,11 @@ interface CommerceOrder {
     protectionProvider: string;
     trackingNumber: string;
   };
+  repeatOperations: {
+    operationalRepeat: boolean;
+    sourceOrderId: number;
+    requestId: string;
+  };
   profitability: {
     costOfGoods: number;
     operatingCost: number;
@@ -691,6 +696,43 @@ interface WorkspaceNotification {
   severity: "info" | "success" | "warning" | "critical";
   title: string; message: string; createdAt: string; actionView: string; actionEntityId?: number; read: boolean;
 }
+
+interface InsuranceContribution {
+  orderId: number;
+  orderNumber: string;
+  customerName: string;
+  customerEmail: string;
+  currency: string;
+  orderTotal: number;
+  amount: number;
+  protectionValue: number;
+  status: string;
+  collectedAt: string | null;
+}
+
+interface InsuranceClaim {
+  id: string;
+  orderId: number;
+  orderNumber: string;
+  customerName: string;
+  customerEmail: string;
+  currency: string;
+  orderTotal: number;
+  protectionFee: number;
+  amount: number;
+  reason: string;
+  status: "active" | "voided";
+  recordedByName: string;
+  createdAt: string;
+}
+
+interface InsuranceFundPayload {
+  currency: string;
+  totals: { collected: number; claims: number; available: number; protectedOrders: number; lostOrders: number };
+  contributions: InsuranceContribution[];
+  claims: InsuranceClaim[];
+  syncedAt: string;
+}
 interface SeoRow { key: string; clicks: number; impressions: number; ctr: number; position: number; }
 interface SeoReport {
   connected: true; siteUrl: string; period: { start: string; end: string; days: number };
@@ -943,6 +985,8 @@ let salesInsightLoading = false;
 let salesInsightComplete: { range: SalesInsightRange; orders: CommerceOrder[] } | undefined;
 let monthlyFinanceOrders: CommerceOrder[] | undefined;
 let monthlyFinanceLoading = false;
+let insuranceFund: InsuranceFundPayload | undefined;
+let insuranceFundLoading = false;
 let monthlyFinanceUpdatedAt = 0;
 let monthlyFinanceError = "";
 let skuStockSearch = "";
@@ -1031,7 +1075,8 @@ let activeProductTestingLot = "";
 let activeOrder: CommerceOrder | null = null;
 let activeOrderOperations: OrderOperations | null = null;
 let activeOrderTab: "overview" | "payment" | "documents" | "coas" | "shipping" | "timeline" = "overview";
-let pendingOrderAction: "confirm" | "complete" | "cancel" | null = null;
+let pendingOrderAction: "confirm" | "complete" | "cancel" | "repeat" | null = null;
+let pendingRepeatRequestId: string | null = null;
 let workspaceSession: WorkspaceSession | undefined;
 let workspaceUsers: WorkspaceUser[] = [];
 let workspaceNotifications: WorkspaceNotification[] = [];
@@ -2000,7 +2045,7 @@ function statusClass(status: string): string {
 }
 
 function paidOrder(order: CommerceOrder): boolean {
-  return order.status === "completed" || order.status === "processing";
+  return !order.repeatOperations?.operationalRepeat && (order.status === "completed" || order.status === "processing");
 }
 
 interface ProductSalesSummary {
@@ -2582,6 +2627,132 @@ async function loadCustomerDirectory(force = false): Promise<void> {
   }
 }
 
+function insuranceLedgerRow(input: { label: string; meta: string; date: string | null; amount: number; currency: string; negative?: boolean }): string {
+  return `<article class="insurance-ledger-row"><span class="insurance-ledger-icon">${input.negative ? "−" : "+"}</span><div><strong>${escapeHtml(input.label)}</strong><small>${escapeHtml(input.meta)} · ${escapeHtml(formatCommerceTimestamp(input.date))}</small></div><b class="${input.negative ? "is-negative" : "is-positive"}">${input.negative ? "−" : "+"}${escapeHtml(formatCurrency(input.amount, input.currency))}</b></article>`;
+}
+
+function renderInsuranceFund(): void {
+  const data = insuranceFund;
+  const currency = data?.currency || "USD";
+  requiredElement<HTMLElement>("#insurance-collected").textContent = data ? formatCurrency(data.totals.collected, currency) : "—";
+  requiredElement<HTMLElement>("#insurance-claims").textContent = data ? formatCurrency(data.totals.claims, currency) : "—";
+  requiredElement<HTMLElement>("#insurance-available").textContent = data ? formatCurrency(data.totals.available, currency) : "—";
+  requiredElement<HTMLElement>("#insurance-order-count").textContent = data ? formatNumber(data.totals.protectedOrders) : "—";
+  requiredElement<HTMLElement>("#insurance-claim-count").textContent = data ? `${formatNumber(data.totals.lostOrders)} active lost-order claim${data.totals.lostOrders === 1 ? "" : "s"}` : "No claims recorded";
+  requiredElement<HTMLElement>("#insurance-sync-state").textContent = data ? `Updated ${relativeDate(data.syncedAt)}` : "Not synchronized";
+  const contributions = requiredElement<HTMLElement>("#insurance-contributions");
+  contributions.innerHTML = data?.contributions.length
+    ? data.contributions.slice(0, 100).map((item) => insuranceLedgerRow({
+      label: `Order #${item.orderNumber} · ${item.customerName}`,
+      meta: `${item.customerEmail || "No email"} · ${orderStatusLabel(item.status)}`,
+      date: item.collectedAt,
+      amount: item.amount,
+      currency: item.currency,
+    })).join("")
+    : '<div class="operations-empty"><strong>No protection money found</strong><span>Refresh after protected orders have been paid.</span></div>';
+  const claims = requiredElement<HTMLElement>("#insurance-claims-ledger");
+  claims.innerHTML = data?.claims.length
+    ? data.claims.map((item) => insuranceLedgerRow({
+      label: `Order #${item.orderNumber} · ${item.customerName}`,
+      meta: `${item.reason}${item.status === "voided" ? " · Voided" : ""}`,
+      date: item.createdAt,
+      amount: item.amount,
+      currency: item.currency,
+      negative: item.status === "active",
+    })).join("")
+    : '<div class="operations-empty"><strong>No claims recorded</strong><span>The full collected reserve remains available.</span></div>';
+  const permission = requiredElement<HTMLElement>("#insurance-claim-permission");
+  permission.textContent = workspaceSession?.permissions.administer ? "Claims enabled" : "View only";
+  permission.classList.toggle("integration-state--connected", Boolean(workspaceSession?.permissions.administer));
+}
+
+async function loadInsuranceFund(force = false): Promise<void> {
+  if (insuranceFundLoading) return;
+  insuranceFundLoading = true;
+  requiredElement<HTMLButtonElement>("#insurance-refresh").disabled = true;
+  requiredElement<HTMLElement>("#insurance-sync-state").textContent = "Synchronizing protected orders…";
+  try {
+    const response = await fetch(`/api/insurance-fund${force ? "?refresh=1" : ""}`, {
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    const payload: unknown = await response.json();
+    if (!response.ok || !isRecord(payload) || !isRecord(payload.totals) || !Array.isArray(payload.contributions) || !Array.isArray(payload.claims)) {
+      throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The insurance reserve could not be loaded");
+    }
+    insuranceFund = payload as unknown as InsuranceFundPayload;
+    renderInsuranceFund();
+  } catch (error) {
+    requiredElement<HTMLElement>("#insurance-sync-state").textContent = "Synchronization unavailable";
+    showToast("Insurance fund unavailable", error instanceof Error ? error.message : "Try again.", false);
+  } finally {
+    insuranceFundLoading = false;
+    requiredElement<HTMLButtonElement>("#insurance-refresh").disabled = false;
+  }
+}
+
+function findInsuranceOrders(): void {
+  const query = requiredElement<HTMLInputElement>("#insurance-order-search").value.trim().toLocaleLowerCase("en").replace(/^#/, "");
+  const host = requiredElement<HTMLElement>("#insurance-order-results");
+  if (!query) {
+    host.innerHTML = '<div class="operations-empty"><strong>Enter an order or customer</strong><span>Use the order number, name or email address.</span></div>';
+    return;
+  }
+  const matches = (insuranceFund?.contributions || []).filter((item) =>
+    item.orderNumber.toLocaleLowerCase("en").includes(query) ||
+    item.customerName.toLocaleLowerCase("en").includes(query) ||
+    item.customerEmail.toLocaleLowerCase("en").includes(query)
+  ).slice(0, 12);
+  host.innerHTML = matches.length ? matches.map((item) => `<button type="button" class="insurance-order-option" data-insurance-order="${item.orderId}"><span><strong>#${escapeHtml(item.orderNumber)} · ${escapeHtml(item.customerName)}</strong><small>${escapeHtml(item.customerEmail || "No email")} · ${escapeHtml(formatCurrency(item.orderTotal, item.currency))} order</small></span><b>${escapeHtml(formatCurrency(item.amount, item.currency))} collected</b><i>Choose →</i></button>`).join("") : '<div class="operations-empty"><strong>No protected order matched</strong><span>Only orders that collected Phase One protection are shown.</span></div>';
+}
+
+function selectInsuranceOrder(orderId: number): void {
+  const contribution = insuranceFund?.contributions.find((item) => item.orderId === orderId);
+  if (!contribution) return;
+  if (!workspaceSession?.permissions.administer) {
+    showToast("View-only access", "An administrator must register lost-order claims.", false);
+    return;
+  }
+  requiredElement<HTMLInputElement>("#insurance-claim-order-id").value = String(orderId);
+  requiredElement<HTMLInputElement>("#insurance-claim-amount").value = contribution.orderTotal.toFixed(2);
+  requiredElement<HTMLInputElement>("#insurance-claim-amount").max = contribution.orderTotal.toFixed(2);
+  requiredElement<HTMLElement>("#insurance-selected-order").innerHTML = `<span>Selected protected order</span><strong>#${escapeHtml(contribution.orderNumber)} · ${escapeHtml(contribution.customerName)}</strong><small>${escapeHtml(contribution.customerEmail || "No email")} · ${escapeHtml(formatCurrency(contribution.amount, contribution.currency))} collected into reserve</small>`;
+  requiredElement<HTMLFormElement>("#insurance-claim-form").hidden = false;
+}
+
+async function submitInsuranceClaim(): Promise<void> {
+  const form = requiredElement<HTMLFormElement>("#insurance-claim-form");
+  const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+  if (submit) submit.disabled = true;
+  try {
+    const response = await fetch("/api/insurance-fund/claim", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        orderId: Number(requiredElement<HTMLInputElement>("#insurance-claim-order-id").value),
+        amount: Number(requiredElement<HTMLInputElement>("#insurance-claim-amount").value),
+        reason: requiredElement<HTMLTextAreaElement>("#insurance-claim-reason").value.trim(),
+      }),
+    });
+    const payload: unknown = await response.json();
+    if (!response.ok || !isRecord(payload) || !isRecord(payload.fund)) {
+      throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The claim could not be recorded");
+    }
+    insuranceFund = payload.fund as unknown as InsuranceFundPayload;
+    form.reset();
+    form.hidden = true;
+    requiredElement<HTMLElement>("#insurance-order-results").innerHTML = '<div class="operations-empty"><strong>Claim recorded</strong><span>Search another protected order when needed.</span></div>';
+    renderInsuranceFund();
+    showToast("Claim deducted", "The lost-order amount is now reflected in the available insurance reserve.");
+  } catch (error) {
+    showToast("Claim not saved", error instanceof Error ? error.message : "Try again.", false);
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+}
+
 const loyaltyDefaults: LoyaltySettings = {
   earningEnabled: true,
   redemptionEnabled: true,
@@ -2835,12 +3006,16 @@ function renderCustomerDetail(customer: CustomerProfile): void {
     ? customer.orders.map((order) => `<button class="customer-order-row" type="button" data-customer-order="${order.id}"><span><strong>#${escapeHtml(order.number)}</strong><small>${escapeHtml(formatCommerceTimestamp(order.createdAt))}</small></span><span>${formatNumber(order.items.reduce((sum, item) => sum + item.quantity, 0))} items</span><span class="status-pill status-pill--${statusClass(order.status)}">${escapeHtml(orderStatusLabel(order.status))}</span><b>${escapeHtml(formatCurrency(order.netTotal, order.currency))}</b><i>→</i></button>`).join("")
     : '<div class="customer-empty-detail"><span>▤</span><strong>No orders yet</strong><small>This account exists in the store but has not placed an order.</small></div>';
   const registered = customer.registeredAt ? formatCommerceTimestamp(customer.registeredAt) : "Guest checkout profile";
+  const recoveryControl = customer.accountType === "registered" && customer.id && workspaceSession?.permissions.administer
+    ? `<section class="customer-detail-section customer-recovery-section"><div class="customer-section-heading"><div><p class="section-kicker">Account recovery</p><h3>Password reset link</h3></div><span>Administrator only</span></div><div class="customer-recovery-control"><div><strong>Help this customer regain access</strong><small>Generate a private, expiring, one-use WordPress recovery link. It is never stored here.</small></div><button class="button button--secondary" type="button" data-generate-password-link="${customer.id}">Generate secure link</button></div><div class="customer-recovery-result" data-password-link-result hidden></div></section>`
+    : "";
   customerDetailContent.innerHTML = `
     <div class="customer-detail-hero">
       <div class="customer-detail-kpis"><article><span>Current points</span><strong>${formatNumber(points)}</strong><small>${customer.pointsBalance === null ? "Recorded earnings" : "Live reward balance"}</small></article><article><span>Store credit</span><strong>${customer.storeCredit === null ? "—" : escapeHtml(formatCurrency(customer.storeCredit, currency))}</strong><small>${customer.storeCredit === null ? "Balance bridge pending" : "Available balance"}</small></article><article><span>Net lifetime value</span><strong>${escapeHtml(formatCurrency(customer.netSpent, currency))}</strong><small>${escapeHtml(formatCurrency(customer.averageOrderValue, currency))} average order</small></article><article><span>Order history</span><strong>${formatNumber(customer.orderCount)}</strong><small>${formatNumber(customer.totalItems)} items purchased</small></article></div>
       <div class="customer-profile-facts"><div><span>Customer ID</span><strong>${customer.id ? `#${customer.id}` : "Guest profile"}</strong></div><div><span>Registered</span><strong>${escapeHtml(registered)}</strong></div><div><span>First order</span><strong>${escapeHtml(formatCommerceTimestamp(customer.firstOrderAt))}</strong></div><div><span>Latest order</span><strong>${escapeHtml(formatCommerceTimestamp(customer.lastOrderAt))}</strong></div><div><span>Successful orders</span><strong>${formatNumber(customer.successfulOrderCount)}</strong></div><div><span>Lifetime points earned</span><strong>${formatNumber(customer.pointsEarned)}</strong></div></div>
     </div>
     <section class="customer-detail-section"><div class="customer-section-heading"><div><p class="section-kicker">Contact & fulfillment</p><h3>Saved customer information</h3></div><span>Protected session</span></div><div class="customer-address-grid">${customerAddressCard("Billing profile", customer.billing)}${customerAddressCard("Shipping profile", customer.shipping)}</div></section>
+    ${recoveryControl}
     <section class="customer-detail-section"><div class="customer-section-heading"><div><p class="section-kicker">Loyalty ledger</p><h3>Points activity</h3></div><span>${customerDirectory?.rewardsLive ? "Live balance + audit history" : "Order-earned points preserved"}</span></div><div class="reward-activity-list">${rewardActivityRows(customer)}</div></section>
     <section class="customer-detail-section"><div class="customer-section-heading"><div><p class="section-kicker">Purchase history</p><h3>Top products</h3></div><span>${formatNumber(customer.topProducts.length)} products</span></div><div class="customer-products-list">${products}</div></section>
     <section class="customer-detail-section customer-orders-section"><div class="customer-section-heading"><div><p class="section-kicker">Complete order history</p><h3>Every order</h3></div><span>${formatNumber(customer.orderCount)} total</span></div><div class="customer-order-history">${orders}</div></section>`;
@@ -2859,6 +3034,42 @@ function closeCustomerDrawer(): void {
   customerDrawer.hidden = true;
   customerBackdrop.hidden = true;
   document.body.classList.remove("drawer-open");
+}
+
+async function generateCustomerPasswordLink(customerId: number, button: HTMLButtonElement): Promise<void> {
+  button.disabled = true;
+  const original = button.textContent || "Generate secure link";
+  button.textContent = "Generating…";
+  try {
+    const response = await fetch("/api/customers/password-reset-link", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ customerId }),
+    });
+    const payload: unknown = await response.json();
+    if (!response.ok || !isRecord(payload) || typeof payload.url !== "string") {
+      throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The recovery link could not be generated");
+    }
+    const result = button.closest(".customer-recovery-section")?.querySelector<HTMLElement>("[data-password-link-result]");
+    if (result) {
+      result.hidden = false;
+      result.innerHTML = `<label><span>Private recovery link</span><input type="text" value="${escapeHtml(payload.url)}" readonly /></label><button class="button button--primary" type="button" data-copy-password-link>Copy link</button><small>Expires ${escapeHtml(formatCommerceTimestamp(typeof payload.expiresAt === "string" ? payload.expiresAt : null))}. Generating another link invalidates this one.</small>`;
+      const input = result.querySelector<HTMLInputElement>("input");
+      result.querySelector<HTMLButtonElement>("[data-copy-password-link]")?.addEventListener("click", async () => {
+        if (!input) return;
+        await navigator.clipboard.writeText(input.value);
+        showToast("Recovery link copied", "Share it with the customer through a private channel.");
+      });
+    }
+    button.textContent = "Generate a new link";
+    showToast("Recovery link ready", "The private link is shown in the customer profile.");
+  } catch (error) {
+    button.textContent = original;
+    showToast("Recovery link failed", error instanceof Error ? error.message : "Try again.", false);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function orderLineImage(item: CommerceOrder["lineItems"][number]): string | null {
@@ -2954,6 +3165,7 @@ function renderOrderDetail(order: CommerceOrder): void {
     </section>` : "";
 
   detailContent.innerHTML = `
+    ${order.repeatOperations?.operationalRepeat ? `<section class="order-repeat-notice"><span>↻</span><div><p class="section-kicker">Operational repeat</p><strong>Copied from order #${formatNumber(order.repeatOperations.sourceOrderId)}</strong><small>No customer charge was created and this order is excluded from revenue and profit.</small></div></section>` : ""}
     <section class="order-summary-band"><div><span>Order total</span><strong>${escapeHtml(formatCurrency(order.total, order.currency))}</strong></div><div><span>Net captured</span><strong>${escapeHtml(formatCurrency(netCaptured, order.currency))}</strong></div><div><span>Refundable</span><strong>${escapeHtml(formatCurrency(order.refundableTotal, order.currency))}</strong></div><div><span>Est. profit</span><strong class="${profit !== null && profit < 0 ? "is-negative" : ""}">${profit === null ? "Not calculated" : escapeHtml(formatCurrency(profit, order.currency))}</strong></div></section>
     <nav class="order-workspace-tabs" aria-label="Order details">${([['overview', 'Overview'], ['payment', 'Payment'], ['documents', `Documents ${operations.evidence.items.length ? `(${operations.evidence.items.length})` : ''}`], ['coas', 'COAs'], ['shipping', 'Shipping'], ['timeline', 'Timeline']] as const).map(([key, label]) => `<button class="${activeOrderTab === key ? "is-active" : ""}" type="button" data-order-tab="${key}">${label}</button>`).join("")}</nav>
     <div class="order-tab-panel" data-order-tab-panel="overview"${activeOrderTab === "overview" ? "" : " hidden"}>
@@ -2972,12 +3184,13 @@ function renderOrderDetail(order: CommerceOrder): void {
       <section class="agreement-card agreement-card--${order.agreement.status}"><div class="agreement-mark">${order.agreement.status === "sealed" ? "✓" : "—"}</div><div><p class="section-kicker">Signed agreement</p><h3>${order.agreement.status === "sealed" ? "Sealed and archived" : order.agreement.status === "accepted" ? "Accepted — archive pending" : "No agreement found"}</h3><p>${order.agreement.signer ? `Signed by ${escapeHtml(order.agreement.signer)} · ` : ""}${escapeHtml(formatCommerceTimestamp(order.agreement.acceptedAt))}${order.agreement.version ? ` · Version ${escapeHtml(order.agreement.version)}` : ""}</p></div>${order.agreement.downloadAvailable ? `<a class="button button--secondary" href="/api/commerce/order-agreement?orderId=${order.id}" target="_blank">Open signed PDF</a>` : ""}</section>
     </div>
     <div class="order-tab-panel" data-order-tab-panel="coas"${activeOrderTab === "coas" ? "" : " hidden"}><section class="coa-workspace-head"><div><p class="section-kicker">Lot traceability</p><h3>Assign certificates by product and quantity</h3><p>Use the verified shipping lot for every fulfilled unit.</p></div><span>${operations.coas.items.reduce((sum, line) => sum + line.assignments.length, 0)} assignments</span></section><div class="coa-order-list">${coaLines || `<div class="operations-empty"><strong>${operations.coas.unavailable ? "COA assignment needs the bridge update" : "No COA-compatible line items"}</strong><span>${operations.coas.unavailable ? "Install Operations Bridge 1.4 to manage order certificates." : "This order has no assignable certificate records."}</span></div>`}</div></div>
-    <div class="order-tab-panel" data-order-tab-panel="shipping"${activeOrderTab === "shipping" ? "" : " hidden"}><div class="shipping-status-grid"><article><span>Carrier sync</span><strong>${order.shippingOperations.exported ? "Exported" : "Not exported"}</strong><small>${escapeHtml(order.shippingOperations.carrier || "Carrier not assigned")} ${escapeHtml(order.shippingOperations.service || "")}</small></article><article><span>Tracking</span><strong>${escapeHtml(order.shippingOperations.trackingNumber || "Not available")}</strong><small>${formatNumber(order.shippingOperations.shippedItemCount)} shipped items</small></article><article><span>Shipping protection</span><strong>${order.shippingOperations.protectionSelected ? "Protected" : "Not selected"}</strong><small>${order.shippingOperations.protectionSelected ? `${escapeHtml(formatCurrency(order.shippingOperations.protectionValue || order.total, order.currency))} insured value` : "No protection fee recorded"}</small></article></div><section class="order-detail-section"><div class="order-section-head"><div><p class="section-kicker">Delivery destination</p><h3>Shipping address</h3></div></div><div class="address-card">${shippingLines.length ? shippingLines.map((line, index) => index === 0 ? `<strong>${escapeHtml(line)}</strong>` : `<span>${escapeHtml(line)}</span>`).join("") : '<span>No shipping address supplied.</span>'}</div></section></div>
+    <div class="order-tab-panel" data-order-tab-panel="shipping"${activeOrderTab === "shipping" ? "" : " hidden"}><div class="shipping-status-grid"><article><span>Carrier sync</span><strong>${order.shippingOperations.exported ? "Exported" : "Not exported"}</strong><small>${escapeHtml(order.shippingOperations.carrier || "Carrier not assigned")} ${escapeHtml(order.shippingOperations.service || "")}</small></article><article><span>Tracking</span><strong>${escapeHtml(order.shippingOperations.trackingNumber || "Not available")}</strong><small>${formatNumber(order.shippingOperations.shippedItemCount)} shipped items</small></article><article><span>Phase One protection</span><strong>${order.shippingOperations.protectionSelected ? "Internal reserve" : "Not selected"}</strong><small>${order.shippingOperations.protectionSelected ? `${escapeHtml(formatCurrency(order.shippingOperations.protectionFee, order.currency))} retained · carrier insurance $0` : "No protection fee recorded"}</small></article></div><section class="order-detail-section"><div class="order-section-head"><div><p class="section-kicker">Delivery destination</p><h3>Shipping address</h3></div></div><div class="address-card">${shippingLines.length ? shippingLines.map((line, index) => index === 0 ? `<strong>${escapeHtml(line)}</strong>` : `<span>${escapeHtml(line)}</span>`).join("") : '<span>No shipping address supplied.</span>'}</div></section></div>
     <div class="order-tab-panel" data-order-tab-panel="timeline"${activeOrderTab === "timeline" ? "" : " hidden"}><section class="timeline-head"><div><p class="section-kicker">Audit trail</p><h3>Complete order history</h3></div><span>${timelineEntries.length} recorded events</span></section><div class="order-timeline">${timelineEntries.map((entry) => `<article><i></i><div><time>${escapeHtml(formatCommerceTimestamp(entry.at))}</time><strong>${escapeHtml(entry.title)}</strong><p>${escapeHtml(entry.copy)}</p></div></article>`).join("")}</div></div>
   `;
 
   const writeEnabled = commerceData?.mode === "read_write";
   const confirmButton = requiredElement<HTMLButtonElement>("#order-confirm-button");
+  const repeatButton = requiredElement<HTMLButtonElement>("#order-repeat-button");
   const completeButton = requiredElement<HTMLButtonElement>("#order-complete-button");
   const cancelButton = requiredElement<HTMLButtonElement>("#order-cancel-button");
   const refundButton = requiredElement<HTMLButtonElement>("#order-refund-button");
@@ -2985,7 +3198,8 @@ function renderOrderDetail(order: CommerceOrder): void {
   completeButton.hidden = !["processing", "on-hold"].includes(order.status);
   cancelButton.hidden = !["pending", "on-hold", "processing", "failed"].includes(order.status);
   refundButton.hidden = !["processing", "completed"].includes(order.status) || order.refundableTotal <= 0;
-  for (const button of [confirmButton, completeButton, cancelButton, refundButton]) {
+  repeatButton.hidden = order.lineItems.length === 0 || order.repeatOperations?.operationalRepeat;
+  for (const button of [repeatButton, confirmButton, completeButton, cancelButton, refundButton]) {
     button.disabled = !writeEnabled;
   }
   requiredElement<HTMLElement>("#order-action-hint").textContent = writeEnabled
@@ -7389,6 +7603,7 @@ window.addEventListener("keydown", (event) => {
 const viewNames: Record<string, string> = {
   overview: "Overview",
   orders: "Orders",
+  insurance: "Insurance money collected",
   products: "Products",
   fulfillment: "Fulfillment",
   labels: "Product barcode labels",
@@ -7585,6 +7800,7 @@ function navigate(view: string): void {
   closeCommandPalette();
   window.scrollTo({ top: 0, behavior: "smooth" });
   if (view === "customers") void loadCustomerDirectory();
+  if (view === "insurance") void loadInsuranceFund();
   if (view === "affiliates") void loadAffiliateAdmin();
   if (view === "loyalty") void loadLoyalty();
   if (view === "seo") void loadSeo();
@@ -8283,11 +8499,13 @@ function closeOrderActionDialog(): void {
   orderActionDialog.hidden = true;
   orderActionBackdrop.hidden = true;
   pendingOrderAction = null;
+  pendingRepeatRequestId = null;
 }
 
-function openOrderActionDialog(action: "confirm" | "complete" | "cancel"): void {
+function openOrderActionDialog(action: "confirm" | "complete" | "cancel" | "repeat"): void {
   if (!activeOrder) return;
   pendingOrderAction = action;
+  pendingRepeatRequestId = action === "repeat" ? crypto.randomUUID() : null;
   const content = {
     confirm: {
       title: "Confirm this order?",
@@ -8307,6 +8525,12 @@ function openOrderActionDialog(action: "confirm" | "complete" | "cancel"): void 
       button: "Cancel order",
       danger: true,
     },
+    repeat: {
+      title: "Repeat this order for fulfillment?",
+      message: `A new Processing order will copy every product, quantity and customer address from #${activeOrder.number}. The customer will not be charged again and the repeat will not inflate sales.`,
+      button: "Create repeat order",
+      danger: false,
+    },
   }[action];
   requiredElement<HTMLElement>("#order-action-dialog-title").textContent = content.title;
   requiredElement<HTMLElement>("#order-action-dialog-message").textContent = content.message;
@@ -8324,11 +8548,12 @@ async function executeOrderAction(): Promise<void> {
   const orderId = activeOrder.id;
   orderActionConfirm.disabled = true;
   try {
-    const response = await fetch("/api/commerce/order-action", {
+    const repeating = action === "repeat";
+    const response = await fetch(repeating ? "/api/commerce/order-repeat" : "/api/commerce/order-action", {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ orderId, action }),
+      body: JSON.stringify(repeating ? { orderId, requestId: pendingRepeatRequestId } : { orderId, action }),
     });
     const payload: unknown = await response.json();
     if (!response.ok || !isRecord(payload) || !isRecord(payload.order)) {
@@ -8336,7 +8561,10 @@ async function executeOrderAction(): Promise<void> {
     }
     closeOrderActionDialog();
     syncUpdatedOrder(payload.order as unknown as CommerceOrder);
-    showToast("Order updated", `Order #${activeOrder?.number || orderId} now shows the latest status.`);
+    const createdOrder = payload.order as unknown as CommerceOrder;
+    showToast(repeating ? "Repeat order created" : "Order updated", repeating
+      ? `Order #${createdOrder.number} is now in Processing and ready for fulfillment.`
+      : `Order #${activeOrder?.number || orderId} now shows the latest status.`);
   } catch (error) {
     showToast("Order update failed", error instanceof Error ? error.message : "Try again in a moment.", false);
   } finally {
@@ -9316,12 +9544,39 @@ customerPageNext.addEventListener("click", () => {
   renderCustomerDirectory();
 });
 requiredElement<HTMLButtonElement>("#refresh-customers").addEventListener("click", () => void loadCustomerDirectory(true));
+requiredElement<HTMLButtonElement>("#insurance-refresh").addEventListener("click", () => void loadInsuranceFund(true));
+requiredElement<HTMLButtonElement>("#insurance-order-find").addEventListener("click", findInsuranceOrders);
+requiredElement<HTMLInputElement>("#insurance-order-search").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); findInsuranceOrders(); }
+});
+requiredElement<HTMLElement>("#insurance-order-results").addEventListener("click", (event) => {
+  const trigger = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-insurance-order]") : null;
+  const orderId = Number(trigger?.dataset.insuranceOrder);
+  if (Number.isSafeInteger(orderId) && orderId > 0) selectInsuranceOrder(orderId);
+});
+requiredElement<HTMLFormElement>("#insurance-claim-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void submitInsuranceClaim();
+});
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-insurance-tab]")) {
+  button.addEventListener("click", () => {
+    const claims = button.dataset.insuranceTab === "claims";
+    requiredElement<HTMLElement>("#insurance-contributions").hidden = claims;
+    requiredElement<HTMLElement>("#insurance-claims-ledger").hidden = !claims;
+    for (const option of document.querySelectorAll<HTMLButtonElement>("[data-insurance-tab]")) option.classList.toggle("is-active", option === button);
+  });
+}
 requiredElement<HTMLButtonElement>("#close-customer-drawer").addEventListener("click", closeCustomerDrawer);
 customerBackdrop.addEventListener("click", closeCustomerDrawer);
 customerDetailContent.addEventListener("click", (event) => {
-  const trigger = event.target instanceof Element
-    ? event.target.closest<HTMLElement>("[data-customer-order]")
-    : null;
+  const element = event.target instanceof Element ? event.target : null;
+  const recovery = element?.closest<HTMLButtonElement>("[data-generate-password-link]");
+  if (recovery) {
+    const customerId = Number(recovery.dataset.generatePasswordLink);
+    if (Number.isSafeInteger(customerId) && customerId > 0) void generateCustomerPasswordLink(customerId, recovery);
+    return;
+  }
+  const trigger = element?.closest<HTMLElement>("[data-customer-order]") || null;
   const orderId = Number(trigger?.dataset.customerOrder);
   if (!Number.isSafeInteger(orderId) || orderId <= 0) return;
   closeCustomerDrawer();
@@ -9414,6 +9669,7 @@ requiredElement<HTMLButtonElement>("#order-action-dismiss").addEventListener("cl
 orderActionBackdrop.addEventListener("click", closeOrderActionDialog);
 orderActionConfirm.addEventListener("click", () => void executeOrderAction());
 requiredElement<HTMLButtonElement>("#order-refund-button").addEventListener("click", openRefundDialog);
+requiredElement<HTMLButtonElement>("#order-repeat-button").addEventListener("click", () => openOrderActionDialog("repeat"));
 requiredElement<HTMLButtonElement>("#order-pdf-button").addEventListener("click", downloadActiveOrderPdf);
 requiredElement<HTMLButtonElement>("#refund-dismiss").addEventListener("click", closeRefundDialog);
 refundBackdrop.addEventListener("click", closeRefundDialog);

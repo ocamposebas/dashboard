@@ -64,3 +64,9 @@ photos. WordPress validates every supplied image and sends exactly the available
 evidence through the site's existing SMTP transport without weakening replay or
 size protections.
 
+Version 2.0.0 adds idempotent operational order repetition and administrator-only
+customer recovery links. Repeated orders copy the exact products, quantities and
+addresses into a zero-charge Processing order, remain visibly linked to the source
+order and cannot inflate revenue. Recovery links use WordPress core one-use reset
+keys, expire automatically and are never stored by the Operations Suite.
+

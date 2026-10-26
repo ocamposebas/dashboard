@@ -297,6 +297,11 @@ export interface CommerceOrder {
     protectionProvider: string;
     trackingNumber: string;
   };
+  repeatOperations: {
+    operationalRepeat: boolean;
+    sourceOrderId: number;
+    requestId: string;
+  };
 }
 
 export interface CommerceOrderEvidence {
@@ -925,6 +930,12 @@ function mapOrder(value: unknown): CommerceOrder {
   const acceptedAt = isoDate(metadataValue(order, "_phaseone_contract_accepted_at"));
   const fileName = metadataText(order, "_phaseone_contract_pdf_filename");
   const rawShipmentIds = metadataValue(order, "_shipstation_processed_shipments");
+  const protectionFeeLine = feeLines.find((fee) => /(?:shipping|package)\s+protection|insurance/i.test(fee.name));
+  const protectionFee = Math.max(
+    0,
+    metadataNumber(order, "_phaseone_shipping_protection_fee"),
+    protectionFeeLine ? protectionFeeLine.total + protectionFeeLine.totalTax : 0,
+  );
   return {
     id, customerId: Math.max(0, number(order.customer_id)), number: text(order.number) || String(id), status: text(order.status) || "pending", currency: text(order.currency) || "USD",
     total, totalTax: number(order.total_tax), cartTax: number(order.cart_tax), shippingTotal: number(order.shipping_total),
@@ -972,11 +983,16 @@ function mapOrder(value: unknown): CommerceOrder {
       exported: truthy(metadataValue(order, "_shipstation_exported")),
       shippedItemCount: Math.max(0, Math.round(metadataNumber(order, "_shipstation_shipped_item_count"))),
       shipmentIds: textArray(rawShipmentIds),
-      protectionSelected: truthy(metadataValue(order, "_phaseone_shipping_protection_selected")) || truthy(metadataValue(order, "_phaseone_shipstation_insurance")),
-      protectionFee: Math.max(0, metadataNumber(order, "_phaseone_shipping_protection_fee")),
+      protectionSelected: protectionFee > 0 || truthy(metadataValue(order, "_phaseone_shipping_protection_selected")) || truthy(metadataValue(order, "_phaseone_shipstation_insurance")),
+      protectionFee,
       protectionValue: Math.max(0, metadataNumber(order, "_phaseone_shipping_protection_value")),
       protectionProvider: metadataText(order, "_phaseone_shipping_protection_provider"),
       trackingNumber: metadataText(order, "_phaseone_shipping_tracking_number", "_tracking_number", "_shipstation_tracking_number", "tracking_number"),
+    },
+    repeatOperations: {
+      operationalRepeat: truthy(metadataValue(order, "_phaseone_operational_repeat")),
+      sourceOrderId: Math.max(0, Math.trunc(metadataNumber(order, "_phaseone_repeated_from_order_id"))),
+      requestId: metadataText(order, "_phaseone_repeat_request_id"),
     },
   };
 }
@@ -2389,6 +2405,32 @@ export class WooCommerceGateway {
   }
 
   async getOrder(orderId: number): Promise<CommerceOrder> { return mapOrder(await this.request(`orders/${orderId}`)); }
+  async repeatOrder(orderId: number, requestId: string, actorName: string): Promise<CommerceOrder> {
+    const payload = record(await this.requestRoute(`/wp-json/phaseone-ops/v1/orders/${orderId}/repeat`, {
+      method: "POST",
+      body: { request_id: requestId, actor_name: actorName },
+      headers: {
+        "X-PhaseOne-Consumer-Key": this.config.consumerKey,
+        "X-PhaseOne-Consumer-Secret": this.config.consumerSecret,
+      },
+    }, false));
+    const repeatedOrderId = Math.trunc(number(payload.order_id));
+    if (repeatedOrderId <= 0) throw new Error("WordPress did not return the repeated order identifier");
+    return this.getOrder(repeatedOrderId);
+  }
+  async generateCustomerPasswordResetLink(customerId: number): Promise<{ url: string; expiresAt: string | null }> {
+    const payload = record(await this.requestRoute(`/wp-json/phaseone-ops/v1/customers/${customerId}/password-reset-link`, {
+      method: "POST",
+      body: {},
+      headers: {
+        "X-PhaseOne-Consumer-Key": this.config.consumerKey,
+        "X-PhaseOne-Consumer-Secret": this.config.consumerSecret,
+      },
+    }, false));
+    const url = text(payload.url);
+    if (!url) throw new Error("WordPress did not return a password recovery link");
+    return { url, expiresAt: isoDate(payload.expires_at) };
+  }
   async approveOrderPayment(orderId: number): Promise<CommerceOrder> {
     const approvedAt = new Date().toISOString();
     return mapOrder(await this.request(`orders/${orderId}`, {

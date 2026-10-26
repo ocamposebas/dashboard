@@ -811,6 +811,68 @@ test("writes and voids native shipping metadata through the protected bridge", a
   assert.equal(requests[1]?.body.label_id, "se-label-1");
 });
 
+test("repeats an order idempotently and generates a customer recovery link through the protected bridge", async () => {
+  const requests: Array<{ path: string; method: string; body: Record<string, unknown>; key: string | null }> = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    const headers = new Headers(init?.headers);
+    requests.push({
+      path: url.pathname,
+      method: init?.method || "GET",
+      body: JSON.parse(String(init?.body || "{}")) as Record<string, unknown>,
+      key: headers.get("x-phaseone-consumer-key"),
+    });
+    if (url.pathname.endsWith("/repeat")) {
+      return new Response(JSON.stringify({ created: true, order_id: 4100 }), { status: 201 });
+    }
+    if (url.pathname.endsWith("/password-reset-link")) {
+      return new Response(JSON.stringify({
+        url: "https://shop.example/wp-login.php?action=rp&key=one-use&login=customer",
+        expires_at: "2026-10-27T10:00:00Z",
+      }), { status: 201 });
+    }
+    return new Response(JSON.stringify({
+      id: 4100,
+      customer_id: 22,
+      number: "4100",
+      status: "processing",
+      currency: "USD",
+      total: "0.00",
+      payment_method: "phaseone_operational_repeat",
+      payment_method_title: "Operational repeat · no new charge",
+      date_created_gmt: "2026-10-26T10:00:00Z",
+      date_paid_gmt: "2026-10-26T10:00:00Z",
+      billing: { first_name: "Ana", last_name: "Test", email: "ana@example.test" },
+      shipping: { first_name: "Ana", last_name: "Test" },
+      line_items: [{ id: 1, product_id: 20, variation_id: 0, name: "KPV", sku: "KPV", quantity: 1, total: "0.00" }],
+      meta_data: [
+        { key: "_phaseone_operational_repeat", value: "yes" },
+        { key: "_phaseone_repeated_from_order_id", value: "3180" },
+      ],
+    }), { status: 200 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example", consumerKey: "ck_test", consumerSecret: "cs_test",
+  }, fetchImpl);
+  const requestId = "11111111-1111-4111-8111-111111111111";
+
+  const repeated = await gateway.repeatOrder(3180, requestId, "Administrator");
+  const recovery = await gateway.generateCustomerPasswordResetLink(22);
+
+  assert.equal(repeated.id, 4100);
+  assert.equal(repeated.repeatOperations.operationalRepeat, true);
+  assert.equal(repeated.repeatOperations.sourceOrderId, 3180);
+  assert.equal(recovery.expiresAt, "2026-10-27T10:00:00.000Z");
+  assert.deepEqual(requests.map((request) => request.path), [
+    "/wp-json/phaseone-ops/v1/orders/3180/repeat",
+    "/wp-json/wc/v3/orders/4100",
+    "/wp-json/phaseone-ops/v1/customers/22/password-reset-link",
+  ]);
+  assert.equal(requests[0]?.body.request_id, requestId);
+  assert.equal(requests[0]?.key, "ck_test");
+  assert.equal(requests[2]?.key, "ck_test");
+});
+
 test("publishes Site Controls through the protected operations bridge", async () => {
   const requests: Array<{ path: string; method: string; key: string | null; secret: string | null; body: unknown }> = [];
   const fetchImpl: typeof fetch = async (input, init) => {

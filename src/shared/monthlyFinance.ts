@@ -9,6 +9,7 @@ export interface MonthlyFinanceOrder {
   paymentMethodId: string;
   paidAt: string | null;
   createdAt: string | null;
+  repeatOperations?: { operationalRepeat: boolean };
   profitability: {
     costOfGoods: number;
     operatingCost: number;
@@ -77,6 +78,7 @@ export function summarizeMonthToDate(
   const start = monthToDateStart(now).getTime();
   const end = now.getTime();
   const paid = orders.filter((order) => {
+    if (order.repeatOperations?.operationalRepeat) return false;
     if (order.status !== "processing" && order.status !== "completed") return false;
     const timestamp = Date.parse(order.paidAt || order.createdAt || "");
     return Number.isFinite(timestamp) && timestamp >= start && timestamp <= end;

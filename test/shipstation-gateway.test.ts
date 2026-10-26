@@ -193,6 +193,8 @@ test("Phase One shipping requests only FedEx 2Day with the One Rate Pak package"
   const parcel = (shipment.packages as Array<Record<string, unknown>>)[0];
   assert.equal(parcel?.package_code, "fedex_pak_onerate");
   assert.equal("dimensions" in (parcel || {}), false);
+  assert.equal(shipment.insurance_provider, "none");
+  assert.deepEqual(parcel?.insured_value, { amount: 0, currency: "USD" });
   const rateOptions = rateRequest?.body.rate_options as Record<string, unknown>;
   assert.deepEqual(rateOptions.service_codes, ["fedex_2day"]);
   assert.deepEqual(rateOptions.package_types, ["fedex_pak_onerate"]);

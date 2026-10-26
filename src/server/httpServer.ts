@@ -25,6 +25,7 @@ import {
 } from "./affiliateManagement.js";
 import type { AppConfig } from "./config.js";
 import type { Database } from "./database.js";
+import { InsuranceFundRepository } from "./insuranceFundRepository.js";
 import { BarcodeLabelError, BarcodeLabelService } from "./barcodeLabels.js";
 import {
   BarcodeRegistryError,
@@ -467,6 +468,9 @@ export function createMonitorServer(
   const affiliates = dependencies.fulfillmentDatabase
     ? new AffiliateRepository(dependencies.fulfillmentDatabase)
     : undefined;
+  const insuranceFund = dependencies.fulfillmentDatabase
+    ? new InsuranceFundRepository(dependencies.fulfillmentDatabase)
+    : undefined;
   const affiliateLoginAttempts = new LoginAttemptThrottle();
   let affiliateLegacySyncAt = 0;
   const shipStation = dependencies.shipStationGateway || new ShipStationGateway(config.shipStation);
@@ -562,6 +566,54 @@ export function createMonitorServer(
   let extensionsRefresh: Promise<Record<string, unknown>> | undefined;
   let fulfillmentCoasCache: { coas: CommerceCoa[]; updatedAt: number } | undefined;
   let fulfillmentCoasRefresh: Promise<CommerceCoa[]> | undefined;
+  let insuranceOrdersCache: { orders: CommerceOrder[]; updatedAt: number } | undefined;
+
+  async function insuranceFundPayload(force = false) {
+    if (!commerce || !insuranceFund) throw new Error("Insurance fund services are not configured");
+    if (force || !insuranceOrdersCache || Date.now() - insuranceOrdersCache.updatedAt > 300_000) {
+      const before = new Date(Date.now() + 86_400_000).toISOString();
+      const orders = await commerce.listOrdersForPeriod("2020-01-01T00:00:00.000Z", before);
+      insuranceOrdersCache = { orders, updatedAt: Date.now() };
+    }
+    const excludedStatuses = new Set(["cancelled", "failed", "refunded", "trash"]);
+    const contributions = insuranceOrdersCache.orders.flatMap((order) => {
+      if (
+        order.repeatOperations.operationalRepeat ||
+        excludedStatuses.has(order.status) ||
+        !order.shippingOperations.protectionSelected ||
+        order.shippingOperations.protectionFee <= 0
+      ) return [];
+      return [{
+        orderId: order.id,
+        orderNumber: order.number,
+        customerName: order.customer,
+        customerEmail: order.billing.email,
+        currency: order.currency,
+        orderTotal: order.total,
+        amount: order.shippingOperations.protectionFee,
+        protectionValue: order.shippingOperations.protectionValue || order.total,
+        status: order.status,
+        collectedAt: order.paidAt || order.createdAt,
+      }];
+    });
+    const claims = await insuranceFund.listClaims();
+    const activeClaims = claims.filter((claim) => claim.status === "active");
+    const collected = contributions.reduce((sum, item) => sum + item.amount, 0);
+    const paidClaims = activeClaims.reduce((sum, item) => sum + item.amount, 0);
+    return {
+      currency: contributions[0]?.currency || claims[0]?.currency || "USD",
+      totals: {
+        collected,
+        claims: paidClaims,
+        available: collected - paidClaims,
+        protectedOrders: contributions.length,
+        lostOrders: activeClaims.length,
+      },
+      contributions,
+      claims,
+      syncedAt: new Date(insuranceOrdersCache.updatedAt).toISOString(),
+    };
+  }
 
   async function automaticallyPublishExactCoas(
     candidates: Awaited<ReturnType<CoaRepository["list"]>>,
@@ -3665,6 +3717,146 @@ export function createMonitorServer(
         } catch (error: unknown) {
           console.error("Live order refresh failed", error);
           json(response, 502, { connected: false, orders: [], error: "Live orders could not be refreshed" });
+        }
+        return;
+      }
+
+      if (url.pathname === "/api/insurance-fund" && request.method === "GET") {
+        if (!canOperate) {
+          json(response, 403, { error: "Operations access is required" });
+          return;
+        }
+        if (!commerce || !insuranceFund) {
+          json(response, 503, { error: "The internal insurance fund is not configured" });
+          return;
+        }
+        try {
+          json(response, 200, await insuranceFundPayload(url.searchParams.get("refresh") === "1"));
+        } catch (error: unknown) {
+          console.error("Insurance fund load failed", error);
+          json(response, 502, { error: "Insurance collections could not be synchronized" });
+        }
+        return;
+      }
+
+      if (url.pathname === "/api/insurance-fund/claim" && request.method === "POST") {
+        if (!canAdminister || !isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Administrator access is required" });
+          return;
+        }
+        if (!commerce || !insuranceFund) {
+          json(response, 503, { error: "The internal insurance fund is not configured" });
+          return;
+        }
+        let input: Record<string, unknown>;
+        try { input = JSON.parse(await readBody(request)) as Record<string, unknown>; }
+        catch { json(response, 400, { error: "Invalid JSON request" }); return; }
+        const orderId = Number(input.orderId);
+        const amount = Number(input.amount);
+        const reason = typeof input.reason === "string" ? input.reason.trim() : "";
+        if (
+          !Number.isSafeInteger(orderId) || orderId <= 0 ||
+          !Number.isFinite(amount) || amount <= 0 || amount > 1_000_000 ||
+          reason.length < 3 || reason.length > 500
+        ) {
+          json(response, 400, { error: "Choose an insured order, amount and reason" });
+          return;
+        }
+        try {
+          const order = await commerce.getOrder(orderId);
+          if (!order.shippingOperations.protectionSelected || order.shippingOperations.protectionFee <= 0) {
+            json(response, 409, { error: `Order #${order.number} did not collect Phase One protection` });
+            return;
+          }
+          if (["cancelled", "failed", "refunded", "trash"].includes(order.status)) {
+            json(response, 409, { error: `Order #${order.number} is not an eligible protected shipment` });
+            return;
+          }
+          if (amount > order.total + 0.001) {
+            json(response, 409, { error: `The claim cannot exceed the order total of ${order.total.toFixed(2)} ${order.currency}` });
+            return;
+          }
+          const claim = await insuranceFund.createClaim({
+            order,
+            amount,
+            reason,
+            actorId: currentUser.id,
+            actorName: currentUser.displayName,
+          });
+          await store.addNotification({
+            type: "system",
+            severity: "warning",
+            title: `Insurance claim recorded for order #${order.number}`,
+            message: `${amount.toFixed(2)} ${order.currency} was deducted from the internal protection fund.`,
+            actionView: "insurance",
+            actionEntityId: order.id,
+          });
+          json(response, 201, { saved: true, claim, fund: await insuranceFundPayload() });
+        } catch (error: unknown) {
+          console.error("Insurance claim save failed", error);
+          const duplicate = Boolean(error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "23505");
+          json(response, duplicate ? 409 : 502, { error: duplicate ? "This order already has an active claim" : "The insurance claim could not be recorded" });
+        }
+        return;
+      }
+
+      if (url.pathname === "/api/commerce/order-repeat" && request.method === "POST") {
+        if (!canOperate || !isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Operations access is required" });
+          return;
+        }
+        if (!commerce || config.wooCommerce?.accessMode !== "read_write") {
+          json(response, 503, { error: "A read/write store connection is required" });
+          return;
+        }
+        let input: Record<string, unknown>;
+        try { input = JSON.parse(await readBody(request)) as Record<string, unknown>; }
+        catch { json(response, 400, { error: "Invalid JSON request" }); return; }
+        const orderId = Number(input.orderId);
+        const requestId = typeof input.requestId === "string" ? input.requestId : "";
+        if (!Number.isSafeInteger(orderId) || orderId <= 0 || !/^[a-f0-9-]{36}$/i.test(requestId)) {
+          json(response, 400, { error: "The repeat order request is invalid" });
+          return;
+        }
+        try {
+          const repeated = await commerce.repeatOrder(orderId, requestId, currentUser.displayName);
+          const profitableOrder = await orderWithProfitability(repeated);
+          updateCachedOrder(profitableOrder);
+          markCustomersStale();
+          insuranceOrdersCache = undefined;
+          json(response, 201, { created: true, order: profitableOrder });
+        } catch (error: unknown) {
+          console.error("Order repeat failed", error);
+          const message = error instanceof CommerceServiceError ? error.serviceMessage : "The order could not be repeated";
+          json(response, error instanceof CommerceServiceError && error.status < 500 ? error.status : 502, { error: message });
+        }
+        return;
+      }
+
+      if (url.pathname === "/api/customers/password-reset-link" && request.method === "POST") {
+        if (!canAdminister || !isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Administrator access is required" });
+          return;
+        }
+        if (!commerce) {
+          json(response, 503, { error: "The live customer service is not connected" });
+          return;
+        }
+        let input: Record<string, unknown>;
+        try { input = JSON.parse(await readBody(request)) as Record<string, unknown>; }
+        catch { json(response, 400, { error: "Invalid JSON request" }); return; }
+        const customerId = Number(input.customerId);
+        if (!Number.isSafeInteger(customerId) || customerId <= 0) {
+          json(response, 400, { error: "A registered customer is required" });
+          return;
+        }
+        try {
+          const link = await commerce.generateCustomerPasswordResetLink(customerId);
+          json(response, 201, link);
+        } catch (error: unknown) {
+          console.error("Customer password reset link failed", error);
+          const message = error instanceof CommerceServiceError ? error.serviceMessage : "The recovery link could not be generated";
+          json(response, error instanceof CommerceServiceError && error.status < 500 ? error.status : 502, { error: message });
         }
         return;
       }

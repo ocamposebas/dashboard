@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Phase One Operations Bridge
  * Description: Secure bridge between Phase One Operations Suite, storefront controls, customer rewards and existing COA Manager records.
- * Version: 1.9.0
+ * Version: 2.0.0
  * Author: Phase One Labz
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -66,6 +66,18 @@ final class Phase_One_Operations_Bridge {
         register_rest_route(self::REST_NAMESPACE, '/customers/(?P<id>\d+)/points', [
             'methods' => WP_REST_Server::CREATABLE,
             'callback' => [__CLASS__, 'adjust_customer_points'],
+            'permission_callback' => [__CLASS__, 'authenticate_write_key'],
+        ]);
+
+        register_rest_route(self::REST_NAMESPACE, '/customers/(?P<id>\d+)/password-reset-link', [
+            'methods' => WP_REST_Server::CREATABLE,
+            'callback' => [__CLASS__, 'customer_password_reset_link'],
+            'permission_callback' => [__CLASS__, 'authenticate_write_key'],
+        ]);
+
+        register_rest_route(self::REST_NAMESPACE, '/orders/(?P<id>\d+)/repeat', [
+            'methods' => WP_REST_Server::CREATABLE,
+            'callback' => [__CLASS__, 'repeat_order'],
             'permission_callback' => [__CLASS__, 'authenticate_write_key'],
         ]);
 
@@ -145,7 +157,7 @@ final class Phase_One_Operations_Bridge {
     public static function status() {
         return rest_ensure_response([
             'connected' => true,
-            'version' => '1.9.0',
+            'version' => '2.0.0',
             'capabilities' => array_values(array_filter([
                 'edit_coa',
                 'read_customer_rewards',
@@ -156,11 +168,130 @@ final class Phase_One_Operations_Bridge {
                 class_exists('WooCommerce') ? 'idempotent_order_coa_assignment' : null,
                 class_exists('WooCommerce') ? 'email_order_evidence' : null,
                 class_exists('WooCommerce') ? 'save_native_shipping_label' : null,
+                class_exists('WooCommerce') ? 'repeat_order' : null,
+                class_exists('WooCommerce') ? 'generate_customer_password_reset' : null,
                 'inventory_restock',
                 'waitlist_subscribers',
                 'waitlist_notifications',
             ])),
         ]);
+    }
+
+    public static function customer_password_reset_link(WP_REST_Request $request) {
+        $user = get_userdata(absint($request['id']));
+        if (!$user) {
+            return new WP_Error('phaseone_customer_not_found', 'Customer account was not found.', ['status' => 404]);
+        }
+        if (user_can($user, 'manage_options') || !array_intersect((array) $user->roles, ['customer', 'subscriber'])) {
+            return new WP_Error('phaseone_customer_reset_forbidden', 'Only customer accounts can receive a storefront recovery link.', ['status' => 403]);
+        }
+        $key = get_password_reset_key($user);
+        if (is_wp_error($key)) {
+            return $key;
+        }
+        $expiration = (int) apply_filters('password_reset_expiration', DAY_IN_SECONDS, $user);
+        $url = network_site_url(
+            'wp-login.php?action=rp&key=' . rawurlencode($key) . '&login=' . rawurlencode($user->user_login),
+            'login'
+        );
+        return rest_ensure_response([
+            'url' => $url,
+            'expires_at' => gmdate('c', time() + max(300, $expiration)),
+        ]);
+    }
+
+    private static function copy_order_item_meta($source, $target) {
+        foreach ($source->get_meta_data() as $meta) {
+            $data = $meta->get_data();
+            if (!isset($data['key']) || strpos((string) $data['key'], '_reduced_stock') === 0) {
+                continue;
+            }
+            $target->add_meta_data($data['key'], $data['value'], false);
+        }
+    }
+
+    public static function repeat_order(WP_REST_Request $request) {
+        if (!class_exists('WooCommerce')) {
+            return new WP_Error('phaseone_woocommerce_missing', 'WooCommerce is not available.', ['status' => 503]);
+        }
+        $source = wc_get_order(absint($request['id']));
+        if (!$source) {
+            return new WP_Error('phaseone_order_not_found', 'Source order was not found.', ['status' => 404]);
+        }
+        $request_id = sanitize_text_field((string) $request->get_param('request_id'));
+        if (!preg_match('/^[a-f0-9-]{36}$/i', $request_id)) {
+            return new WP_Error('phaseone_repeat_request_invalid', 'A valid repeat request identifier is required.', ['status' => 400]);
+        }
+        $existing = wc_get_orders([
+            'limit' => 1,
+            'return' => 'objects',
+            'meta_key' => '_phaseone_repeat_request_id',
+            'meta_value' => $request_id,
+        ]);
+        if (!empty($existing)) {
+            return rest_ensure_response(['created' => false, 'replayed' => true, 'order_id' => $existing[0]->get_id()]);
+        }
+
+        try {
+            $order = wc_create_order(['customer_id' => $source->get_customer_id(), 'status' => 'pending']);
+            if (is_wp_error($order)) {
+                return $order;
+            }
+            $order->set_address($source->get_address('billing'), 'billing');
+            $order->set_address($source->get_address('shipping'), 'shipping');
+            $order->set_currency($source->get_currency());
+            $order->set_customer_note($source->get_customer_note());
+            $order->set_created_via('phaseone_operations_repeat');
+            $order->set_payment_method('phaseone_operational_repeat');
+            $order->set_payment_method_title('Operational repeat · no new charge');
+
+            foreach ($source->get_items('line_item') as $source_item) {
+                $product = $source_item->get_product();
+                if (!$product) {
+                    throw new Exception('A source product is no longer available: ' . $source_item->get_name());
+                }
+                $item = new WC_Order_Item_Product();
+                $item->set_product($product);
+                $item->set_name($source_item->get_name());
+                $item->set_quantity($source_item->get_quantity());
+                $item->set_subtotal(0);
+                $item->set_total(0);
+                $item->set_subtotal_tax(0);
+                $item->set_total_tax(0);
+                $item->set_taxes(['subtotal' => [], 'total' => []]);
+                $item->add_meta_data('_phaseone_original_line_total', $source_item->get_total(), true);
+                self::copy_order_item_meta($source_item, $item);
+                $order->add_item($item);
+            }
+            foreach ($source->get_items('shipping') as $source_item) {
+                $item = new WC_Order_Item_Shipping();
+                $item->set_method_title($source_item->get_method_title());
+                $item->set_method_id($source_item->get_method_id());
+                $item->set_instance_id($source_item->get_instance_id());
+                $item->set_total(0);
+                $item->set_taxes(['total' => []]);
+                self::copy_order_item_meta($source_item, $item);
+                $order->add_item($item);
+            }
+            $order->update_meta_data('_phaseone_operational_repeat', 'yes');
+            $order->update_meta_data('_phaseone_repeated_from_order_id', $source->get_id());
+            $order->update_meta_data('_phaseone_repeat_request_id', $request_id);
+            $order->update_meta_data('_phaseone_repeated_by', sanitize_text_field((string) $request->get_param('actor_name')));
+            $order->update_meta_data('_phaseone_original_order_total', $source->get_total());
+            $order->calculate_totals(false);
+            $order->set_date_paid(time());
+            $order->save();
+            $order->update_status('processing', sprintf('Operational repeat of order #%s. No new customer charge was created.', $source->get_order_number()), false);
+            wc_reduce_stock_levels($order->get_id());
+            $order->add_order_note(sprintf('Created as an operational repeat of order #%s from Phase One Operations Suite.', $source->get_order_number()), false);
+            $source->add_order_note(sprintf('Repeated operationally as order #%s. The customer was not charged again.', $order->get_order_number()), false);
+            return rest_ensure_response(['created' => true, 'replayed' => false, 'order_id' => $order->get_id()]);
+        } catch (Throwable $error) {
+            if (isset($order) && is_a($order, 'WC_Order')) {
+                $order->delete(true);
+            }
+            return new WP_Error('phaseone_repeat_failed', $error->getMessage(), ['status' => 500]);
+        }
     }
 
     private static function proxy_request($method, $route, WP_REST_Request $source = null, $json = null) {

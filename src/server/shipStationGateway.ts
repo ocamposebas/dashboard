@@ -613,6 +613,7 @@ export class ShipStationGateway {
       validate_address: "validate_only",
       warehouse_id: origin.id,
       confirmation: "none",
+      insurance_provider: "none",
       ship_to: {
         name: input.destination.name || input.destination.company || "Customer",
         company_name: input.destination.company || "",
@@ -628,6 +629,7 @@ export class ShipStationGateway {
       packages: [{
         package_code: packageCode,
         weight: { value: input.package.weightOz, unit: "ounce" },
+        insured_value: { amount: 0, currency: "USD" },
         ...(packageCode === "package" ? {
           dimensions: {
             unit: "inch",
