@@ -1,5 +1,7 @@
 import type { AffiliateStatus } from "../shared/affiliates.js";
 
+export type AffiliateApplicationDecision = "approved" | "rejected";
+
 export interface AffiliateCouponManagementInput {
   affiliateId: string;
   couponId: string | null;
@@ -55,4 +57,16 @@ export function affiliateStatusInput(value: Record<string, unknown>): {
     throw new AffiliateManagementError("invalid_status_change", "The affiliate status action is invalid");
   }
   return { affiliateId, status };
+}
+
+export function affiliateApplicationDecisionInput(value: Record<string, unknown>): {
+  applicationId: string;
+  decision: AffiliateApplicationDecision;
+} {
+  const applicationId = typeof value.applicationId === "string" ? value.applicationId.trim() : "";
+  const decision = value.decision === "approved" || value.decision === "rejected" ? value.decision : null;
+  if (!/^[a-f0-9-]{36}$/i.test(applicationId) || !decision) {
+    throw new AffiliateManagementError("invalid_application_decision", "The affiliate application action is invalid");
+  }
+  return { applicationId, decision };
 }

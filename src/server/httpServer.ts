@@ -20,6 +20,7 @@ import {
 import { AffiliateRepository } from "./affiliateRepository.js";
 import {
   AffiliateManagementError,
+  affiliateApplicationDecisionInput,
   affiliateCouponInput,
   affiliateStatusInput,
 } from "./affiliateManagement.js";
@@ -2762,6 +2763,58 @@ export function createMonitorServer(
               ? "The affiliate must connect their store account before reactivation"
               : "The affiliate status could not be changed safely",
           });
+        }
+        return;
+      }
+
+      if (url.pathname === "/api/affiliates/application-review" && request.method === "POST") {
+        if (!canAdminister || !affiliates || !isLoginOriginAllowed(request, config)) {
+          json(response, !canAdminister ? 403 : 503, {
+            error: !canAdminister ? "Administrator access is required" : "Affiliate application review is unavailable",
+          });
+          return;
+        }
+        let payload: Record<string, unknown>;
+        try { payload = JSON.parse(await readBody(request)) as Record<string, unknown>; }
+        catch { json(response, 400, { error: "Invalid request" }); return; }
+        try {
+          const input = affiliateApplicationDecisionInput(payload);
+          const token = input.decision === "approved" ? randomBytes(32).toString("base64url") : undefined;
+          const result = await affiliates.reviewApplication({
+            ...input,
+            actorId: currentUser.id,
+            ...(token ? { invitationToken: token } : {}),
+          });
+          let activationUrl: string | null = null;
+          if (token && result.invitationExpiresAt) {
+            const activation = new URL("/account/", "https://phaseonelabz.com");
+            activation.searchParams.set("affiliateInvite", token);
+            activation.hash = "affiliate";
+            activationUrl = activation.toString();
+          }
+          json(response, 200, {
+            saved: true,
+            application: result.application,
+            affiliateId: result.affiliateId,
+            activationUrl,
+            expiresAt: result.invitationExpiresAt?.toISOString() || null,
+            alreadyActive: result.alreadyActive,
+          });
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : "";
+          const clientError = error instanceof AffiliateManagementError;
+          console.error("Affiliate application review failed", error);
+          json(response,
+            clientError ? 400 : message === "affiliate_application_not_found" ? 404 : message === "affiliate_application_already_reviewed" ? 409 : 422,
+            {
+              error: clientError ? error.message
+                : message === "affiliate_application_not_found" ? "The affiliate application was not found"
+                  : message === "affiliate_application_already_reviewed" ? "This application has already been reviewed"
+                    : message === "affiliate_ineligible" ? "This email belongs to a suspended or closed affiliate"
+                      : message === "affiliate_identity_conflict" ? "The customer identity conflicts with another affiliate record"
+                        : "The affiliate application could not be reviewed safely",
+            },
+          );
         }
         return;
       }

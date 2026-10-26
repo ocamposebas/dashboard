@@ -144,6 +144,13 @@ export interface AffiliateManagementTarget {
   }>;
 }
 
+export interface AffiliateApplicationReviewResult {
+  application: AffiliateApplicationSummary;
+  affiliateId: string | null;
+  invitationExpiresAt: Date | null;
+  alreadyActive: boolean;
+}
+
 interface ApplicationRow {
   id: string;
   wp_user_id: string | null;
@@ -1140,6 +1147,114 @@ export class AffiliateRepository {
       LIMIT 1
     `, [input.email.trim().toLowerCase(), input.wpUserId]);
     return application.rows[0] ? this.mapApplication(application.rows[0]) : null;
+  }
+
+  async reviewApplication(input: {
+    applicationId: string;
+    decision: "approved" | "rejected";
+    actorId: string;
+    invitationToken?: string;
+  }): Promise<AffiliateApplicationReviewResult> {
+    return this.database.transaction(async (client) => {
+      const selected = await client.query<ApplicationRow>(`
+        SELECT id, wp_user_id, email, display_name, preferred_coupon, platform,
+          social_handle, audience_size, promotion_notes, source, status, created_at, reviewed_at
+        FROM affiliate_applications
+        WHERE id = $1
+        FOR UPDATE
+      `, [input.applicationId]);
+      const application = selected.rows[0];
+      if (!application) throw new Error("affiliate_application_not_found");
+      if (application.status !== "pending") throw new Error("affiliate_application_already_reviewed");
+
+      if (input.decision === "rejected") {
+        const rejected = await client.query<ApplicationRow>(`
+          UPDATE affiliate_applications
+          SET status = 'rejected', reviewed_by = $2, reviewed_at = now(), updated_at = now()
+          WHERE id = $1
+          RETURNING id, wp_user_id, email, display_name, preferred_coupon, platform,
+            social_handle, audience_size, promotion_notes, source, status, created_at, reviewed_at
+        `, [application.id, input.actorId]);
+        await this.audit(client, null, null, "application_rejected", "admin", input.actorId, {
+          applicationId: application.id,
+          email: application.email,
+        });
+        return {
+          application: this.mapApplication(rejected.rows[0]!),
+          affiliateId: null,
+          invitationExpiresAt: null,
+          alreadyActive: false,
+        };
+      }
+
+      if (!input.invitationToken) throw new Error("affiliate_invitation_token_required");
+      const matchingProfiles = await client.query<{
+        id: string;
+        status: AffiliateSummary["status"];
+        wp_user_id: string | null;
+      }>(`
+        SELECT id, status, wp_user_id
+        FROM affiliate_profiles
+        WHERE lower(email) = lower($1)
+          OR ($2::bigint IS NOT NULL AND wp_user_id = $2)
+        FOR UPDATE
+      `, [application.email, application.wp_user_id]);
+      const distinctProfiles = new Set(matchingProfiles.rows.map((row) => row.id));
+      if (distinctProfiles.size > 1) throw new Error("affiliate_identity_conflict");
+      const existing = matchingProfiles.rows[0];
+      if (existing && (existing.status === "suspended" || existing.status === "closed")) {
+        throw new Error("affiliate_ineligible");
+      }
+
+      const affiliateId = existing?.id || randomUUID();
+      if (!existing) {
+        await client.query(`
+          INSERT INTO affiliate_profiles (id, wp_user_id, email, display_name, status, source)
+          VALUES ($1, $2, $3, $4, 'pending_invite', 'approved_application')
+        `, [affiliateId, application.wp_user_id, application.email, application.display_name]);
+      } else {
+        await client.query(`
+          UPDATE affiliate_profiles
+          SET wp_user_id = COALESCE(wp_user_id, $2),
+              display_name = COALESCE(NULLIF(display_name, ''), $3),
+              updated_at = now()
+          WHERE id = $1
+        `, [affiliateId, application.wp_user_id, application.display_name]);
+      }
+
+      let invitationExpiresAt: Date | null = null;
+      const alreadyActive = existing?.status === "active";
+      if (!alreadyActive) {
+        invitationExpiresAt = new Date(Date.now() + 72 * 60 * 60 * 1_000);
+        await client.query(
+          "UPDATE affiliate_invitations SET used_at = now() WHERE affiliate_id = $1 AND used_at IS NULL",
+          [affiliateId],
+        );
+        await client.query(`
+          INSERT INTO affiliate_invitations (id, affiliate_id, token_digest, expires_at, created_by)
+          VALUES ($1, $2, $3, $4, $5)
+        `, [randomUUID(), affiliateId, tokenDigest(input.invitationToken), invitationExpiresAt, input.actorId]);
+      }
+
+      const approved = await client.query<ApplicationRow>(`
+        UPDATE affiliate_applications
+        SET status = 'approved', reviewed_by = $2, reviewed_at = now(), updated_at = now()
+        WHERE id = $1
+        RETURNING id, wp_user_id, email, display_name, preferred_coupon, platform,
+          social_handle, audience_size, promotion_notes, source, status, created_at, reviewed_at
+      `, [application.id, input.actorId]);
+      await this.audit(client, affiliateId, null, "application_approved", "admin", input.actorId, {
+        applicationId: application.id,
+        preferredCoupon: application.preferred_coupon,
+        invitationCreated: !alreadyActive,
+      });
+      return {
+        application: this.mapApplication(approved.rows[0]!),
+        affiliateId,
+        invitationExpiresAt,
+        alreadyActive,
+      };
+    });
   }
 
   async activate(token: string, password: string): Promise<{ id: string; email: string; displayName: string; authVersion: number }> {

@@ -217,8 +217,51 @@ function renderApplications(): void {
     : "Public and account requests";
   required("#affiliate-application-body").innerHTML = rows.length ? rows.map((application) => {
     const initials = application.displayName.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "P1";
-    return `<tr><td><div class="affiliate-person"><span>${escapeHtml(initials)}</span><div><strong>${escapeHtml(application.displayName)}</strong><small>${escapeHtml(application.email)}</small></div></div></td><td><strong>${escapeHtml(application.preferredCoupon)}</strong></td><td><div class="affiliate-coupon-cell"><strong>${escapeHtml(application.platform)}</strong><small>${escapeHtml(application.socialHandle)}</small></div></td><td>${escapeHtml(application.audienceSize.replaceAll("-", " "))}</td><td><span class="affiliate-source-badge">${escapeHtml(applicationSourceLabel(application.source))}</span></td><td>${shortDate(application.createdAt)}</td><td><span class="affiliate-admin-status affiliate-admin-status--${escapeHtml(application.status)}">${escapeHtml(statusLabel(application.status))}</span></td></tr>`;
-  }).join("") : '<tr><td colspan="7"><div class="affiliate-admin-empty"><strong>No applications found</strong><p>Requests from the public affiliate page and customer accounts will appear together here.</p></div></td></tr>';
+    const actions = application.status === "pending"
+      ? `<div class="affiliate-application-actions"><button type="button" data-application-action="approved" data-application-id="${escapeHtml(application.id)}">Approve</button><button class="is-danger" type="button" data-application-action="rejected" data-application-id="${escapeHtml(application.id)}">Reject</button></div>`
+      : `<span class="affiliate-none">Reviewed ${shortDate(application.reviewedAt)}</span>`;
+    return `<tr><td><div class="affiliate-person"><span>${escapeHtml(initials)}</span><div><strong>${escapeHtml(application.displayName)}</strong><small>${escapeHtml(application.email)}</small></div></div></td><td><strong>${escapeHtml(application.preferredCoupon)}</strong></td><td><div class="affiliate-coupon-cell"><strong>${escapeHtml(application.platform)}</strong><small>${escapeHtml(application.socialHandle)}</small></div></td><td>${escapeHtml(application.audienceSize.replaceAll("-", " "))}</td><td><span class="affiliate-source-badge">${escapeHtml(applicationSourceLabel(application.source))}</span></td><td>${shortDate(application.createdAt)}</td><td><span class="affiliate-admin-status affiliate-admin-status--${escapeHtml(application.status)}">${escapeHtml(statusLabel(application.status))}</span></td><td>${actions}</td></tr>`;
+  }).join("") : '<tr><td colspan="8"><div class="affiliate-admin-empty"><strong>No applications found</strong><p>Requests from the public affiliate page and customer accounts will appear together here.</p></div></td></tr>';
+}
+
+async function reviewApplication(applicationId: string, decision: "approved" | "rejected", button: HTMLButtonElement): Promise<void> {
+  const application = directory?.applications.find((item) => item.id === applicationId);
+  if (!application || application.status !== "pending") return;
+  if (decision === "rejected" && !window.confirm(`Reject ${application.displayName}'s affiliate application?`)) return;
+  const row = button.closest("tr");
+  const buttons = Array.from(row?.querySelectorAll<HTMLButtonElement>("[data-application-action]") || []);
+  for (const actionButton of buttons) actionButton.disabled = true;
+  button.textContent = decision === "approved" ? "Approving…" : "Rejecting…";
+  try {
+    const response = await fetch("/api/affiliates/application-review", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ applicationId, decision }),
+    });
+    const payload = await response.json() as {
+      activationUrl?: string | null;
+      expiresAt?: string | null;
+      alreadyActive?: boolean;
+      error?: string;
+    };
+    if (!response.ok) throw new Error(payload.error || "The application could not be reviewed");
+    await loadAffiliateAdmin(true);
+    if (decision === "approved" && payload.activationUrl) {
+      required<HTMLInputElement>("#affiliate-invite-url").value = payload.activationUrl;
+      required("#affiliate-copy-invite").textContent = "Copy link";
+      required("#affiliate-invite-expiry").textContent = payload.expiresAt
+        ? `Approved · expires ${shortDate(payload.expiresAt)} · one-time use`
+        : "Approved · expires in 72 hours";
+      required("#affiliate-invite-result").hidden = false;
+    } else if (decision === "approved" && payload.alreadyActive) {
+      window.alert("Application approved. This person already has an active affiliate account.");
+    }
+  } catch (error: unknown) {
+    window.alert(error instanceof Error ? error.message : "The application could not be reviewed");
+    for (const actionButton of buttons) actionButton.disabled = false;
+    button.textContent = decision === "approved" ? "Approve" : "Reject";
+  }
 }
 
 function renderMetrics(): void {
@@ -418,6 +461,15 @@ export function initAffiliateAdmin(): void {
     if (inviteId && directory) {
       const affiliate = directory.affiliates.find((item) => item.id === inviteId);
       if (affiliate) void inviteAffiliate(affiliate).catch((error: unknown) => alert(error instanceof Error ? error.message : "Invitation failed"));
+      return;
+    }
+    const applicationAction = target.closest<HTMLButtonElement>("[data-application-action]");
+    if (applicationAction?.dataset.applicationId && (applicationAction.dataset.applicationAction === "approved" || applicationAction.dataset.applicationAction === "rejected")) {
+      void reviewApplication(
+        applicationAction.dataset.applicationId,
+        applicationAction.dataset.applicationAction,
+        applicationAction,
+      );
       return;
     }
     const action = target.closest<HTMLElement>("[data-payout-action]");
