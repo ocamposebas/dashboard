@@ -20,6 +20,7 @@
           <div class="nav-group" role="group" aria-labelledby="nav-command-center">
             <p class="nav-label" id="nav-command-center">Command center</p>
             <button class="nav-item is-active" type="button" data-view="overview" aria-current="page"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg></span><span>Overview</span></button>
+            <button class="nav-item" type="button" data-view="finance"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M3 19h18M4 7l6-4 6 6 5-5"/></svg></span><span>Finance</span></button>
             <button class="nav-item" type="button" data-view="orders"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6"/></svg></span><span>Orders</span><b class="nav-count" id="orders-nav-count">0</b></button>
             <button class="nav-item" type="button" data-view="insurance"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v5c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6zM9 12l2 2 4-5"/></svg></span><span>Insurance fund</span></button>
             <button class="nav-item" type="button" data-view="fulfillment"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m4 7 8-4 8 4-8 4zM4 7v10l8 4 8-4V7M8.5 14l2 2 4-4"/></svg></span><span>Fulfillment</span><b class="nav-count" id="fulfillment-nav-count">0</b></button>
@@ -103,6 +104,45 @@
               <div class="overview-top-products" id="overview-top-products"><div class="table-loading">Calculating product performance…</div></div>
             </article>
             <article class="surface table-surface"><div class="surface-head"><div><p class="section-kicker">Operations</p><h2>Recent orders</h2></div><button class="text-button" type="button" data-go-view="orders">View all orders →</button></div><div class="table-scroll"><table><thead><tr><th>Order</th><th>Customer</th><th>Status</th><th>Date</th><th>Total</th><th>Est. profit</th></tr></thead><tbody id="orders-preview-body"><tr><td colspan="6"><div class="table-loading">Syncing orders…</div></td></tr></tbody></table></div></article>
+          </section>
+
+          <section class="view-panel finance-workspace" data-view-panel="finance" aria-labelledby="finance-center-title">
+            <div class="page-header finance-page-header">
+              <div><p class="eyebrow">Financial command center</p><h1 id="finance-center-title">Know exactly how the business is performing.</h1><p class="page-description">Revenue, true costs, SKU profitability and business risks — reconciled from paid orders and exact product variations.</p></div>
+              <div class="page-actions"><span class="finance-sync-state" id="finance-sync-state"><i></i><span><small>FINANCE DATA</small><b>Ready to load</b></span></span><button class="button button--secondary" id="finance-refresh" type="button">Refresh</button><button class="button button--primary" id="finance-export-pdf" type="button">Export executive PDF</button></div>
+            </div>
+
+            <nav class="finance-period-bar" aria-label="Finance reporting period">
+              <div><span>Reporting period</span><strong id="finance-period-title">This month</strong></div>
+              <div class="finance-period-options" role="group"><button class="is-active" type="button" data-finance-range="month">This month</button><button type="button" data-finance-range="30">30 days</button><button type="button" data-finance-range="90">90 days</button><button type="button" data-finance-range="year">This year</button></div>
+              <p id="finance-period-detail">Paid processing and completed orders only.</p>
+            </nav>
+
+            <section class="finance-kpi-grid" aria-label="Financial performance">
+              <article class="finance-kpi finance-kpi--hero"><span>NET REVENUE</span><strong id="finance-center-revenue">—</strong><small id="finance-center-revenue-note">After refunds</small></article>
+              <article class="finance-kpi"><span>NET PROFIT</span><strong id="finance-center-profit">—</strong><small id="finance-center-profit-note">Waiting for costs</small></article>
+              <article class="finance-kpi"><span>PROFIT MARGIN</span><strong id="finance-center-margin">—</strong><small>Profit ÷ net revenue</small></article>
+              <article class="finance-kpi"><span>PAID ORDERS</span><strong id="finance-center-orders">—</strong><small id="finance-center-aov">— average order</small></article>
+              <article class="finance-kpi"><span>UNITS SOLD</span><strong id="finance-center-units">—</strong><small id="finance-center-skus">— active SKUs</small></article>
+              <article class="finance-kpi"><span>COST COVERAGE</span><strong id="finance-center-coverage">—</strong><small id="finance-center-coverage-note">No orders analyzed</small></article>
+            </section>
+
+            <div class="finance-main-grid">
+              <article class="surface finance-trend-panel"><div class="surface-head"><div><p class="section-kicker">Performance trend</p><h2>Revenue and profit over time</h2><p>Daily movement for the selected reporting period.</p></div><div class="finance-chart-legend"><span><i class="is-revenue"></i>Revenue</span><span><i class="is-profit"></i>Profit</span></div></div><div class="finance-trend-summary" id="finance-trend-summary"></div><div class="finance-trend-chart" id="finance-trend-chart"><div class="table-loading">Loading complete finance history…</div></div></article>
+              <article class="surface finance-cost-panel"><div class="surface-head"><div><p class="section-kicker">Cost structure</p><h2>Where the money goes</h2><p>Every recorded expense deducted from revenue.</p></div><strong id="finance-total-cost">—</strong></div><div class="finance-cost-stack" id="finance-cost-stack"></div></article>
+            </div>
+
+            <div class="finance-secondary-grid">
+              <article class="surface finance-best-sellers"><div class="surface-head"><div><p class="section-kicker">Volume leaders</p><h2>Most-sold vials and products</h2><p>Ranked by exact SKU and units sold.</p></div></div><div id="finance-top-products" class="finance-top-products"></div></article>
+              <article class="surface finance-signals"><div class="surface-head"><div><p class="section-kicker">Decision center</p><h2>What needs attention</h2><p>Margin, loss and data-quality signals.</p></div></div><div id="finance-insights" class="finance-insight-list"></div></article>
+              <article class="surface finance-payments"><div class="surface-head"><div><p class="section-kicker">Collection channels</p><h2>Revenue by payment method</h2><p>Zelle, eDebit, cards and every paid method.</p></div></div><div id="finance-payment-mix" class="finance-payment-mix"></div></article>
+            </div>
+
+            <article class="surface finance-sku-panel">
+              <div class="surface-head finance-sku-head"><div><p class="section-kicker">Product truth table</p><h2>Profitability by SKU</h2><p>Exact product or variation performance after inventory, packaging, fees, affiliate commission, laboratory testing and refunds.</p></div><div class="finance-table-tools"><label class="table-search"><span>⌕</span><input id="finance-sku-search" type="search" placeholder="Search product or SKU" /></label><label><span>Sort by</span><select id="finance-sku-sort"><option value="profit">Highest profit</option><option value="units">Most units</option><option value="revenue">Highest revenue</option><option value="margin">Best margin</option><option value="risk">Needs attention</option></select></label></div></div>
+              <div class="finance-table-note"><span><i></i>Exact variation-level calculation</span><p>“Incomplete” means a cost is missing; the system never invents profit.</p></div>
+              <div class="table-scroll"><table class="finance-sku-table"><thead><tr><th>Product / exact SKU</th><th>Units</th><th>Orders</th><th>Net sales</th><th>Total costs</th><th>Net profit</th><th>Margin</th><th>Data quality</th></tr></thead><tbody id="finance-sku-body"><tr><td colspan="8"><div class="table-loading">Loading SKU profitability…</div></td></tr></tbody></table></div>
+            </article>
           </section>
 
           <section class="view-panel" data-view-panel="orders" aria-labelledby="orders-title">

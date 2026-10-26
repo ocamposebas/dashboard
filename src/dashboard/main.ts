@@ -3,6 +3,7 @@ import "./premium.css";
 import "./labels.css";
 import "./fulfillment.css";
 import "./clean-ui.css";
+import "./finance.css";
 import { initAffiliateAdmin, loadAffiliateAdmin } from "./affiliates-admin";
 import type { AffiliateCommissionSummary } from "../shared/affiliates";
 import { calculateProductProfitability } from "../shared/productProfitability";
@@ -12,6 +13,12 @@ import {
   type MonthlyFinanceOrder,
   type MonthlyFinanceSummary,
 } from "../shared/monthlyFinance";
+import {
+  summarizeFinance,
+  type FinanceLineProfitability,
+  type FinanceOrder,
+  type FinanceSummary,
+} from "../shared/financeAnalytics";
 import { suggestedCoaVariationId } from "../shared/coaCatalogMapping";
 import { productSkuBase, productVariantSku } from "../shared/productSku";
 import {
@@ -288,6 +295,7 @@ interface CommerceOrder {
     testingCost?: number;
     completeCostCoverage: boolean;
     estimatedProfit: number | null;
+    lines?: FinanceLineProfitability[];
   };
 }
 
@@ -1037,6 +1045,13 @@ type SalesInsightRange = "today" | "week" | "month";
 let salesInsightRange: SalesInsightRange = "today";
 let salesInsightLoading = false;
 let salesInsightComplete: { range: SalesInsightRange; orders: CommerceOrder[] } | undefined;
+type FinanceRange = "month" | "30" | "90" | "year";
+let financeRange: FinanceRange = "month";
+let financeLoading = false;
+let financeLoadedAt = 0;
+let financeReportData: { range: FinanceRange; orders: CommerceOrder[]; generatedAt: string } | undefined;
+let financeSkuSearch = "";
+let financeSkuSort: "profit" | "units" | "revenue" | "margin" | "risk" = "profit";
 let monthlyFinanceOrders: Array<MonthlyFinanceOrder & { id: number }> | undefined;
 let monthlyFinancePreview: MonthlyFinanceSummary | undefined;
 let monthlyFinanceLoading = false;
@@ -2481,6 +2496,213 @@ function renderSalesPerformance(): void {
   container.innerHTML = products.length
     ? products.slice(0, 6).map((product, index) => `<article class="overview-product-rank"><span class="overview-product-position">${String(index + 1).padStart(2, "0")}</span><span class="overview-product-image">${product.imageUrl ? `<img src="${escapeHtml(product.imageUrl)}" alt="" loading="lazy" decoding="async" />` : escapeHtml((product.name[0] || "P").toUpperCase())}</span><div><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.sku || (product.variationId ? `Variation ${product.variationId}` : `Product ${product.productId}`))} · ${formatNumber(product.orders.size)} order${product.orders.size === 1 ? "" : "s"}</small></div><span class="overview-product-units"><strong>${formatNumber(product.units)}</strong><small>units</small></span><span class="overview-product-revenue"><strong>${escapeHtml(formatCurrency(product.revenue, currency))}</strong><small>sales</small></span></article>`).join("")
     : `<div class="overview-sales-empty"><span>◇</span><div><strong>No paid product sales for ${escapeHtml(salesRangeLabel(salesInsightRange).toLocaleLowerCase("en"))}</strong><p>Completed and processing orders will be ranked here automatically.</p></div></div>`;
+}
+
+function financeRangeStart(range = financeRange, now = new Date()): Date {
+  if (range === "month") return new Date(now.getFullYear(), now.getMonth(), 1);
+  if (range === "year") return new Date(now.getFullYear(), 0, 1);
+  const days = range === "90" ? 89 : 29;
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - days);
+}
+
+function financeRangeLabel(range = financeRange): string {
+  const now = new Date();
+  if (range === "month") return new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(now);
+  if (range === "year") return String(now.getFullYear());
+  return range === "90" ? "Last 90 days" : "Last 30 days";
+}
+
+function financeRangeRequest(range = financeRange): { after: Date; before: Date; label: string } {
+  return { after: financeRangeStart(range), before: new Date(Date.now() + 60_000), label: financeRangeLabel(range) };
+}
+
+function financeOrders(range = financeRange): CommerceOrder[] {
+  const start = financeRangeStart(range).getTime();
+  const source = financeReportData?.range === range ? financeReportData.orders : commerceData?.orders || [];
+  return source.filter((order) => {
+    const timestamp = Date.parse(order.paidAt || order.createdAt || "");
+    return paidOrder(order) && Number.isFinite(timestamp) && timestamp >= start;
+  });
+}
+
+function financeSummary(): FinanceSummary {
+  return summarizeFinance(financeOrders() as FinanceOrder[]);
+}
+
+function financeChartPoints(summary: FinanceSummary): Array<{ key: string; label: string; revenue: number; profit: number | null }> {
+  const start = financeRangeStart().getTime();
+  const grouped = new Map<string, { key: string; label: string; revenue: number; profit: number | null }>();
+  for (const day of summary.daily) {
+    const date = new Date(`${day.date}T12:00:00`);
+    const key = financeRange === "year"
+      ? day.date.slice(0, 7)
+      : financeRange === "90" ? `week-${Math.max(0, Math.floor((date.getTime() - start) / (7 * 86_400_000)))}` : day.date;
+    const label = financeRange === "year"
+      ? new Intl.DateTimeFormat("en-US", { month: "short" }).format(date)
+      : financeRange === "90"
+        ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date)
+        : new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
+    const current = grouped.get(key) || { key, label, revenue: 0, profit: 0 };
+    current.revenue += day.revenue;
+    current.profit = current.profit === null || day.profit === null ? null : current.profit + day.profit;
+    grouped.set(key, current);
+  }
+  return [...grouped.values()];
+}
+
+function renderFinanceTrend(summary: FinanceSummary): void {
+  const points = financeChartPoints(summary);
+  const container = requiredElement<HTMLElement>("#finance-trend-chart");
+  const best = points.reduce((current, point) => point.revenue > current.revenue ? point : current, points[0] || { label: "—", revenue: 0, profit: 0, key: "" });
+  const profitable = points.filter((point) => point.profit !== null).reduce((sum, point) => sum + Math.max(0, point.profit || 0), 0);
+  requiredElement<HTMLElement>("#finance-trend-summary").innerHTML = `<span>Peak <b>${escapeHtml(best.label)}</b> · ${escapeHtml(formatCurrency(best.revenue, summary.currency))}</span><span>Known daily profit <b>${escapeHtml(formatCurrency(profitable, summary.currency))}</b></span>`;
+  if (!points.length) {
+    container.innerHTML = '<div class="finance-chart-empty">No paid orders were found for this period.</div>';
+    return;
+  }
+  const maximum = Math.max(1, ...points.flatMap((point) => [point.revenue, Math.max(0, point.profit || 0)]));
+  container.innerHTML = points.map((point, index) => {
+    const revenueHeight = Math.max(2, (point.revenue / maximum) * 100);
+    const profitHeight = point.profit === null ? 0 : Math.max(2, (Math.max(0, point.profit) / maximum) * 100);
+    const showLabel = points.length <= 16 || index % Math.ceil(points.length / 12) === 0 || index === points.length - 1;
+    const title = `${point.label}: ${formatCurrency(point.revenue, summary.currency)} revenue${point.profit === null ? "; profit incomplete" : `; ${formatCurrency(point.profit, summary.currency)} profit`}`;
+    return `<div class="finance-trend-day" title="${escapeHtml(title)}"><i class="finance-trend-bar" style="height:${revenueHeight.toFixed(2)}%"></i><i class="finance-trend-bar finance-trend-bar--profit${point.profit !== null && point.profit < 0 ? " is-negative" : ""}" style="height:${profitHeight.toFixed(2)}%"></i>${showLabel ? `<small>${escapeHtml(point.label)}</small>` : ""}</div>`;
+  }).join("");
+}
+
+function renderFinanceCosts(summary: FinanceSummary): void {
+  requiredElement<HTMLElement>("#finance-total-cost").textContent = formatCurrency(summary.costs.total, summary.currency);
+  const rows = [
+    ["Inventory / COGS", summary.costs.costOfGoods, "#52606d"],
+    ["Packaging & operations", summary.costs.operating, "#65cfe3"],
+    ["Payment processing", summary.costs.paymentFees, "#d7a544"],
+    ["Affiliate commissions", summary.costs.affiliates, "#8e7bd5"],
+    ["Laboratory testing", summary.costs.testing, "#4ba5a7"],
+    ["Refunds", summary.costs.refunds, "#d66b67"],
+  ] as const;
+  const maximum = Math.max(1, ...rows.map((row) => row[1]));
+  requiredElement<HTMLElement>("#finance-cost-stack").innerHTML = rows.map(([label, value, color]) => `<div class="finance-cost-row" style="--cost-color:${color};--cost-width:${Math.max(0, (value / maximum) * 100).toFixed(2)}%"><span><i></i>${escapeHtml(label)}</span><div><i></i></div><b>${escapeHtml(formatCurrency(value, summary.currency))}</b><small>${summary.revenue > 0 ? `${((value / summary.revenue) * 100).toFixed(1)}% of net revenue` : "No revenue"}</small></div>`).join("");
+}
+
+function renderFinanceTopProducts(summary: FinanceSummary): void {
+  const top = summary.skus.slice(0, 5);
+  requiredElement<HTMLElement>("#finance-top-products").innerHTML = top.length ? top.map((sku, index) => `<article class="finance-top-row"><i>${String(index + 1).padStart(2, "0")}</i><figure>${sku.imageUrl ? `<img src="${escapeHtml(sku.imageUrl)}" alt="" loading="lazy" decoding="async" />` : `<span>${escapeHtml((sku.name[0] || "P").toUpperCase())}</span>`}</figure><div><strong>${escapeHtml(sku.name)}</strong><small>${escapeHtml(sku.sku || `Product ${sku.productId}`)} · ${formatNumber(sku.orders)} order${sku.orders === 1 ? "" : "s"}</small></div><span><b>${formatNumber(sku.units)}</b><small>units · ${escapeHtml(formatCurrency(sku.allocatedRevenue - sku.refunds, summary.currency))}</small></span></article>`).join("") : '<div class="finance-empty">No product sales in this period.</div>';
+}
+
+function renderFinanceInsights(summary: FinanceSummary): void {
+  if (!summary.orders) {
+    requiredElement<HTMLElement>("#finance-insights").innerHTML = '<article class="finance-insight finance-insight--warning"><i>·</i><div><strong>No paid orders in this period</strong><p>Choose another range or refresh after new processing and completed orders arrive.</p></div></article>';
+    return;
+  }
+  const insights: Array<{ tone: "good" | "warning" | "danger"; icon: string; title: string; copy: string }> = [];
+  if (summary.missingCostSkus) insights.push({ tone: "warning", icon: "!", title: `${summary.missingCostSkus} SKU${summary.missingCostSkus === 1 ? " is" : "s are"} missing costs`, copy: "Add the exact variation cost before relying on total profit." });
+  else insights.push({ tone: "good", icon: "✓", title: "Cost data is complete", copy: "Every sold SKU has the costs required for a trustworthy margin." });
+  if (summary.negativeSkus) insights.push({ tone: "danger", icon: "−", title: `${summary.negativeSkus} SKU${summary.negativeSkus === 1 ? " is" : "s are"} losing money`, copy: "Review price, test expense, affiliate rate and direct product cost." });
+  else insights.push({ tone: "good", icon: "+", title: "No loss-making SKUs", copy: "All completely costed products remain above zero net profit." });
+  if (summary.lowMarginSkus) insights.push({ tone: "warning", icon: "%", title: `${summary.lowMarginSkus} low-margin SKU${summary.lowMarginSkus === 1 ? "" : "s"}`, copy: "Margin is below 20%; consider price or cost adjustments." });
+  else insights.push({ tone: "good", icon: "%", title: "Margins are holding", copy: "No completely costed SKU is currently below the 20% watch line." });
+  requiredElement<HTMLElement>("#finance-insights").innerHTML = insights.map((item) => `<article class="finance-insight finance-insight--${item.tone}"><i>${item.icon}</i><div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.copy)}</p></div></article>`).join("");
+}
+
+function renderFinancePayments(summary: FinanceSummary): void {
+  const labels: Record<string, string> = { zelle: "Zelle", debit: "eDebit", card: "Card", wallet: "Wallet", bank: "Bank", cash: "Cash", other: "Other" };
+  const colors: Record<string, string> = { zelle: "#8e67d8", debit: "#d4a243", card: "#56bfd4", wallet: "#4ba5a7", bank: "#657487", cash: "#4bae79", other: "#8c9591" };
+  requiredElement<HTMLElement>("#finance-payment-mix").innerHTML = summary.payments.length ? summary.payments.map((payment) => `<article class="finance-payment-row" style="--payment-color:${colors[payment.kind] || colors.other};--payment-width:${payment.share.toFixed(2)}%"><span><i></i>${labels[payment.kind] || payment.kind}</span><div><i></i></div><p><b>${escapeHtml(formatCurrency(payment.revenue, summary.currency))}</b><small>${formatNumber(payment.orders)} order${payment.orders === 1 ? "" : "s"} · ${payment.share.toFixed(1)}%</small></p></article>`).join("") : '<div class="finance-empty">No payment collections in this period.</div>';
+}
+
+function financeVisibleSkus(summary: FinanceSummary): FinanceSummary["skus"] {
+  const search = financeSkuSearch.trim().toLocaleLowerCase("en");
+  const visible = summary.skus.filter((sku) => !search || `${sku.name} ${sku.sku}`.toLocaleLowerCase("en").includes(search));
+  const descending = (value: (sku: FinanceSummary["skus"][number]) => number | null) => (left: FinanceSummary["skus"][number], right: FinanceSummary["skus"][number]) => (value(right) ?? -Infinity) - (value(left) ?? -Infinity);
+  if (financeSkuSort === "units") return visible.sort(descending((sku) => sku.units));
+  if (financeSkuSort === "revenue") return visible.sort(descending((sku) => sku.allocatedRevenue - sku.refunds));
+  if (financeSkuSort === "margin") return visible.sort(descending((sku) => sku.margin));
+  if (financeSkuSort === "risk") return visible.sort((left, right) => left.coverage - right.coverage || (left.profit ?? Infinity) - (right.profit ?? Infinity));
+  return visible.sort(descending((sku) => sku.profit));
+}
+
+function renderFinanceSkuTable(summary: FinanceSummary): void {
+  const visible = financeVisibleSkus(summary);
+  requiredElement<HTMLElement>("#finance-sku-body").innerHTML = visible.length ? visible.map((sku) => {
+    const netSales = sku.allocatedRevenue - sku.refunds;
+    const profitClass = sku.profit === null ? "" : sku.profit < 0 ? "finance-profit-negative" : "finance-profit-positive";
+    return `<tr><td><div class="finance-product-cell"><span>${sku.imageUrl ? `<img src="${escapeHtml(sku.imageUrl)}" alt="" loading="lazy" decoding="async" />` : escapeHtml((sku.name[0] || "P").toUpperCase())}</span><div><strong>${escapeHtml(sku.name)}</strong><small>${escapeHtml(sku.sku || `Product ${sku.productId}`)}${sku.variationId ? ` · Variation ${sku.variationId}` : ""}</small></div></div></td><td><div class="finance-value"><strong>${formatNumber(sku.units)}</strong><small>sold</small></div></td><td>${formatNumber(sku.orders)}</td><td><div class="finance-value"><strong>${escapeHtml(formatCurrency(netSales, summary.currency))}</strong><small>${sku.refunds > 0 ? `${formatCurrency(sku.refunds, summary.currency)} refunded` : "after discounts"}</small></div></td><td><div class="finance-value"><strong>${escapeHtml(formatCurrency(sku.costs.total, summary.currency))}</strong><small>all recorded costs</small></div></td><td><div class="finance-value ${profitClass}"><strong>${sku.profit === null ? "Incomplete" : escapeHtml(formatCurrency(sku.profit, summary.currency))}</strong><small>${sku.profit === null ? "cost setup required" : "net contribution"}</small></div></td><td><strong class="${profitClass}">${sku.margin === null ? "—" : `${sku.margin.toFixed(1)}%`}</strong></td><td><span class="finance-quality ${sku.coverage >= 99.999 ? "finance-quality--complete" : "finance-quality--partial"}">${sku.coverage >= 99.999 ? "Complete" : `${sku.coverage.toFixed(0)}% covered`}</span></td></tr>`;
+  }).join("") : '<tr><td colspan="8"><div class="finance-empty">No SKU matches this view.</div></td></tr>';
+}
+
+function renderFinance(): void {
+  const summary = financeSummary();
+  const complete = financeReportData?.range === financeRange;
+  requiredElement<HTMLElement>("#finance-period-title").textContent = financeRangeLabel();
+  requiredElement<HTMLElement>("#finance-period-detail").textContent = complete
+    ? `Complete period · ${formatNumber(summary.orders)} paid orders · synchronized ${relativeDate(financeReportData!.generatedAt)}`
+    : financeLoading ? "Loading every paid order in this period…" : "Fast preview from synchronized orders.";
+  const sync = requiredElement<HTMLElement>("#finance-sync-state");
+  sync.classList.toggle("is-loading", financeLoading);
+  sync.classList.remove("is-error");
+  const syncText = sync.querySelector<HTMLElement>("b");
+  if (syncText) syncText.textContent = financeLoading ? "Loading complete history" : complete ? `Updated ${relativeDate(financeReportData!.generatedAt)}` : "Preview data";
+  requiredElement<HTMLElement>("#finance-center-revenue").textContent = formatCurrency(summary.revenue, summary.currency);
+  requiredElement<HTMLElement>("#finance-center-revenue-note").textContent = `${formatCurrency(summary.costs.refunds, summary.currency)} refunded`;
+  requiredElement<HTMLElement>("#finance-center-profit").textContent = summary.profit === null ? formatCurrency(summary.knownProfit, summary.currency) : formatCurrency(summary.profit, summary.currency);
+  requiredElement<HTMLElement>("#finance-center-profit-note").textContent = summary.profit === null ? `Known profit · ${summary.coverage.toFixed(0)}% cost coverage` : "After every recorded cost";
+  requiredElement<HTMLElement>("#finance-center-margin").textContent = summary.margin === null ? "Incomplete" : `${summary.margin.toFixed(1)}%`;
+  requiredElement<HTMLElement>("#finance-center-orders").textContent = formatNumber(summary.orders);
+  requiredElement<HTMLElement>("#finance-center-aov").textContent = `${formatCurrency(summary.averageOrderValue, summary.currency)} average order`;
+  requiredElement<HTMLElement>("#finance-center-units").textContent = formatNumber(summary.units);
+  requiredElement<HTMLElement>("#finance-center-skus").textContent = `${formatNumber(summary.skus.length)} active SKU${summary.skus.length === 1 ? "" : "s"}`;
+  requiredElement<HTMLElement>("#finance-center-coverage").textContent = `${summary.coverage.toFixed(0)}%`;
+  requiredElement<HTMLElement>("#finance-center-coverage-note").textContent = `${formatNumber(summary.coveredOrders)} of ${formatNumber(summary.orders)} orders fully costed`;
+  const profitCard = requiredElement<HTMLElement>("#finance-center-profit").closest<HTMLElement>(".finance-kpi");
+  profitCard?.classList.toggle("is-positive", summary.profit !== null && summary.profit >= 0);
+  profitCard?.classList.toggle("is-danger", summary.profit !== null && summary.profit < 0);
+  const coverageCard = requiredElement<HTMLElement>("#finance-center-coverage").closest<HTMLElement>(".finance-kpi");
+  coverageCard?.classList.toggle("is-positive", summary.coverage >= 99.999);
+  coverageCard?.classList.toggle("is-warning", summary.coverage < 99.999);
+  renderFinanceTrend(summary);
+  renderFinanceCosts(summary);
+  renderFinanceTopProducts(summary);
+  renderFinanceInsights(summary);
+  renderFinancePayments(summary);
+  renderFinanceSkuTable(summary);
+}
+
+async function loadFinance(force = false): Promise<void> {
+  if (financeLoading) return;
+  if (!force && financeReportData?.range === financeRange && Date.now() - financeLoadedAt < 60_000) {
+    renderFinance();
+    return;
+  }
+  financeLoading = true;
+  renderFinance();
+  const refreshButton = requiredElement<HTMLButtonElement>("#finance-refresh");
+  refreshButton.disabled = true;
+  try {
+    const range = financeRangeRequest();
+    const params = new URLSearchParams({ after: range.after.toISOString(), before: range.before.toISOString() });
+    if (force) params.set("fresh", "1");
+    const response = await fetch(`/api/commerce/sales-report?${params.toString()}`, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
+    const payload: unknown = await response.json();
+    if (!response.ok || !isRecord(payload) || !Array.isArray(payload.orders)) throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "Finance history is unavailable");
+    financeReportData = { range: financeRange, orders: payload.orders as CommerceOrder[], generatedAt: typeof payload.generatedAt === "string" ? payload.generatedAt : new Date().toISOString() };
+    financeLoadedAt = Date.now();
+  } catch (error) {
+    const sync = requiredElement<HTMLElement>("#finance-sync-state");
+    sync.classList.add("is-error");
+    const label = sync.querySelector<HTMLElement>("b");
+    if (label) label.textContent = "Complete history unavailable";
+    showToast("Finance data delayed", error instanceof Error ? error.message : "Try refreshing again.", false);
+  } finally {
+    financeLoading = false;
+    refreshButton.disabled = false;
+    renderFinance();
+  }
+}
+
+async function downloadFinancePdf(): Promise<void> {
+  const range = financeRangeRequest();
+  const params = new URLSearchParams({ after: range.after.toISOString(), before: range.before.toISOString(), label: range.label });
+  await downloadPdfFrom(`/api/reports/finance.pdf?${params.toString()}`, `phase-one-finance-${financeRange}-${new Date().toISOString().slice(0, 10)}.pdf`, requiredElement<HTMLButtonElement>("#finance-export-pdf"));
 }
 
 function monthToDateLabel(now = new Date()): string {
@@ -4248,6 +4470,7 @@ function renderCommerce(): void {
 
   const orders = commerceData.orders;
   renderOverviewFinancials();
+  renderFinance();
   requiredElement<HTMLElement>("#orders-nav-count").textContent = formatNumber(
     orders.filter((order) => order.status === "processing").length,
   );
@@ -8240,6 +8463,7 @@ window.addEventListener("keydown", (event) => {
 
 const viewNames: Record<string, string> = {
   overview: "Overview",
+  finance: "Finance",
   orders: "Orders",
   insurance: "Insurance money collected",
   products: "Products",
@@ -8438,6 +8662,7 @@ function navigate(view: string): void {
   closeCommandPalette();
   window.scrollTo({ top: 0, behavior: "smooth" });
   if (view === "customers") void loadCustomerDirectory();
+  if (view === "finance") void loadFinance();
   if (view === "insurance") void loadInsuranceFund();
   if (view === "affiliates") void loadAffiliateAdmin();
   if (view === "marketing") void loadMarketingEmailCenter();
@@ -10120,6 +10345,16 @@ requiredElement<HTMLFormElement>("#password-form").addEventListener("submit", as
 });
 requiredElement<HTMLButtonElement>("#download-monitor-report").addEventListener("click", downloadMonitorReport);
 requiredElement<HTMLButtonElement>("#download-sales-report").addEventListener("click", () => void downloadSalesReport());
+requiredElement<HTMLButtonElement>("#finance-refresh").addEventListener("click", () => void loadFinance(true));
+requiredElement<HTMLButtonElement>("#finance-export-pdf").addEventListener("click", () => void downloadFinancePdf());
+requiredElement<HTMLInputElement>("#finance-sku-search").addEventListener("input", (event) => {
+  financeSkuSearch = (event.currentTarget as HTMLInputElement).value;
+  renderFinanceSkuTable(financeSummary());
+});
+requiredElement<HTMLSelectElement>("#finance-sku-sort").addEventListener("change", (event) => {
+  financeSkuSort = (event.currentTarget as HTMLSelectElement).value as typeof financeSkuSort;
+  renderFinanceSkuTable(financeSummary());
+});
 requiredElement<HTMLButtonElement>("#orders-report-open").addEventListener("click", openOrdersReportDialog);
 requiredElement<HTMLButtonElement>("#orders-report-close").addEventListener("click", closeOrdersReportDialog);
 requiredElement<HTMLButtonElement>("#orders-report-cancel").addEventListener("click", closeOrdersReportDialog);
@@ -10145,6 +10380,22 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-sales-r
     }
     renderSalesPerformance();
     void loadCompleteSalesRange(range);
+  });
+}
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-finance-range]")) {
+  button.addEventListener("click", () => {
+    const range = button.dataset.financeRange;
+    if (range !== "month" && range !== "30" && range !== "90" && range !== "year") return;
+    financeRange = range;
+    financeSkuSearch = "";
+    requiredElement<HTMLInputElement>("#finance-sku-search").value = "";
+    for (const item of document.querySelectorAll<HTMLButtonElement>("[data-finance-range]")) {
+      const active = item === button;
+      item.classList.toggle("is-active", active);
+      item.setAttribute("aria-pressed", String(active));
+    }
+    renderFinance();
+    void loadFinance();
   });
 }
 customerTableBody.addEventListener("click", (event) => {

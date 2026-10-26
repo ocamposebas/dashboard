@@ -62,6 +62,7 @@ import {
 } from "../shared/coaAutomaticPublishing.js";
 import { productVariantSku } from "../shared/productSku.js";
 import type { MonthlyFinanceOrder } from "../shared/monthlyFinance.js";
+import type { FinanceOrder } from "../shared/financeAnalytics.js";
 import type { MarketingEmailProduct } from "../shared/marketingEmail.js";
 import { fulfillmentAccessForRole } from "./fulfillmentAccess.js";
 import {
@@ -141,6 +142,7 @@ import {
 } from "./productLocationRepository.js";
 import { SearchConsoleGateway } from "./searchConsoleGateway.js";
 import { buildOrderReportPdf } from "./orderReportPdf.js";
+import { buildFinanceReportPdf } from "./financeReportPdf.js";
 import { LoginAttemptThrottle } from "./loginAttemptThrottle.js";
 import {
   buildIndependentSiteControls,
@@ -540,20 +542,73 @@ export function createMonitorServer(
     let testingCost = 0;
     let coveredItems = 0;
     let totalItems = 0;
+    const lineProfitability: Array<{
+      orderItemId: number;
+      productId: number;
+      variationId: number;
+      name: string;
+      sku: string;
+      quantity: number;
+      productRevenue: number;
+      allocatedRevenue: number;
+      allocatedRefund: number;
+      costOfGoods: number;
+      operatingCost: number;
+      feeCost: number;
+      affiliateCost: number;
+      testingCost: number;
+      completeCostCoverage: boolean;
+      estimatedProfit: number | null;
+    }> = [];
     for (const item of order.lineItems) {
       totalItems += item.quantity;
       const cost = productCostForCatalogLine(costs, item.productId, item.variationId);
-      if (!cost) continue;
-      coveredItems += item.quantity;
-      costOfGoods += cost.unitCost * item.quantity;
-      operatingCost += cost.packagingCost * item.quantity;
-      feeCost += item.total * (cost.feeRate / 100);
-      affiliateCost += item.total * (cost.affiliateRate / 100);
       const recorded = recordedTestingCosts[String(item.id)];
       const current = item.variationId > 0 && currentTestingCosts[String(item.variationId)]
         ? currentTestingCosts[String(item.variationId)]
         : currentTestingCosts[String(item.productId)];
-      testingCost += allocatedTestingCost(item.quantity, recorded, current?.perUnit || 0);
+      const lineTestingCost = allocatedTestingCost(item.quantity, recorded, current?.perUnit || 0);
+      const lineCostOfGoods = cost ? cost.unitCost * item.quantity : 0;
+      const lineOperatingCost = cost ? cost.packagingCost * item.quantity : 0;
+      const lineFeeCost = cost ? item.total * (cost.feeRate / 100) : 0;
+      const lineAffiliateCost = cost ? item.total * (cost.affiliateRate / 100) : 0;
+      if (cost) coveredItems += item.quantity;
+      costOfGoods += lineCostOfGoods;
+      operatingCost += lineOperatingCost;
+      feeCost += lineFeeCost;
+      affiliateCost += lineAffiliateCost;
+      testingCost += lineTestingCost;
+      lineProfitability.push({
+        orderItemId: item.id,
+        productId: item.productId,
+        variationId: item.variationId,
+        name: item.name,
+        sku: item.sku,
+        quantity: item.quantity,
+        productRevenue: item.total,
+        allocatedRevenue: 0,
+        allocatedRefund: 0,
+        costOfGoods: lineCostOfGoods,
+        operatingCost: lineOperatingCost,
+        feeCost: lineFeeCost,
+        affiliateCost: lineAffiliateCost,
+        testingCost: lineTestingCost,
+        completeCostCoverage: Boolean(cost),
+        estimatedProfit: null,
+      });
+    }
+    const merchandiseRevenue = lineProfitability.reduce((sum, line) => sum + Math.max(0, line.productRevenue), 0);
+    const quantityTotal = lineProfitability.reduce((sum, line) => sum + Math.max(0, line.quantity), 0);
+    for (const line of lineProfitability) {
+      const share = merchandiseRevenue > 0
+        ? Math.max(0, line.productRevenue) / merchandiseRevenue
+        : quantityTotal > 0 ? Math.max(0, line.quantity) / quantityTotal : 0;
+      line.allocatedRevenue = order.total * share;
+      line.allocatedRefund = Math.max(0, order.refundedTotal) * share;
+      if (line.completeCostCoverage) {
+        line.estimatedProfit = line.allocatedRevenue - line.allocatedRefund - line.costOfGoods -
+          line.operatingCost - line.feeCost - line.affiliateCost - line.testingCost;
+      }
     }
     const completeCostCoverage = totalItems > 0 && coveredItems >= totalItems;
     return {
@@ -568,6 +623,7 @@ export function createMonitorServer(
         estimatedProfit: completeCostCoverage
           ? order.total - costOfGoods - operatingCost - feeCost - affiliateCost - testingCost
           : null,
+        lines: lineProfitability,
       },
     };
   }
@@ -797,7 +853,9 @@ export function createMonitorServer(
   let productCampaignRetryAt = 0;
 
   function salesReportPeriodKey(after: Date, before: Date): string {
-    return `${after.toISOString().slice(0, 10)}:${before.toISOString().slice(0, 10)}`;
+    // v2 adds exact line-level profitability. Keeping it in the cache key avoids
+    // serving a pre-finance-dashboard report that only had order-level totals.
+    return `v2:${after.toISOString().slice(0, 10)}:${before.toISOString().slice(0, 10)}`;
   }
 
   async function refreshSalesReport(
@@ -4441,6 +4499,35 @@ export function createMonitorServer(
         } catch (error: unknown) {
           console.error("Order PDF report generation failed", error);
           json(response, 502, { error: "The order PDF could not be generated" });
+        }
+        return;
+      }
+
+      if (url.pathname === "/api/reports/finance.pdf" && request.method === "GET") {
+        if (!commerce || !config.wooCommerce) {
+          json(response, 503, { error: "The live order service is not connected" });
+          return;
+        }
+        const after = new Date(url.searchParams.get("after") || "");
+        const before = new Date(url.searchParams.get("before") || "");
+        const rangeMs = before.getTime() - after.getTime();
+        if (!Number.isFinite(after.getTime()) || !Number.isFinite(before.getTime()) || rangeMs <= 0 || rangeMs > 370 * 86_400_000) {
+          json(response, 400, { error: "A valid finance period of 370 days or less is required" });
+          return;
+        }
+        try {
+          const reportData = await cachedSalesReport(after, before, url.searchParams.get("fresh") === "1");
+          const requestedLabel = (url.searchParams.get("label") || "").replace(/[^a-zA-Z0-9 ,.'-]/g, "").trim();
+          const periodLabel = requestedLabel || `${after.toISOString().slice(0, 10)} to ${before.toISOString().slice(0, 10)}`;
+          const report = await buildFinanceReportPdf(reportData.orders as unknown as FinanceOrder[], { periodLabel });
+          response.statusCode = 200;
+          response.setHeader("Content-Type", "application/pdf");
+          response.setHeader("Content-Disposition", `attachment; filename="phase-one-finance-${new Date().toISOString().slice(0, 10)}.pdf"`);
+          response.setHeader("Content-Length", String(report.byteLength));
+          response.end(report);
+        } catch (error: unknown) {
+          console.error("Finance PDF report generation failed", error);
+          json(response, 502, { error: "The finance PDF could not be generated" });
         }
         return;
       }
