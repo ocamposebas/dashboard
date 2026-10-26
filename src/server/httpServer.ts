@@ -156,6 +156,7 @@ import {
   CommerceServiceError,
   WooCommerceGateway,
   type CommerceCoa,
+  type CommerceCustomerProfile,
   type CommerceOrder,
   type CommerceProduct,
   type CommerceProductWrite,
@@ -491,6 +492,14 @@ export function createMonitorServer(
       )
     : undefined;
   marketingEmails?.start();
+  let marketingContactSyncPromise: Promise<{ imported: number; skipped: number }> | undefined;
+  const marketingContactSyncState: {
+    state: "waiting" | "syncing" | "ready" | "error";
+    lastSyncedAt: string | null;
+    imported: number;
+    skipped: number;
+    error: string;
+  } = { state: "waiting", lastSyncedAt: null, imported: 0, skipped: 0, error: "" };
   const affiliateLoginAttempts = new LoginAttemptThrottle();
   let affiliateLegacySyncAt = 0;
   const shipStation = dependencies.shipStationGateway || new ShipStationGateway(config.shipStation);
@@ -1305,6 +1314,50 @@ export function createMonitorServer(
     void refreshCustomers().catch((error: unknown) => {
       console.error("Customer background refresh failed", error);
     });
+  }
+
+  async function syncMarketingContactsFromWordPress(): Promise<{ imported: number; skipped: number }> {
+    if (!marketingEmailRepository || !commerce) throw new Error("Contact synchronization is not configured");
+    if (marketingContactSyncPromise) return marketingContactSyncPromise;
+    marketingContactSyncState.state = "syncing";
+    marketingContactSyncState.error = "";
+    marketingContactSyncPromise = commerce.getCustomerDirectory()
+      .then(async (directory) => {
+        const contacts: MarketingContactInput[] = directory.customers
+          .filter((customer: CommerceCustomerProfile) => customer.email.trim() !== "")
+          .map((customer: CommerceCustomerProfile) => ({
+            email: customer.email,
+            firstName: customer.firstName,
+            lastName: customer.lastName,
+            source: "woocommerce" as const,
+            status: "unconfirmed" as const,
+            tags: customer.orderCount > 0 ? ["customer"] : ["account"],
+            wpCustomerId: customer.id && customer.id > 0 ? customer.id : null,
+          }));
+        const result = await marketingEmailRepository.upsertContacts(contacts);
+        marketingContactSyncState.state = "ready";
+        marketingContactSyncState.lastSyncedAt = new Date().toISOString();
+        marketingContactSyncState.imported = result.imported;
+        marketingContactSyncState.skipped = result.skipped;
+        return result;
+      })
+      .catch((error: unknown) => {
+        marketingContactSyncState.state = "error";
+        marketingContactSyncState.error = error instanceof Error ? error.message : "WordPress contact sync failed";
+        throw error;
+      })
+      .finally(() => { marketingContactSyncPromise = undefined; });
+    return marketingContactSyncPromise;
+  }
+
+  if (marketingEmailRepository && commerce) {
+    setTimeout(() => void syncMarketingContactsFromWordPress().catch((error: unknown) => {
+      console.error("Automatic WordPress contact sync failed", error);
+    }), 1_500).unref();
+    const contactSyncTimer = setInterval(() => void syncMarketingContactsFromWordPress().catch((error: unknown) => {
+      console.error("Automatic WordPress contact sync failed", error);
+    }), 15 * 60_000);
+    contactSyncTimer.unref();
   }
 
   async function refreshExtensions(): Promise<Record<string, unknown>> {
@@ -2344,6 +2397,7 @@ export function createMonitorServer(
           )),
           templates: marketingEmails.templates(),
           smtpOwner: "wordpress",
+          contactSync: { ...marketingContactSyncState },
         });
         return;
       }
@@ -2357,20 +2411,8 @@ export function createMonitorServer(
           json(response, 503, { error: "Contact synchronization is not configured" });
           return;
         }
-        const directory = await commerce.getCustomerDirectory();
-        const contacts: MarketingContactInput[] = directory.customers
-          .filter((customer) => customer.email.trim() !== "")
-          .map((customer) => ({
-            email: customer.email,
-            firstName: customer.firstName,
-            lastName: customer.lastName,
-            source: "woocommerce",
-            status: "unconfirmed",
-            tags: customer.orderCount > 0 ? ["customer"] : ["account"],
-            wpCustomerId: customer.id,
-          }));
-        const result = await marketingEmailRepository.upsertContacts(contacts);
-        json(response, 200, { synced: true, ...result, unconfirmed: true });
+        const result = await syncMarketingContactsFromWordPress();
+        json(response, 200, { synced: true, ...result, unconfirmed: true, contactSync: { ...marketingContactSyncState } });
         return;
       }
 

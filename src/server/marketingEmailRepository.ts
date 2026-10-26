@@ -173,9 +173,19 @@ export class MarketingEmailRepository {
           ON CONFLICT (lower(email)) DO UPDATE SET
             first_name = CASE WHEN EXCLUDED.first_name <> '' THEN EXCLUDED.first_name ELSE marketing_contacts.first_name END,
             last_name = CASE WHEN EXCLUDED.last_name <> '' THEN EXCLUDED.last_name ELSE marketing_contacts.last_name END,
-            source = EXCLUDED.source,
+            source = CASE
+              WHEN EXCLUDED.source = 'woocommerce'
+                AND EXCLUDED.status = 'unconfirmed'
+                AND marketing_contacts.source <> 'woocommerce'
+              THEN marketing_contacts.source
+              ELSE EXCLUDED.source
+            END,
             status = CASE
               WHEN marketing_contacts.status = 'unsubscribed' AND EXCLUDED.status <> 'unsubscribed' THEN 'unsubscribed'
+              WHEN EXCLUDED.source = 'woocommerce'
+                AND EXCLUDED.status = 'unconfirmed'
+                AND marketing_contacts.status IN ('subscribed', 'bounced')
+              THEN marketing_contacts.status
               ELSE EXCLUDED.status
             END,
             tags = ARRAY(SELECT DISTINCT value FROM unnest(marketing_contacts.tags || EXCLUDED.tags) AS value WHERE value <> ''),

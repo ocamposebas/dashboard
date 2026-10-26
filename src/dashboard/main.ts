@@ -716,6 +716,10 @@ interface MarketingEmailCenterPayload {
   contacts: MarketingEmailContact[]; campaigns: MarketingEmailCampaign[];
   tags: Array<{ tag: string; contacts: number }>; templates: MarketingEmailTemplate[];
   smtpOwner: "wordpress";
+  contactSync?: {
+    state: "waiting" | "syncing" | "ready" | "error";
+    lastSyncedAt: string | null; imported: number; skipped: number; error: string;
+  };
 }
 interface WorkspaceNotification {
   id: string; type: "order" | "seo" | "security" | "system";
@@ -1134,6 +1138,7 @@ let marketingCartFilter: "open" | "abandoned" | "all" = "open";
 let marketingEmailCenter: MarketingEmailCenterPayload | undefined;
 let marketingEmailLoading = false;
 let marketingEmailSearchTimer: number | undefined;
+let marketingEmailSyncRefreshTimer: number | undefined;
 let pendingEmailLaunchId = "";
 const SESSION_PAGE_SIZE = 5;
 const CUSTOMER_PAGE_SIZE = 50;
@@ -1737,20 +1742,28 @@ function renderMarketingEmailCenter(): void {
   requiredElement<HTMLElement>("#email-unconfirmed-count").textContent = formatNumber(center.counts.unconfirmed);
   requiredElement<HTMLElement>("#email-total-count").textContent = formatNumber(center.counts.total);
   requiredElement<HTMLElement>("#email-delivered-count").textContent = formatNumber(center.campaigns.reduce((sum, campaign) => sum + campaign.sentCount, 0));
-  requiredElement<HTMLElement>("#email-center-updated").textContent = "Audience and campaign ledger up to date";
+  const sync = center.contactSync;
+  requiredElement<HTMLElement>("#email-center-updated").textContent = sync?.state === "syncing"
+    ? "Updating every WordPress contact…"
+    : sync?.state === "error"
+      ? "Automatic sync will retry shortly"
+      : sync?.lastSyncedAt
+        ? `WordPress updated ${relativeDate(sync.lastSyncedAt)}`
+        : "Automatic WordPress sync is starting";
   requiredElement<HTMLElement>("#email-campaign-count").textContent = `${center.campaigns.length} campaign${center.campaigns.length === 1 ? "" : "s"}`;
 
-  emailTemplateStrip.innerHTML = center.templates.map((template) => `<button class="email-template-card" type="button" data-email-template="${escapeHtml(template.key)}" style="--template-accent:${escapeHtml(template.accent)}"><span>READY TEMPLATE</span><strong>${escapeHtml(template.name)}</strong><small>${escapeHtml(template.description)}</small></button>`).join("");
+  emailTemplateStrip.innerHTML = center.templates.map((template) => `<button class="email-template-card" type="button" data-email-template="${escapeHtml(template.key)}" style="--template-accent:${escapeHtml(template.accent)}"><span>USE TEMPLATE</span><strong>${escapeHtml(template.name)}</strong><small>${escapeHtml(template.description)}</small></button>`).join("");
   emailCampaignList.innerHTML = center.campaigns.length ? center.campaigns.map((campaign) => {
-    const progress = campaign.status === "draft" ? "Not sent" : `${formatNumber(campaign.sentCount)} of ${formatNumber(campaign.recipientCount)} sent`;
+    const progress = campaign.status === "draft" ? "Safe draft · nobody emailed" : `${formatNumber(campaign.sentCount)} of ${formatNumber(campaign.recipientCount)} delivered`;
     const actions = campaign.status === "draft" && workspaceSession?.permissions.administer
-      ? `<button type="button" data-email-test="${campaign.id}">Send test</button><button type="button" data-email-launch="${campaign.id}">Approve</button>`
+      ? `<button type="button" data-email-test="${campaign.id}">Test first</button><button type="button" data-email-launch="${campaign.id}">Send to ${formatNumber(center.counts.subscribed)}</button>`
       : ["queued", "sending"].includes(campaign.status) && workspaceSession?.permissions.administer
         ? `<button type="button" data-email-cancel="${campaign.id}">Cancel queue</button>` : "";
-    return `<article class="email-campaign-row"><span>✦</span><div class="email-campaign-copy"><strong>${escapeHtml(campaign.name)}</strong><small>${escapeHtml(campaign.subject)} · ${progress} · ${relativeDate(campaign.createdAt)}</small></div><i class="email-state email-state--${escapeHtml(campaign.status)}">${escapeHtml(campaign.status)}</i><footer>${actions}</footer></article>`;
+    const statusLabel: Record<string, string> = { draft: "Draft", queued: "Waiting", sending: "Sending", completed: "Sent", cancelled: "Cancelled" };
+    return `<article class="email-campaign-row"><span>✦</span><div class="email-campaign-copy"><strong>${escapeHtml(campaign.subject)}</strong><small>${progress} · ${relativeDate(campaign.createdAt)}</small></div><i class="email-state email-state--${escapeHtml(campaign.status)}">${escapeHtml(statusLabel[campaign.status] || campaign.status)}</i><footer>${actions}</footer></article>`;
   }).join("") : '<p class="empty-state">Choose a template to prepare the first campaign. Nothing is sent while it remains a draft.</p>';
 
-  emailContactList.innerHTML = center.contacts.length ? center.contacts.map((contact) => `<article class="email-contact-row"><span class="email-contact-avatar">${escapeHtml(contact.displayName.slice(0, 2).toUpperCase())}</span><div class="email-contact-copy"><strong>${escapeHtml(contact.displayName)}</strong><small>${escapeHtml(contact.email)} · ${escapeHtml(contact.source)}${contact.tags.length ? ` · ${escapeHtml(contact.tags.join(", "))}` : ""}</small></div><em data-status="${contact.status}">${escapeHtml(contact.status === "unconfirmed" ? "needs consent" : contact.status)}</em></article>`).join("") : '<p class="empty-state">No contacts match this view.</p>';
+  emailContactList.innerHTML = center.contacts.length ? center.contacts.map((contact) => `<article class="email-contact-row"><span class="email-contact-avatar">${escapeHtml(contact.displayName.slice(0, 2).toUpperCase())}</span><div class="email-contact-copy"><strong>${escapeHtml(contact.displayName)}</strong><small>${escapeHtml(contact.email)} · ${escapeHtml(contact.source === "woocommerce" ? "WordPress" : contact.source)}${contact.tags.length ? ` · ${escapeHtml(contact.tags.join(", "))}` : ""}</small></div><em data-status="${contact.status}">${escapeHtml(contact.status === "subscribed" ? "ready" : contact.status === "unconfirmed" ? "protected" : contact.status)}</em></article>`).join("") : '<p class="empty-state">No contacts match this view.</p>';
 
   const templateSelect = requiredElement<HTMLSelectElement>("#email-template-select");
   templateSelect.innerHTML = center.templates.map((template) => `<option value="${escapeHtml(template.key)}">${escapeHtml(template.name)}</option>`).join("");
@@ -1770,6 +1783,10 @@ async function loadMarketingEmailCenter(): Promise<void> {
     }
     marketingEmailCenter = payload as unknown as MarketingEmailCenterPayload;
     renderMarketingEmailCenter();
+    if (marketingEmailCenter.contactSync?.state === "syncing") {
+      if (marketingEmailSyncRefreshTimer) window.clearTimeout(marketingEmailSyncRefreshTimer);
+      marketingEmailSyncRefreshTimer = window.setTimeout(() => void loadMarketingEmailCenter(), 2_500);
+    }
   } catch (error) {
     requiredElement<HTMLElement>("#email-center-updated").textContent = error instanceof Error ? error.message : "Email center unavailable";
   } finally {
@@ -1778,9 +1795,16 @@ async function loadMarketingEmailCenter(): Promise<void> {
 }
 
 function updateEmailPreview(): void {
-  requiredElement<HTMLElement>("#email-preview-preheader").textContent = requiredElement<HTMLInputElement>("#email-preheader").value || "Research updates from Phase One Labz";
-  requiredElement<HTMLElement>("#email-preview-heading").textContent = requiredElement<HTMLInputElement>("#email-heading").value || "A precise update, made for your research.";
-  requiredElement<HTMLElement>("#email-preview-message").textContent = requiredElement<HTMLTextAreaElement>("#email-message").value || "Your campaign message will appear here.";
+  const subject = requiredElement<HTMLInputElement>("#email-subject").value.trim();
+  const message = requiredElement<HTMLTextAreaElement>("#email-message").value.trim();
+  requiredElement<HTMLInputElement>("#email-heading").value = subject || "A precise update, made for your research.";
+  requiredElement<HTMLInputElement>("#email-preheader").value = message.slice(0, 180) || "Research updates from Phase One Labz";
+  requiredElement<HTMLInputElement>("#email-campaign-name").value = subject
+    ? `${subject} · ${new Date().toLocaleDateString()}`
+    : `Phase One email · ${new Date().toLocaleDateString()}`;
+  requiredElement<HTMLElement>("#email-preview-preheader").textContent = requiredElement<HTMLInputElement>("#email-preheader").value;
+  requiredElement<HTMLElement>("#email-preview-heading").textContent = requiredElement<HTMLInputElement>("#email-heading").value;
+  requiredElement<HTMLElement>("#email-preview-message").textContent = message || "Your campaign message will appear here.";
   const button = requiredElement<HTMLElement>("#email-preview-button");
   button.textContent = `${requiredElement<HTMLInputElement>("#email-button-label").value || "EXPLORE NOW"} →`;
   button.hidden = requiredElement<HTMLInputElement>("#email-button-label").value.trim() === "";
