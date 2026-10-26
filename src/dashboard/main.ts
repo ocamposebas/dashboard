@@ -1139,6 +1139,7 @@ let marketingEmailCenter: MarketingEmailCenterPayload | undefined;
 let marketingEmailLoading = false;
 let marketingEmailSearchTimer: number | undefined;
 let marketingEmailSyncRefreshTimer: number | undefined;
+let marketingEmailCampaignFilter: "all" | "draft" | "sent" = "all";
 let pendingEmailLaunchId = "";
 const SESSION_PAGE_SIZE = 5;
 const CUSTOMER_PAGE_SIZE = 50;
@@ -1750,10 +1751,18 @@ function renderMarketingEmailCenter(): void {
       : sync?.lastSyncedAt
         ? `WordPress updated ${relativeDate(sync.lastSyncedAt)}`
         : "Automatic WordPress sync is starting";
-  requiredElement<HTMLElement>("#email-campaign-count").textContent = `${center.campaigns.length} campaign${center.campaigns.length === 1 ? "" : "s"}`;
+  const visibleCampaigns = center.campaigns.filter((campaign) => {
+    if (marketingEmailCampaignFilter === "draft") return campaign.status === "draft";
+    if (marketingEmailCampaignFilter === "sent") return campaign.status === "completed";
+    return true;
+  });
+  const sentCampaignCount = center.campaigns.filter((campaign) => campaign.status === "completed").length;
+  requiredElement<HTMLElement>("#email-campaign-count").textContent = marketingEmailCampaignFilter === "all"
+    ? `${center.campaigns.length} total · ${sentCampaignCount} sent`
+    : `${visibleCampaigns.length} campaign${visibleCampaigns.length === 1 ? "" : "s"}`;
 
   emailTemplateStrip.innerHTML = center.templates.map((template) => `<button class="email-template-card" type="button" data-email-template="${escapeHtml(template.key)}" style="--template-accent:${escapeHtml(template.accent)}"><span>USE TEMPLATE</span><strong>${escapeHtml(template.name)}</strong><small>${escapeHtml(template.description)}</small></button>`).join("");
-  emailCampaignList.innerHTML = center.campaigns.length ? center.campaigns.map((campaign) => {
+  emailCampaignList.innerHTML = visibleCampaigns.length ? visibleCampaigns.map((campaign) => {
     const progress = campaign.status === "draft" ? "Safe draft · nobody emailed" : `${formatNumber(campaign.sentCount)} of ${formatNumber(campaign.recipientCount)} delivered`;
     const actions = campaign.status === "draft" && workspaceSession?.permissions.administer
       ? `<button type="button" data-email-test="${campaign.id}">Test first</button><button type="button" data-email-launch="${campaign.id}">Send to ${formatNumber(center.counts.subscribed)}</button>`
@@ -1761,7 +1770,7 @@ function renderMarketingEmailCenter(): void {
         ? `<button type="button" data-email-cancel="${campaign.id}">Cancel queue</button>` : "";
     const statusLabel: Record<string, string> = { draft: "Draft", queued: "Waiting", sending: "Sending", completed: "Sent", cancelled: "Cancelled" };
     return `<article class="email-campaign-row"><span>✦</span><div class="email-campaign-copy"><strong>${escapeHtml(campaign.subject)}</strong><small>${progress} · ${relativeDate(campaign.createdAt)}</small></div><i class="email-state email-state--${escapeHtml(campaign.status)}">${escapeHtml(statusLabel[campaign.status] || campaign.status)}</i><footer>${actions}</footer></article>`;
-  }).join("") : '<p class="empty-state">Choose a template to prepare the first campaign. Nothing is sent while it remains a draft.</p>';
+  }).join("") : `<p class="empty-state">${marketingEmailCampaignFilter === "sent" ? "No sent campaigns yet." : marketingEmailCampaignFilter === "draft" ? "No drafts waiting for review." : "No campaigns created yet."}</p>`;
 
   emailContactList.innerHTML = center.contacts.length ? center.contacts.map((contact) => `<article class="email-contact-row"><span class="email-contact-avatar">${escapeHtml(contact.displayName.slice(0, 2).toUpperCase())}</span><div class="email-contact-copy"><strong>${escapeHtml(contact.displayName)}</strong><small>${escapeHtml(contact.email)} · ${escapeHtml(contact.source === "woocommerce" ? "WordPress" : contact.source)}${contact.tags.length ? ` · ${escapeHtml(contact.tags.join(", "))}` : ""}</small></div><em data-status="${contact.status}">${escapeHtml(contact.status === "subscribed" ? "ready" : contact.status === "unconfirmed" ? "protected" : contact.status)}</em></article>`).join("") : '<p class="empty-state">No contacts match this view.</p>';
 
@@ -7929,6 +7938,21 @@ monitorSpecificDateInput.addEventListener("change", () =>
   selectSpecificDate(monitorSpecificDateInput),
 );
 
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-marketing-mode]")) {
+  button.addEventListener("click", () => {
+    const mode = button.dataset.marketingMode;
+    if (mode !== "email" && mode !== "activity") return;
+    for (const option of document.querySelectorAll<HTMLButtonElement>("[data-marketing-mode]")) {
+      const active = option === button;
+      option.classList.toggle("is-active", active);
+      option.setAttribute("aria-pressed", String(active));
+    }
+    for (const panel of document.querySelectorAll<HTMLElement>("[data-marketing-mode-panel]")) {
+      panel.hidden = panel.dataset.marketingModePanel !== mode;
+    }
+  });
+}
+
 for (const button of document.querySelectorAll<HTMLButtonElement>("[data-marketing-cart-filter]")) {
   button.addEventListener("click", () => {
     const filter = button.dataset.marketingCartFilter;
@@ -7943,6 +7967,17 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-marketi
 }
 
 requiredElement<HTMLButtonElement>("#email-new-campaign").addEventListener("click", () => openEmailComposer());
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-email-campaign-filter]")) {
+  button.addEventListener("click", () => {
+    const filter = button.dataset.emailCampaignFilter;
+    if (filter !== "all" && filter !== "draft" && filter !== "sent") return;
+    marketingEmailCampaignFilter = filter;
+    for (const item of document.querySelectorAll<HTMLButtonElement>("[data-email-campaign-filter]")) {
+      item.classList.toggle("is-active", item === button);
+    }
+    renderMarketingEmailCenter();
+  });
+}
 emailTemplateStrip.addEventListener("click", (event) => {
   const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-email-template]") : null;
   if (button?.dataset.emailTemplate) openEmailComposer(button.dataset.emailTemplate);
