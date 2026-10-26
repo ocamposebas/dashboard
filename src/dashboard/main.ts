@@ -1847,7 +1847,14 @@ function renderEmailSelectedProducts(): void {
   requiredElement<HTMLElement>("#email-selected-products").innerHTML = marketingEmailSelectedProducts.length
     ? marketingEmailSelectedProducts.map((product) => `<article><span>${product.imageUrl ? `<img src="${escapeHtml(product.imageUrl)}" alt="" loading="lazy" />` : "P1"}</span><div><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(formatCurrency(product.price))}${product.sku ? ` · ${escapeHtml(product.sku)}` : ""}</small></div><button type="button" data-email-remove-product="${product.productId}" aria-label="Remove ${escapeHtml(product.name)}">×</button></article>`).join("")
     : "<p>No products added.</p>";
-  requiredElement<HTMLElement>("#email-preview-products").innerHTML = marketingEmailSelectedProducts.map((product) => `<article>${product.imageUrl ? `<img src="${escapeHtml(product.imageUrl)}" alt="" />` : ""}<div><strong>${escapeHtml(product.name)}</strong><span>${escapeHtml(formatCurrency(product.price))}</span><small>VIEW PRODUCT →</small></div></article>`).join("");
+  const previewSection = requiredElement<HTMLElement>("#email-preview-product-section");
+  previewSection.hidden = marketingEmailSelectedProducts.length === 0;
+  requiredElement<HTMLElement>("#email-preview-products").innerHTML = marketingEmailSelectedProducts.map((product, index) => {
+    const price = product.regularPrice > product.price && product.price > 0
+      ? `<span><del>${escapeHtml(formatCurrency(product.regularPrice))}</del><b>${escapeHtml(formatCurrency(product.price))}</b></span>`
+      : `<span><b>${escapeHtml(formatCurrency(product.price))}</b></span>`;
+    return `<article${index === 0 ? ' class="is-featured"' : ""}><figure>${product.imageUrl ? `<img src="${escapeHtml(product.imageUrl)}" alt="" />` : "P1"}</figure><div><small>${escapeHtml(product.sku || "PHASE ONE RESEARCH")}</small><strong>${escapeHtml(product.name)}</strong>${price}<em>VIEW PRODUCT <i>→</i></em></div></article>`;
+  }).join("");
   renderEmailProductSelector();
 }
 
@@ -1859,7 +1866,8 @@ function updateEmailPreview(): void {
   requiredElement<HTMLInputElement>("#email-campaign-name").value = subject
     ? `${subject} · ${new Date().toLocaleDateString()}`
     : `Phase One email · ${new Date().toLocaleDateString()}`;
-  requiredElement<HTMLElement>("#email-preview-preheader").textContent = requiredElement<HTMLInputElement>("#email-preheader").value;
+  const template = marketingEmailCenter?.templates.find((item) => item.key === requiredElement<HTMLSelectElement>("#email-template-select").value);
+  requiredElement<HTMLElement>("#email-preview-shell").style.setProperty("--email-accent", template?.accent || "#70def2");
   requiredElement<HTMLElement>("#email-preview-heading").textContent = requiredElement<HTMLInputElement>("#email-heading").value;
   requiredElement<HTMLElement>("#email-preview-message").textContent = message || "Your campaign message will appear here.";
   const button = requiredElement<HTMLElement>("#email-preview-button");
