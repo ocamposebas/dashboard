@@ -6,7 +6,12 @@ import "./clean-ui.css";
 import { initAffiliateAdmin, loadAffiliateAdmin } from "./affiliates-admin";
 import type { AffiliateCommissionSummary } from "../shared/affiliates";
 import { calculateProductProfitability } from "../shared/productProfitability";
-import { monthToDateStart, summarizeCompleteMonthToDate } from "../shared/monthlyFinance";
+import {
+  monthToDateStart,
+  summarizeCompleteMonthToDate,
+  type MonthlyFinanceOrder,
+  type MonthlyFinanceSummary,
+} from "../shared/monthlyFinance";
 import { suggestedCoaVariationId } from "../shared/coaCatalogMapping";
 import { productSkuBase, productVariantSku } from "../shared/productSku";
 import {
@@ -734,6 +739,12 @@ interface InsuranceFundPayload {
   syncedAt: string;
   refreshing?: boolean;
 }
+interface InsuranceFundPreview {
+  currency: string;
+  totals: InsuranceFundPayload["totals"];
+  syncedAt: string;
+  refreshing?: boolean;
+}
 interface SeoRow { key: string; clicks: number; impressions: number; ctr: number; position: number; }
 interface SeoReport {
   connected: true; siteUrl: string; period: { start: string; end: string; days: number };
@@ -984,10 +995,13 @@ type SalesInsightRange = "today" | "week" | "month";
 let salesInsightRange: SalesInsightRange = "today";
 let salesInsightLoading = false;
 let salesInsightComplete: { range: SalesInsightRange; orders: CommerceOrder[] } | undefined;
-let monthlyFinanceOrders: CommerceOrder[] | undefined;
+let monthlyFinanceOrders: Array<MonthlyFinanceOrder & { id: number }> | undefined;
+let monthlyFinancePreview: MonthlyFinanceSummary | undefined;
 let monthlyFinanceLoading = false;
 let insuranceFund: InsuranceFundPayload | undefined;
+let insuranceFundPreview: InsuranceFundPreview | undefined;
 let insuranceFundLoading = false;
+let insuranceFundSummaryLoading = false;
 let insuranceFundLoadedAt = 0;
 let insuranceFundRefreshChecks = 0;
 let monthlyFinanceUpdatedAt = 0;
@@ -2165,8 +2179,94 @@ function monthToDateLabel(now = new Date()): string {
   return `${month} 1–${now.getDate()}`;
 }
 
-function renderOverviewFinancials(): void {
+const MONTHLY_FINANCE_PREVIEW_KEY = "phaseone:stats:monthly-finance:v1";
+const INSURANCE_FUND_PREVIEW_KEY = "phaseone:stats:insurance-fund:v1";
+
+function currentMonthKey(now = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function validFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function validMonthlyFinanceSummary(value: unknown): value is MonthlyFinanceSummary {
+  if (!isRecord(value) || !Array.isArray(value.paymentMethods)) return false;
+  if (
+    !validFiniteNumber(value.orders) || !validFiniteNumber(value.revenue) ||
+    !validFiniteNumber(value.refunds) || !validFiniteNumber(value.coverage) ||
+    typeof value.currency !== "string"
+  ) return false;
+  if (value.profit !== null && !validFiniteNumber(value.profit)) return false;
+  if (value.costs !== null && !validFiniteNumber(value.costs)) return false;
+  if (value.margin !== null && !validFiniteNumber(value.margin)) return false;
+  const kinds = new Set(["zelle", "debit", "card", "wallet", "bank", "cash", "other"]);
+  return value.paymentMethods.every((method) =>
+    isRecord(method) && kinds.has(String(method.kind)) && typeof method.label === "string" &&
+    validFiniteNumber(method.orders) && validFiniteNumber(method.revenue),
+  );
+}
+
+function validInsuranceFundPreview(value: unknown): value is InsuranceFundPreview {
+  if (!isRecord(value) || !isRecord(value.totals)) return false;
+  return typeof value.currency === "string" && typeof value.syncedAt === "string" &&
+    validFiniteNumber(value.totals.collected) && validFiniteNumber(value.totals.claims) &&
+    validFiniteNumber(value.totals.available) && validFiniteNumber(value.totals.protectedOrders) &&
+    validFiniteNumber(value.totals.lostOrders);
+}
+
+function hydrateFastStatisticPreviews(): void {
+  try {
+    const rawFinance = localStorage.getItem(MONTHLY_FINANCE_PREVIEW_KEY);
+    const cachedFinance: unknown = rawFinance ? JSON.parse(rawFinance) : null;
+    if (
+      isRecord(cachedFinance) && cachedFinance.month === currentMonthKey() &&
+      validMonthlyFinanceSummary(cachedFinance.summary)
+    ) monthlyFinancePreview = cachedFinance.summary;
+  } catch {
+    localStorage.removeItem(MONTHLY_FINANCE_PREVIEW_KEY);
+  }
+  try {
+    const rawInsurance = localStorage.getItem(INSURANCE_FUND_PREVIEW_KEY);
+    const cachedInsurance: unknown = rawInsurance ? JSON.parse(rawInsurance) : null;
+    if (isRecord(cachedInsurance) && validInsuranceFundPreview(cachedInsurance.preview)) {
+      insuranceFundPreview = cachedInsurance.preview;
+    }
+  } catch {
+    localStorage.removeItem(INSURANCE_FUND_PREVIEW_KEY);
+  }
+}
+
+function persistMonthlyFinancePreview(): void {
   const summary = summarizeCompleteMonthToDate(monthlyFinanceOrders);
+  if (!summary) return;
+  monthlyFinancePreview = summary;
+  try {
+    localStorage.setItem(MONTHLY_FINANCE_PREVIEW_KEY, JSON.stringify({
+      month: currentMonthKey(),
+      updatedAt: monthlyFinanceUpdatedAt || Date.now(),
+      summary,
+    }));
+  } catch {
+    // Rendering the verified totals must never depend on browser storage.
+  }
+}
+
+function persistInsuranceFundPreview(preview: InsuranceFundPreview): void {
+  insuranceFundPreview = preview;
+  try {
+    localStorage.setItem(INSURANCE_FUND_PREVIEW_KEY, JSON.stringify({
+      updatedAt: Date.now(),
+      preview,
+    }));
+  } catch {
+    // The live request remains authoritative when browser storage is unavailable.
+  }
+}
+
+function renderOverviewFinancials(): void {
+  const authoritativeSummary = summarizeCompleteMonthToDate(monthlyFinanceOrders);
+  const summary = authoritativeSummary || monthlyFinancePreview || null;
   if (!summary) {
     requiredElement<HTMLElement>("#finance-period-label").textContent = monthToDateLabel();
     requiredElement<HTMLElement>("#finance-revenue").textContent = "—";
@@ -2220,12 +2320,16 @@ function renderOverviewFinancials(): void {
     : '<span class="payment-method-loading">No paid orders have been recorded this month.</span>';
   const dataStatus = requiredElement<HTMLElement>("#finance-data-status");
   dataStatus.textContent = monthlyFinanceLoading
-    ? monthlyFinanceOrders
+    ? authoritativeSummary
       ? "Verified totals ready · checking for new orders…"
-      : "Loading verified month totals…"
-    : monthlyFinanceOrders
+      : monthlyFinancePreview
+        ? "Last verified totals ready · updating quietly…"
+        : "Loading verified month totals…"
+    : authoritativeSummary
       ? `${monthlyFinanceRefreshing ? "Verified totals · updating in background" : "Complete month"} · updated ${new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(monthlyFinanceUpdatedAt))}`
-      : "Fast preview · loading complete month";
+      : monthlyFinancePreview
+        ? "Last verified totals · reconnecting live data"
+        : "Fast preview · loading complete month";
 }
 
 async function loadMonthToDateFinancials(force = false): Promise<void> {
@@ -2237,7 +2341,7 @@ async function loadMonthToDateFinancials(force = false): Promise<void> {
   try {
     const after = new Date(monthToDateStart().getTime() - 1_000).toISOString();
     const before = new Date(Date.now() + 60_000).toISOString();
-    const response = await fetch(`/api/commerce/sales-report?after=${encodeURIComponent(after)}&before=${encodeURIComponent(before)}${force ? "&fresh=1" : ""}`, {
+    const response = await fetch(`/api/commerce/sales-report?after=${encodeURIComponent(after)}&before=${encodeURIComponent(before)}&compact=1${force ? "&fresh=1" : ""}`, {
       credentials: "same-origin",
       cache: "no-store",
       headers: { Accept: "application/json" },
@@ -2246,11 +2350,12 @@ async function loadMonthToDateFinancials(force = false): Promise<void> {
     if (!response.ok || !isRecord(payload) || !Array.isArray(payload.orders)) {
       throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The monthly totals are unavailable");
     }
-    monthlyFinanceOrders = payload.orders as CommerceOrder[];
+    monthlyFinanceOrders = payload.orders as Array<MonthlyFinanceOrder & { id: number }>;
     monthlyFinanceUpdatedAt = typeof payload.generatedAt === "string" && Number.isFinite(Date.parse(payload.generatedAt))
       ? Date.parse(payload.generatedAt)
       : Date.now();
     monthlyFinanceRefreshing = payload.refreshing === true;
+    persistMonthlyFinancePreview();
     if (monthlyFinanceRefreshing && monthlyFinanceRefreshChecks < 3) {
       monthlyFinanceRefreshChecks += 1;
       window.setTimeout(() => void loadMonthToDateFinancials(false), 4_000);
@@ -2276,6 +2381,7 @@ function reconcileMonthToDateOrders(recentOrders: CommerceOrder[]): void {
   }
   monthlyFinanceOrders = [...merged.values()];
   monthlyFinanceUpdatedAt = Date.now();
+  persistMonthlyFinancePreview();
 }
 
 function visibleOrders(): CommerceOrder[] {
@@ -2649,15 +2755,18 @@ function insuranceLedgerRow(input: { label: string; meta: string; date: string |
 
 function renderInsuranceFund(): void {
   const data = insuranceFund;
-  const currency = data?.currency || "USD";
-  requiredElement<HTMLElement>("#insurance-collected").textContent = data ? formatCurrency(data.totals.collected, currency) : "—";
-  requiredElement<HTMLElement>("#insurance-claims").textContent = data ? formatCurrency(data.totals.claims, currency) : "—";
-  requiredElement<HTMLElement>("#insurance-available").textContent = data ? formatCurrency(data.totals.available, currency) : "—";
-  requiredElement<HTMLElement>("#insurance-order-count").textContent = data ? formatNumber(data.totals.protectedOrders) : "—";
-  requiredElement<HTMLElement>("#insurance-claim-count").textContent = data ? `${formatNumber(data.totals.lostOrders)} active lost-order claim${data.totals.lostOrders === 1 ? "" : "s"}` : "No claims recorded";
+  const visible = data || insuranceFundPreview;
+  const currency = visible?.currency || "USD";
+  requiredElement<HTMLElement>("#insurance-collected").textContent = visible ? formatCurrency(visible.totals.collected, currency) : "—";
+  requiredElement<HTMLElement>("#insurance-claims").textContent = visible ? formatCurrency(visible.totals.claims, currency) : "—";
+  requiredElement<HTMLElement>("#insurance-available").textContent = visible ? formatCurrency(visible.totals.available, currency) : "—";
+  requiredElement<HTMLElement>("#insurance-order-count").textContent = visible ? formatNumber(visible.totals.protectedOrders) : "—";
+  requiredElement<HTMLElement>("#insurance-claim-count").textContent = visible ? `${formatNumber(visible.totals.lostOrders)} active lost-order claim${visible.totals.lostOrders === 1 ? "" : "s"}` : "No claims recorded";
   requiredElement<HTMLElement>("#insurance-sync-state").textContent = data
     ? `${data.refreshing ? "Updating quietly · " : ""}Updated ${relativeDate(data.syncedAt)}`
-    : "Not synchronized";
+    : insuranceFundPreview
+      ? "Last verified totals ready · loading live activity…"
+      : "Not synchronized";
   const contributions = requiredElement<HTMLElement>("#insurance-contributions");
   contributions.innerHTML = data?.contributions.length
     ? data.contributions.slice(0, 100).map((item) => insuranceLedgerRow({
@@ -2667,7 +2776,9 @@ function renderInsuranceFund(): void {
       amount: item.amount,
       currency: item.currency,
     })).join("")
-    : '<div class="operations-empty"><strong>No protection money found</strong><span>Refresh after protected orders have been paid.</span></div>';
+    : insuranceFundPreview
+      ? '<div class="operations-empty"><strong>Loading protected orders…</strong><span>The verified reserve totals are already available above.</span></div>'
+      : '<div class="operations-empty"><strong>No protection money found</strong><span>Refresh after protected orders have been paid.</span></div>';
   const claims = requiredElement<HTMLElement>("#insurance-claims-ledger");
   claims.innerHTML = data?.claims.length
     ? data.claims.map((item) => insuranceLedgerRow({
@@ -2678,10 +2789,32 @@ function renderInsuranceFund(): void {
       currency: item.currency,
       negative: item.status === "active",
     })).join("")
-    : '<div class="operations-empty"><strong>No claims recorded</strong><span>The full collected reserve remains available.</span></div>';
+    : insuranceFundPreview
+      ? '<div class="operations-empty"><strong>Loading claims…</strong><span>Current reserve totals remain visible while activity arrives.</span></div>'
+      : '<div class="operations-empty"><strong>No claims recorded</strong><span>The full collected reserve remains available.</span></div>';
   const permission = requiredElement<HTMLElement>("#insurance-claim-permission");
   permission.textContent = workspaceSession?.permissions.administer ? "Claims enabled" : "View only";
   permission.classList.toggle("integration-state--connected", Boolean(workspaceSession?.permissions.administer));
+}
+
+async function loadInsuranceFundSummary(): Promise<void> {
+  if (insuranceFundSummaryLoading || insuranceFund) return;
+  insuranceFundSummaryLoading = true;
+  try {
+    const response = await fetch("/api/insurance-fund?summary=1", {
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    const payload: unknown = await response.json();
+    if (!response.ok || !validInsuranceFundPreview(payload)) return;
+    persistInsuranceFundPreview(payload);
+    renderInsuranceFund();
+  } catch {
+    // The complete background load remains the authoritative fallback.
+  } finally {
+    insuranceFundSummaryLoading = false;
+  }
 }
 
 async function loadInsuranceFund(force = false, silent = false): Promise<void> {
@@ -2704,6 +2837,7 @@ async function loadInsuranceFund(force = false, silent = false): Promise<void> {
       throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The insurance reserve could not be loaded");
     }
     insuranceFund = payload as unknown as InsuranceFundPayload;
+    persistInsuranceFundPreview(insuranceFund);
     insuranceFundLoadedAt = Date.now();
     renderInsuranceFund();
     if (insuranceFund.refreshing && insuranceFundRefreshChecks < 3) {
@@ -10656,6 +10790,9 @@ document.addEventListener("keydown", (event) => {
 const initialView = location.hash.slice(1);
 loadSavedSettings();
 initAffiliateAdmin();
+hydrateFastStatisticPreviews();
+renderOverviewFinancials();
+renderInsuranceFund();
 navigate(initialView === "analytics" ? "monitor" : viewNames[initialView] ? initialView : "overview");
 window.addEventListener("hashchange", () => {
   const requestedView = location.hash.slice(1);
@@ -10673,7 +10810,7 @@ void loadExtensions();
 void loadIndependentSiteControls();
 void loadCommerce().then(() => void loadLiveOrders(true));
 void loadMonthToDateFinancials(false);
-window.setTimeout(() => void loadInsuranceFund(false, true), 350);
+void loadInsuranceFundSummary().finally(() => void loadInsuranceFund(false, true));
 window.setInterval(() => {
   if (!document.hidden) void loadLiveOrders();
 }, 15_000);

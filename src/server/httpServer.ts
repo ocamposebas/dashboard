@@ -53,6 +53,7 @@ import {
   exactAutomaticCoaVariation,
 } from "../shared/coaAutomaticPublishing.js";
 import { productVariantSku } from "../shared/productSku.js";
+import type { MonthlyFinanceOrder } from "../shared/monthlyFinance.js";
 import { fulfillmentAccessForRole } from "./fulfillmentAccess.js";
 import {
   FulfillmentRepository,
@@ -616,7 +617,7 @@ export function createMonitorServer(
     return insuranceOrdersRefresh;
   }
 
-  async function insuranceFundPayload(force = false) {
+  async function insuranceFundPayload(force = false, summaryOnly = false) {
     if (!commerce || !insuranceFund) throw new Error("Insurance fund services are not configured");
     await restoreInsuranceOrdersCache();
     const stale = !insuranceOrdersCache || Date.now() - insuranceOrdersCache.updatedAt > 300_000;
@@ -654,7 +655,7 @@ export function createMonitorServer(
     const activeClaims = claims.filter((claim) => claim.status === "active");
     const collected = contributions.reduce((sum, item) => sum + item.amount, 0);
     const paidClaims = activeClaims.reduce((sum, item) => sum + item.amount, 0);
-    return {
+    const payload = {
       currency: contributions[0]?.currency || claims[0]?.currency || "USD",
       totals: {
         collected,
@@ -668,6 +669,9 @@ export function createMonitorServer(
       syncedAt: new Date(insuranceOrdersCache.updatedAt).toISOString(),
       refreshing: refreshingInBackground,
     };
+    return summaryOnly
+      ? { currency: payload.currency, totals: payload.totals, syncedAt: payload.syncedAt, refreshing: payload.refreshing }
+      : payload;
   }
 
   async function automaticallyPublishExactCoas(
@@ -3861,7 +3865,10 @@ export function createMonitorServer(
           return;
         }
         try {
-          json(response, 200, await insuranceFundPayload(url.searchParams.get("refresh") === "1"));
+          json(response, 200, await insuranceFundPayload(
+            url.searchParams.get("refresh") === "1",
+            url.searchParams.get("summary") === "1",
+          ));
         } catch (error: unknown) {
           console.error("Insurance fund load failed", error);
           json(response, 502, { error: "Insurance collections could not be synchronized" });
@@ -4006,8 +4013,27 @@ export function createMonitorServer(
         const forceRefresh = url.searchParams.get("fresh") === "1";
         try {
           const report = await cachedSalesReport(after, before, forceRefresh);
+          const compact = url.searchParams.get("compact") === "1";
+          const orders = compact
+            ? report.orders.map((order) => {
+              const profitable = order as CommerceOrder & { profitability: MonthlyFinanceOrder["profitability"] };
+              return {
+                id: profitable.id,
+                status: profitable.status,
+                currency: profitable.currency,
+                total: profitable.total,
+                refundedTotal: profitable.refundedTotal,
+                paymentMethod: profitable.paymentMethod,
+                paymentMethodId: profitable.paymentMethodId,
+                paidAt: profitable.paidAt,
+                createdAt: profitable.createdAt,
+                repeatOperations: { operationalRepeat: profitable.repeatOperations.operationalRepeat },
+                profitability: profitable.profitability,
+              } satisfies MonthlyFinanceOrder & { id: number };
+            })
+            : report.orders;
           json(response, 200, {
-            orders: report.orders,
+            orders,
             generatedAt: new Date(report.updatedAt).toISOString(),
             cacheAgeSeconds: Math.max(0, Math.floor((Date.now() - report.updatedAt) / 1_000)),
             refreshing: report.stale,
