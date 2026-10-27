@@ -7205,6 +7205,65 @@ function renderPromoEditorMode(): void {
   for (const field of document.querySelectorAll<HTMLElement>("[data-general-url]")) {
     field.hidden = selectedPromoType === "product";
   }
+  updateSiteControlsQuickSummary();
+}
+
+function promoDurationFromInputs(): number {
+  const days = Number(requiredElement<HTMLInputElement>("#promo-duration-days").value) || 0;
+  const hours = Number(requiredElement<HTMLInputElement>("#promo-duration-hours").value) || 0;
+  const minutes = Number(requiredElement<HTMLInputElement>("#promo-duration-minutes").value) || 0;
+  return Math.max(1, days * 1_440 + hours * 60 + minutes);
+}
+
+function readablePromoDuration(totalMinutes: number): string {
+  const days = Math.floor(totalMinutes / 1_440);
+  const hours = Math.floor((totalMinutes % 1_440) / 60);
+  const minutes = totalMinutes % 60;
+  return [days ? `${days} day${days === 1 ? "" : "s"}` : "", hours ? `${hours} hour${hours === 1 ? "" : "s"}` : "", minutes ? `${minutes} min` : ""]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function syncPromoDurationControls(draftChanged = false): void {
+  const totalMinutes = promoDurationFromInputs();
+  const matchedPreset = [1_440, 4_320, 10_080].includes(totalMinutes) ? String(totalMinutes) : "custom";
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-promo-duration]")) {
+    const active = button.dataset.promoDuration === matchedPreset;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  requiredElement<HTMLElement>("#promo-custom-time").hidden = matchedPreset !== "custom";
+  if (draftChanged) {
+    requiredElement<HTMLElement>("#promo-ends-at").textContent = `Runs for ${readablePromoDuration(totalMinutes)} after publishing`;
+  }
+}
+
+function updateSiteControlsQuickSummary(): void {
+  const maintenanceEnabled = requiredElement<HTMLInputElement>("#maintenance-enabled").checked;
+  const promoEnabled = requiredElement<HTMLInputElement>("#promo-enabled").checked;
+  const storeSummary = requiredElement<HTMLElement>("#site-controls-store-summary");
+  const storeDetail = requiredElement<HTMLElement>("#site-controls-store-detail");
+  const promoSummary = requiredElement<HTMLElement>("#site-controls-promo-summary");
+  const promoDetail = requiredElement<HTMLElement>("#site-controls-promo-detail");
+  storeSummary.textContent = maintenanceEnabled ? "Maintenance screen active" : "Website online";
+  storeDetail.textContent = maintenanceEnabled
+    ? "Customers see the maintenance message instead of the catalog."
+    : "Customers can browse the catalog and place orders.";
+  if (!promoEnabled) {
+    promoSummary.textContent = "No promotion live";
+    promoDetail.textContent = "The storefront is using normal catalog content and prices.";
+    return;
+  }
+  if (selectedPromoType === "product") {
+    const product = siteControlProduct();
+    promoSummary.textContent = product ? `${product.name} sale` : "Product sale needs a product";
+    promoDetail.textContent = product
+      ? "The selected price will apply in the product, cart and checkout."
+      : "Choose one product before publishing.";
+    return;
+  }
+  promoSummary.textContent = selectedPromoType === "simple_gifts" ? "Store message ready" : "Announcement ready";
+  promoDetail.textContent = "The banner will appear when these changes are published.";
 }
 
 function siteControlProduct(): CommerceProduct | undefined {
@@ -7276,6 +7335,7 @@ function updatePromoProductPreview(): void {
   const media = requiredElement<HTMLElement>("#featured-promo-media");
   const image = product?.thumbnailUrl || product?.imageUrl || matchingLive?.image || "";
   media.innerHTML = image ? `<img src="${escapeHtml(image)}" alt="" loading="lazy" decoding="async" />` : "<span>P1</span>";
+  updateSiteControlsQuickSummary();
 }
 
 function updateMaintenancePreview(): void {
@@ -7283,9 +7343,12 @@ function updateMaintenancePreview(): void {
   const title = requiredElement<HTMLInputElement>("#maintenance-title").value.trim();
   const message = requiredElement<HTMLTextAreaElement>("#maintenance-message").value.trim();
   requiredElement<HTMLElement>("#maintenance-preview-title").textContent = title || "Precision work in progress.";
-  requiredElement<HTMLElement>("#maintenance-preview-message").textContent = message || "The storefront is available.";
+  requiredElement<HTMLElement>("#maintenance-preview-message").textContent = enabled
+    ? message || "Customers will see the maintenance page."
+    : "Customers can browse and place orders normally.";
   requiredElement<HTMLElement>("#maintenance-preview-status").textContent = enabled ? "Maintenance screen active" : "Website online";
   requiredElement<HTMLElement>("#maintenance-state").textContent = enabled ? "ACTIVE" : "STANDBY";
+  updateSiteControlsQuickSummary();
 }
 
 function updateSiteControlsDraftState(): void {
@@ -7297,12 +7360,13 @@ function updateSiteControlsDraftState(): void {
     : "Unsaved changes";
   indicator.querySelector("small")!.textContent = siteControlsDraft.remoteChanged
     ? "The published version changed, but your entries were not replaced. Save to apply your draft or reload to discard it."
-    : "Your entries are protected from automatic refreshes.";
+    : "Review and publish when ready.";
 }
 
 function markSiteControlsDirty(): void {
   siteControlsDraft = markSiteControlsDraftDirty(siteControlsDraft);
   updateSiteControlsDraftState();
+  updateSiteControlsQuickSummary();
 }
 
 function renderSiteControls(options: { force?: boolean } = {}): void {
@@ -7310,7 +7374,7 @@ function renderSiteControls(options: { force?: boolean } = {}): void {
   const save = requiredElement<HTMLButtonElement>("#site-controls-save");
   const writable = Boolean(workspaceSession?.permissions.operate);
   save.disabled = !writable || !controls;
-  save.textContent = writable ? "Save storefront controls" : "Read-only access";
+  save.textContent = writable ? "Publish changes" : "Read-only access";
   requiredElement<HTMLElement>("#site-controls-write-status").textContent = writable
     ? "Independent control state · product campaigns synchronize the real checkout price"
     : "Your role can review controls but cannot publish changes.";
@@ -7342,6 +7406,7 @@ function renderSiteControls(options: { force?: boolean } = {}): void {
   requiredElement<HTMLInputElement>("#promo-duration-hours").value = String(Math.floor((duration % 1_440) / 60));
   requiredElement<HTMLInputElement>("#promo-duration-minutes").value = String(duration % 60);
   requiredElement<HTMLInputElement>("#promo-restart").checked = false;
+  syncPromoDurationControls();
   renderPromoProductOptions(controls.promo.product?.id || 0);
   requiredElement<HTMLInputElement>("#promo-sale-price-input").value = controls.promo.product?.promoPrice ? String(controls.promo.product.promoPrice) : "";
   renderPromoEditorMode();
@@ -7350,8 +7415,10 @@ function renderSiteControls(options: { force?: boolean } = {}): void {
   requiredElement<HTMLInputElement>("#maintenance-title").value = controls.maintenance.title;
   requiredElement<HTMLTextAreaElement>("#maintenance-message").value = controls.maintenance.message;
   requiredElement<HTMLInputElement>("#maintenance-email").value = controls.maintenance.supportEmail;
+  requiredElement<HTMLDetailsElement>("#maintenance-settings").open = controls.maintenance.enabled;
   updateMaintenancePreview();
   updatePromoCountdown();
+  updateSiteControlsQuickSummary();
 }
 
 function updatePromoCountdown(): void {
@@ -7507,7 +7574,7 @@ async function saveSiteControls(): Promise<void> {
     }
     showToast("Unable to publish", error instanceof Error ? error.message : "Check the protected connection and try again.", false);
   } finally {
-    save.textContent = workspaceSession?.permissions.operate ? "Save storefront controls" : "Read-only access";
+    save.textContent = workspaceSession?.permissions.operate ? "Publish changes" : "Read-only access";
     save.disabled = !workspaceSession?.permissions.operate;
   }
 }
@@ -10094,6 +10161,7 @@ requiredElement<HTMLElement>("[data-view-panel='site-controls']").addEventListen
 });
 requiredElement<HTMLInputElement>("#promo-enabled").addEventListener("change", (event) => {
   requiredElement<HTMLElement>("#promo-state").textContent = (event.currentTarget as HTMLInputElement).checked ? "READY" : "OFF";
+  updateSiteControlsQuickSummary();
 });
 requiredElement<HTMLSelectElement>("#promo-product-select").addEventListener("change", () => {
   const product = siteControlProduct();
@@ -10104,12 +10172,41 @@ requiredElement<HTMLSelectElement>("#promo-product-select").addEventListener("ch
   updatePromoProductPreview();
 });
 requiredElement<HTMLInputElement>("#promo-sale-price-input").addEventListener("input", updatePromoProductPreview);
-requiredElement<HTMLInputElement>("#maintenance-enabled").addEventListener("change", updateMaintenancePreview);
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-promo-duration]")) {
+  button.addEventListener("click", () => {
+    const value = button.dataset.promoDuration || "custom";
+    if (value === "custom") {
+      requiredElement<HTMLElement>("#promo-custom-time").hidden = false;
+      for (const option of document.querySelectorAll<HTMLButtonElement>("[data-promo-duration]")) {
+        option.classList.toggle("is-active", option === button);
+        option.setAttribute("aria-pressed", String(option === button));
+      }
+    } else {
+      const totalMinutes = Number(value);
+      requiredElement<HTMLInputElement>("#promo-duration-days").value = String(Math.floor(totalMinutes / 1_440));
+      requiredElement<HTMLInputElement>("#promo-duration-hours").value = String(Math.floor((totalMinutes % 1_440) / 60));
+      requiredElement<HTMLInputElement>("#promo-duration-minutes").value = String(totalMinutes % 60);
+      requiredElement<HTMLInputElement>("#promo-restart").checked = true;
+      syncPromoDurationControls(true);
+    }
+    markSiteControlsDirty();
+  });
+}
+for (const input of document.querySelectorAll<HTMLInputElement>("#promo-custom-time input")) {
+  input.addEventListener("input", () => {
+    requiredElement<HTMLInputElement>("#promo-restart").checked = true;
+    syncPromoDurationControls(true);
+  });
+}
+requiredElement<HTMLInputElement>("#maintenance-enabled").addEventListener("change", (event) => {
+  requiredElement<HTMLDetailsElement>("#maintenance-settings").open = (event.currentTarget as HTMLInputElement).checked;
+  updateMaintenancePreview();
+});
 requiredElement<HTMLInputElement>("#maintenance-title").addEventListener("input", updateMaintenancePreview);
 requiredElement<HTMLTextAreaElement>("#maintenance-message").addEventListener("input", updateMaintenancePreview);
 requiredElement<HTMLButtonElement>("#site-controls-save").addEventListener("click", () => void saveSiteControls());
 requiredElement<HTMLButtonElement>("#site-controls-refresh").addEventListener("click", () => {
-  void loadIndependentSiteControls(true).then(() => showToast("Control state reloaded", "Site Controls now shows the latest independent storefront decision."));
+  void loadIndependentSiteControls(true).then(() => showToast("Draft discarded", "The latest published website controls are back on screen."));
 });
 function showLoyaltySection(section: string): void {
   const next = ["overview", "settings", "customers", "history"].includes(section) ? section : "overview";
