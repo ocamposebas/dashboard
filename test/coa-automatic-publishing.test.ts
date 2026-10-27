@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   canAutomaticallyPublishCoa,
+  exactLegacyCoaCatalogRepairs,
   exactAutomaticCoaProduct,
   exactAutomaticCoaVariation,
 } from "../src/shared/coaAutomaticPublishing.js";
@@ -95,4 +96,103 @@ test("an already available current lot is repaired when its catalog mapping is m
     currentShippingLot: true,
     intakeAnalysis: null,
   }), true);
+});
+
+test("legacy variable COAs are separated by exact strength and receive independent current lots", () => {
+  const legacy10 = {
+    ...coa,
+    id: "kpv-10",
+    source: "wordpress_import",
+    revision: 1,
+    status: "Available",
+    coaNumber: "KPV-10",
+    productName: "KPV",
+    familyName: "KPV",
+    compound: "KPV",
+    strength: "10mg",
+    matchedProductId: 539,
+    matchedVariationId: 0,
+    skus: ["KPV"],
+    currentShippingLot: true,
+  } as unknown as CommerceCoa & { source: string; revision: number };
+  const legacy30 = {
+    ...legacy10,
+    id: "kpv-30",
+    coaNumber: "KPV-30",
+    strength: "30 mg",
+    currentShippingLot: false,
+  };
+  const kpv = { ...product, id: 539, name: "KPV", sku: "KPV", variationIds: [2846, 2847] };
+  const kpvVariations = [
+    { id: 2846, sku: "KPV-10-MG", attributes: [{ id: 1, name: "MG", option: "10 MG" }] },
+    { id: 2847, sku: "KPV-30-MG", attributes: [{ id: 1, name: "MG", option: "30 MG" }] },
+  ] as CommerceVariation[];
+
+  const repairs = exactLegacyCoaCatalogRepairs(
+    [legacy10, legacy30],
+    [kpv],
+    new Map([[539, kpvVariations]]),
+  );
+
+  assert.deepEqual(repairs.map((repair) => ({
+    id: repair.coa.id,
+    variationId: repair.variationId,
+    current: repair.currentShippingLot,
+    skus: repair.skus,
+  })), [
+    { id: "kpv-10", variationId: 2846, current: true, skus: ["KPV", "KPV-10-MG"] },
+    { id: "kpv-30", variationId: 2847, current: true, skus: ["KPV", "KPV-30-MG"] },
+  ]);
+});
+
+test("legacy catalog repair appends the exact live SKU without replacing history", () => {
+  const deadpool = {
+    ...coa,
+    id: "deadpool",
+    source: "wordpress_import",
+    revision: 1,
+    status: "Available",
+    productName: "Deadpool",
+    familyName: "Deadpool",
+    compound: "Deadpool",
+    matchedProductId: 1783,
+    matchedVariationId: 0,
+    skus: ["CARTALAX-AND-BPC-AND-TB500-BLEND"],
+    currentShippingLot: true,
+  } as unknown as CommerceCoa & { source: string; revision: number };
+  const catalog = { ...product, id: 1783, name: "Deadpool", sku: "DEADPOOL", type: "simple" };
+
+  const repairs = exactLegacyCoaCatalogRepairs([deadpool], [catalog], new Map());
+
+  assert.deepEqual(repairs[0]?.skus, ["CARTALAX-AND-BPC-AND-TB500-BLEND", "DEADPOOL"]);
+  assert.equal(repairs[0]?.currentShippingLot, true);
+});
+
+test("legacy current-lot promotion stays closed for ambiguous or previously edited history", () => {
+  const base = {
+    ...coa,
+    source: "wordpress_import",
+    revision: 2,
+    status: "Available",
+    productName: "KPV",
+    familyName: "KPV",
+    compound: "KPV",
+    strength: "30mg",
+    matchedProductId: 539,
+    matchedVariationId: 2847,
+    skus: ["KPV", "KPV-30-MG"],
+    currentShippingLot: false,
+  } as unknown as CommerceCoa & { source: string; revision: number };
+  const kpv = { ...product, id: 539, name: "KPV", sku: "KPV", variationIds: [2847] };
+  const variation = {
+    id: 2847,
+    sku: "KPV-30-MG",
+    attributes: [{ id: 1, name: "MG", option: "30 MG" }],
+  } as CommerceVariation;
+
+  assert.deepEqual(exactLegacyCoaCatalogRepairs([base], [kpv], new Map([[539, [variation]]])), []);
+  assert.deepEqual(exactLegacyCoaCatalogRepairs([
+    { ...base, id: "a", revision: 1 },
+    { ...base, id: "b", revision: 1 },
+  ], [kpv], new Map([[539, [variation]]])), []);
 });

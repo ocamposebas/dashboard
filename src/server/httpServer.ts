@@ -59,6 +59,7 @@ import {
   canAutomaticallyPublishCoa,
   exactAutomaticCoaProduct,
   exactAutomaticCoaVariation,
+  exactLegacyCoaCatalogRepairs,
 } from "../shared/coaAutomaticPublishing.js";
 import { productVariantSku } from "../shared/productSku.js";
 import type { MonthlyFinanceOrder } from "../shared/monthlyFinance.js";
@@ -806,7 +807,7 @@ export function createMonitorServer(
       try {
         const updated = await customCoas.update({
           id: coa.recordId || coa.id,
-          expectedRevision: coa.revision,
+          ...(typeof coa.revision === "number" ? { expectedRevision: coa.revision } : {}),
           coaNumber: coa.coaNumber,
           productName: coa.productName,
           compound: coa.compound,
@@ -841,6 +842,70 @@ export function createMonitorServer(
       }
     }
     return published;
+  }
+  let legacyCoaCatalogReconciled = false;
+
+  async function reconcileExactLegacyCoaCatalog(
+    candidates: Awaited<ReturnType<CoaRepository["list"]>>,
+    actorId: string,
+  ): Promise<Map<string, Awaited<ReturnType<CoaRepository["update"]>>>> {
+    const repaired = new Map<string, Awaited<ReturnType<CoaRepository["update"]>>>();
+    if (legacyCoaCatalogReconciled || !customCoas || !commerce) return repaired;
+
+    const products = await commerce.listProducts();
+    const variationsByProduct = new Map<number, CommerceVariation[]>();
+    const variableProductIds = products
+      .filter((product) => product.type === "variable")
+      .map((product) => product.id);
+    await Promise.all(variableProductIds.map(async (productId) => {
+      variationsByProduct.set(productId, await commerce.listProductVariations(productId));
+    }));
+    const repairs = exactLegacyCoaCatalogRepairs(candidates, products, variationsByProduct);
+    let allSucceeded = true;
+    for (const repair of repairs) {
+      const coa = repair.coa;
+      try {
+        const updated = await customCoas.update({
+          id: coa.recordId || coa.id,
+          ...(typeof coa.revision === "number" ? { expectedRevision: coa.revision } : {}),
+          coaNumber: coa.coaNumber,
+          productName: coa.productName,
+          compound: coa.compound,
+          familyName: coa.familyName,
+          familyKey: coa.familyKey,
+          strength: coa.strength,
+          batch: coa.batch,
+          lot: coa.lot || coa.batch,
+          date: coa.date,
+          status: coa.status,
+          purity: coa.purity,
+          laboratory: coa.laboratory,
+          method: coa.method,
+          tested: coa.tested,
+          ...(typeof coa.testingCostTotal === "number" ? { testingCostTotal: Number(coa.testingCostTotal) } : {}),
+          ...(typeof coa.batchUnitCount === "number" ? { batchUnitCount: Number(coa.batchUnitCount) } : {}),
+          currentShippingLot: repair.currentShippingLot,
+          fileUrl: coa.externalFileUrl || "",
+          verifyUrl: coa.verifyUrl,
+          fileAttachmentId: coa.fileAttachmentId,
+          matchedProductId: repair.productId,
+          matchedVariationId: repair.variationId,
+          skus: repair.skus,
+          aliases: coa.aliases,
+          keywords: coa.keywords,
+          panelTypes: coa.panelTypes,
+        }, actorId);
+        repaired.set(coa.recordId || coa.id, updated);
+      } catch (error: unknown) {
+        allSucceeded = false;
+        console.error("Exact legacy COA catalog reconciliation failed", {
+          certificateId: coa.recordId || coa.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    legacyCoaCatalogReconciled = allSucceeded;
+    return repaired;
   }
   let customCoaBootstrap: Promise<void> | undefined;
   let rewardsCache: { payload: CommerceRewardControl; updatedAt: number } | undefined;
@@ -1438,6 +1503,11 @@ export function createMonitorServer(
         customCoas
           ? ensureCustomCoaHistory().then(async () => {
               let coas = await customCoas.list({ limit: 500 });
+              const repaired = await reconcileExactLegacyCoaCatalog(coas, "system:exact-legacy-coa-reconciler");
+              if (repaired.size) {
+                fulfillmentCoasCache = undefined;
+                coas = await customCoas.list({ limit: 500 });
+              }
               const automaticallyPublished = await automaticallyPublishExactCoas(coas, "system:exact-coa-publisher");
               if (automaticallyPublished.size) {
                 fulfillmentCoasCache = undefined;
@@ -1788,6 +1858,14 @@ export function createMonitorServer(
   if (customCoas && commerce) {
     void ensureCustomCoaHistory()
       .then(() => customCoas.list({ limit: 500 }))
+      .then(async (coas) => {
+        const repaired = await reconcileExactLegacyCoaCatalog(coas, "system:exact-legacy-coa-reconciler");
+        if (!repaired.size) return coas;
+        extensionsCache = undefined;
+        fulfillmentCoasCache = undefined;
+        console.info("Exact legacy COA catalog records reconciled", { certificateIds: [...repaired.keys()] });
+        return customCoas.list({ limit: 500 });
+      })
       .then((coas) => automaticallyPublishExactCoas(coas, "system:exact-coa-publisher"))
       .then((published) => {
         if (!published.size) return;

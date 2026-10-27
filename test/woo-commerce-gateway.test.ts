@@ -703,6 +703,7 @@ test("loads public COA and site-control modules without leaking catalog credenti
       purity: "99.1%",
       currentShippingLot: true,
       fileUrl: "https://shop.example/coa.pdf",
+      externalFileUrl: "https://lab.example/original-coa.pdf",
       history: [{ id: 1 }],
     }] : {
       version: "1.7.0",
@@ -726,6 +727,7 @@ test("loads public COA and site-control modules without leaking catalog credenti
   const [coas, controls] = await Promise.all([gateway.listCoas(), gateway.getSiteControls()]);
 
   assert.equal(coas[0]?.familyName, "Test Family");
+  assert.equal(coas[0]?.externalFileUrl, "https://lab.example/original-coa.pdf");
   assert.equal(coas[0]?.historyCount, 1);
   assert.equal(controls.promo.product?.promoPrice, 55);
   assert.equal(controls.maintenance.enabled, false);

@@ -133,6 +133,26 @@ function currentCoaUrls(coa: CommerceCoa): string[] {
   ].filter((value): value is string => Boolean(value?.trim()));
 }
 
+function freedomCertificateReference(value: string | null | undefined): string {
+  return normalized(value).replace(/\.pdf$/i, "");
+}
+
+/**
+ * Matches an incoming laboratory QR to one governed certificate. Freedom's
+ * printed QR is the certificate number itself, but several migrated records
+ * retained only a WordPress-hosted copy of the PDF. Accepting the exact COA
+ * number keeps those physical labels usable without introducing fuzzy product
+ * or lot matching.
+ */
+export function coaMatchesScanIdentity(coa: CommerceCoa, rawValue: string): boolean {
+  const identity = coaScanIdentity(rawValue);
+  if (!identity) return false;
+  if (currentCoaUrls(coa).some((url) => coaScanIdentity(url) === identity)) return true;
+  if (!identity.startsWith("freedom-diagnostics:")) return false;
+  const certificate = identity.slice("freedom-diagnostics:".length);
+  return Boolean(certificate && freedomCertificateReference(coa.coaNumber) === certificate);
+}
+
 function coaMatchesReference(coa: CommerceCoa, reference: string): boolean {
   const expected = normalized(reference);
   return normalized(coa.id) === expected || normalized(coa.coaNumber) === expected;
@@ -185,9 +205,8 @@ export function resolveCoaQrScan(input: {
   const canonical = canonicalizeCoaScanValue(input.rawValue);
   if (!canonical) return null;
 
-  const identity = coaScanIdentity(canonical);
-  const directMatches = input.coas.filter((coa) => currentCoaUrls(coa).some((url) =>
-    coaScanIdentity(url) === identity));
+  const directMatches = input.coas.filter((coa) =>
+    coaIsAvailableForVialScan(coa) && coaMatchesScanIdentity(coa, canonical));
 
   if (input.registeredIdentifier) {
     const registeredCoa = input.coas.find((candidate) =>

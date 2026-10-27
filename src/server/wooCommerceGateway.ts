@@ -1465,6 +1465,7 @@ function mapCoa(value: unknown): CommerceCoa | null {
     tested: decodedText(coa.tested),
     currentShippingLot: Boolean(coa.currentShippingLot),
     fileUrl: text(coa.fileUrl),
+    externalFileUrl: text(coa.externalFileUrl || coa.external_file_url),
     verifyUrl: text(coa.verifyUrl),
     fileAttachmentId: number(coa.fileAttachmentId),
     aliases: stringList(coa.aliases),

@@ -97,3 +97,93 @@ export function canAutomaticallyPublishCoa(coa: CommerceCoa & {
     hasDocument
   );
 }
+
+export interface ExactLegacyCoaCatalogRepair {
+  coa: CommerceCoa & { recordId?: string; source?: string; revision?: number };
+  productId: number;
+  variationId: number;
+  skus: string[];
+  currentShippingLot: boolean;
+}
+
+function uniqueCatalogSkus(values: string[]): string[] {
+  const seen = new Set<string>();
+  return values.flatMap((value) => {
+    const sku = value.trim();
+    const identity = sku.toLocaleLowerCase("en");
+    if (!sku || seen.has(identity)) return [];
+    seen.add(identity);
+    return [sku];
+  });
+}
+
+/**
+ * Builds conservative repairs for untouched WordPress-era COAs. Existing
+ * catalog IDs remain authoritative; otherwise only a unique exact name/SKU
+ * match and, for variable products, a unique exact strength match are used.
+ *
+ * The old WordPress model could designate one lot only at the parent level.
+ * When a migrated variable presentation has exactly one untouched Available
+ * certificate and no current lot, that exact presentation can safely inherit
+ * its own current-lot flag. Ambiguous or edited history is never promoted.
+ */
+export function exactLegacyCoaCatalogRepairs(
+  coas: Array<CommerceCoa & { recordId?: string; source?: string; revision?: number }>,
+  products: CommerceProduct[],
+  variationsByProduct: ReadonlyMap<number, CommerceVariation[]>,
+): ExactLegacyCoaCatalogRepair[] {
+  const available = coas.filter((coa) => coa.status.toLocaleLowerCase("en") === "available");
+  const candidates = available.flatMap((coa) => {
+    const mappedProduct = products.find((product) =>
+      product.id === coa.matchedProductId && product.status !== "trash");
+    const product = mappedProduct || exactAutomaticCoaProduct(coa, products);
+    if (!product) return [];
+
+    const variations = variationsByProduct.get(product.id) || [];
+    const storedVariation = variations.find((variation) => variation.id === coa.matchedVariationId) || null;
+    const variation = product.type === "variable"
+      ? storedVariation || exactAutomaticCoaVariation(coa, product, variations)
+      : null;
+    if (product.type === "variable" && !variation) return [];
+
+    return [{
+      coa,
+      product,
+      productId: product.id,
+      variationId: variation?.id || 0,
+      skus: uniqueCatalogSkus([...(coa.skus || []), product.sku || "", variation?.sku || ""]),
+      currentShippingLot: coa.currentShippingLot,
+    }];
+  });
+
+  const variableGroups = new Map<string, typeof candidates>();
+  for (const candidate of candidates) {
+    if (candidate.product.type !== "variable" || candidate.variationId <= 0) continue;
+    const key = `${candidate.productId}:${candidate.variationId}`;
+    variableGroups.set(key, [...(variableGroups.get(key) || []), candidate]);
+  }
+  for (const group of variableGroups.values()) {
+    if (group.some((candidate) => candidate.currentShippingLot) || group.length !== 1) continue;
+    const candidate = group[0]!;
+    if (candidate.coa.source === "wordpress_import" && candidate.coa.revision === 1) {
+      candidate.currentShippingLot = true;
+    }
+  }
+
+  return candidates.flatMap((candidate) => {
+    const mappingChanged = candidate.coa.matchedProductId !== candidate.productId ||
+      candidate.coa.matchedVariationId !== candidate.variationId;
+    const skusChanged = candidate.skus.length !== candidate.coa.skus.length ||
+      candidate.skus.some((sku, index) => sku !== candidate.coa.skus[index]);
+    const currentChanged = candidate.currentShippingLot !== candidate.coa.currentShippingLot;
+    return mappingChanged || skusChanged || currentChanged
+      ? [{
+          coa: candidate.coa,
+          productId: candidate.productId,
+          variationId: candidate.variationId,
+          skus: candidate.skus,
+          currentShippingLot: candidate.currentShippingLot,
+        }]
+      : [];
+  });
+}

@@ -156,6 +156,44 @@ test("resolves the original laboratory URL after the COA document is copied into
   assert.equal(result?.lot, "P1KPV30");
 });
 
+test("resolves a Freedom vial QR by its exact certificate number when migration kept only a WordPress copy", () => {
+  const rawValue = "https://coas.freedomdiagnosticstesting.com/Phas2607280192.pdf";
+  const result = resolveCoaQrScan({
+    rawValue,
+    coas: [coa({
+      id: "phas2607280192",
+      coaNumber: "Phas2607280192",
+      matchedProductId: 956,
+      matchedVariationId: 0,
+      productName: "GHK-Cu + KPV Blend",
+      lot: "P1-BTY06",
+      batch: "P1-BTY06",
+      fileUrl: "https://staging.phaseonelabz.com/wp-content/uploads/GHkkpv-blendpdf.pdf",
+      externalFileUrl: "https://staging.phaseonelabz.com/wp-content/uploads/GHkkpv-blendpdf.pdf",
+      verifyUrl: "",
+    })],
+  });
+
+  assert.equal(result?.coaId, "phas2607280192");
+  assert.equal(result?.productId, 956);
+  assert.equal(result?.lot, "P1-BTY06");
+});
+
+test("Freedom certificate-number recovery fails closed when the governed number is duplicated", () => {
+  const rawValue = "https://coas.freedomdiagnosticstesting.com/Phas2607280192.pdf";
+  const migrated = coa({
+    id: "phas2607280192",
+    coaNumber: "Phas2607280192",
+    fileUrl: "https://staging.phaseonelabz.com/wp-content/uploads/GHkkpv-blendpdf.pdf",
+    externalFileUrl: "",
+    verifyUrl: "",
+  });
+  assert.equal(resolveCoaQrScan({
+    rawValue,
+    coas: [migrated, { ...migrated, id: "duplicate-certificate" }],
+  }), null);
+});
+
 test("accepts safe Freedom URL variants and ignores a stale alias when the governed URL is unique", () => {
   const stored = "https://coas.freedomdiagnosticstesting.com/Phas2610050320.pdf";
   const scanned = "http://www.coas.freedomdiagnosticstesting.com/Phas2610050320.PDF?source=vial";

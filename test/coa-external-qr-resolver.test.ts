@@ -213,6 +213,32 @@ test("resolves a Bitly vial QR only through an approved lab redirect and an exac
   });
 });
 
+test("resolves a Bitly Freedom QR by exact COA number when the governed file is a WordPress mirror", async () => {
+  const freedom = coa({
+    id: "phas2607280192",
+    coaNumber: "Phas2607280192",
+    productName: "GHK-Cu + KPV Blend",
+    matchedProductId: 956,
+    matchedVariationId: 0,
+    strength: "60 mg",
+    batch: "P1-BTY06",
+    lot: "P1-BTY06",
+    fileUrl: "https://staging.phaseonelabz.com/wp-content/uploads/GHkkpv-blendpdf.pdf",
+    externalFileUrl: "https://staging.phaseonelabz.com/wp-content/uploads/GHkkpv-blendpdf.pdf",
+    verifyUrl: "",
+  });
+  const result = await resolveExternalCoaQr({
+    rawValue: "https://bit.ly/GhkKpv1",
+    coas: [freedom],
+    fetchImpl: (async () => new Response(null, {
+      status: 301,
+      headers: { location: "https://coas.freedomdiagnosticstesting.com/Phas2607280192.pdf" },
+    })) as typeof fetch,
+  });
+  assert.equal(result?.coaReference, "Phas2607280192");
+  assert.equal(result?.provider, "bitly-freedom-diagnostics");
+});
+
 test("recovers one incorrect Bitly letter case only when the approved destination is unique", async () => {
   const reta20 = coa({
     id: "coa-2026-g3bydj",

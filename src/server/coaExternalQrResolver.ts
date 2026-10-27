@@ -2,6 +2,7 @@ import type { CommerceCoa } from "./wooCommerceGateway.js";
 import {
   canonicalizeCoaScanValue,
   coaIsAvailableForVialScan,
+  coaMatchesScanIdentity,
   coaScanIdentity,
   coaScanProvider,
 } from "./coaScanResolver.js";
@@ -59,23 +60,11 @@ function ilsQrCodeId(rawValue: string): string | null {
   return parsed.pathname.match(/^\/verify\/([A-Za-z0-9_-]{6,200})$/)?.[1] || null;
 }
 
-function currentCoaUrls(coa: CommerceCoa): string[] {
-  return [
-    coa.fileUrl,
-    coa.externalFileUrl,
-    coa.verifyUrl,
-    coa.currentCoa?.fileUrl,
-    coa.currentCoa?.verifyUrl,
-  ].filter((value): value is string => Boolean(value?.trim()));
-}
-
 function directlyMatchingCoas(coas: CommerceCoa[], rawValue: string): CommerceCoa[] {
-  const identity = coaScanIdentity(rawValue);
-  if (!identity) return [];
   return coas.filter((coa) =>
     coaIsAvailableForVialScan(coa) &&
     coa.matchedProductId > 0 &&
-    currentCoaUrls(coa).some((value) => coaScanIdentity(value) === identity));
+    coaMatchesScanIdentity(coa, rawValue));
 }
 
 function approvedLabDestination(rawValue: string): string | null {
