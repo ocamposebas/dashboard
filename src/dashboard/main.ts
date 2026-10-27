@@ -1171,6 +1171,7 @@ let pendingEmailLaunchId = "";
 const SESSION_PAGE_SIZE = 5;
 const CUSTOMER_PAGE_SIZE = 50;
 const ORDER_ALERTS_STORAGE_KEY = "phaseone:order-alerts";
+const NEW_ORDER_VIBRATION_PATTERN = [220, 100, 220, 100, 440];
 const LEGACY_ANALYTICS_TIME_ZONE = "UTC";
 const displayedCounts = emptyPresenceCounts();
 const cardTimers = new Map<PresenceSection, number>();
@@ -6953,15 +6954,48 @@ let alertAudioContext: AudioContext | undefined;
 function updateOrderAlertControl(): void {
   const enabled = orderAlertsEnabled();
   const button = requiredElement<HTMLButtonElement>("#order-alert-toggle");
-  button.textContent = enabled ? "Sale sound on" : "Enable sale sound";
+  const quickButton = requiredElement<HTMLButtonElement>("#order-alert-quick-toggle");
+  button.textContent = enabled ? "Order alerts on" : "Enable phone alerts";
   button.classList.toggle("is-enabled", enabled);
   button.setAttribute("aria-pressed", String(enabled));
+  quickButton.classList.toggle("is-enabled", enabled);
+  quickButton.setAttribute("aria-pressed", String(enabled));
+  quickButton.setAttribute("aria-label", enabled ? "Pause new order alerts" : "Enable new order alerts");
+  requiredElement<HTMLElement>("#order-alert-quick-label").textContent = enabled ? "Alerts on" : "Alerts";
+}
+
+async function armOrderAlertAudio(): Promise<boolean> {
+  try {
+    alertAudioContext ||= new AudioContext();
+    await alertAudioContext.resume();
+    return alertAudioContext.state === "running";
+  } catch {
+    return false;
+  }
+}
+
+function vibrateForNewOrder(pattern: number[] = NEW_ORDER_VIBRATION_PATTERN): boolean {
+  if (typeof navigator.vibrate !== "function") return false;
+  try {
+    return navigator.vibrate(pattern);
+  } catch {
+    return false;
+  }
+}
+
+function primeOrderAlertAudioFromGesture(): void {
+  if (!orderAlertsEnabled()) return;
+  void armOrderAlertAudio().then((armed) => {
+    if (!armed) return;
+    window.removeEventListener("pointerdown", primeOrderAlertAudioFromGesture);
+    window.removeEventListener("keydown", primeOrderAlertAudioFromGesture);
+  });
 }
 
 async function toggleOrderAlerts(): Promise<void> {
   const enable = !orderAlertsEnabled();
   if (enable && "Notification" in window && Notification.permission === "default") {
-    await Notification.requestPermission();
+    await Notification.requestPermission().catch(() => "default");
   }
   try {
     localStorage.setItem(ORDER_ALERTS_STORAGE_KEY, enable ? "enabled" : "disabled");
@@ -6969,17 +7003,22 @@ async function toggleOrderAlerts(): Promise<void> {
     // The alert still works for the current page when storage is unavailable.
   }
   if (enable) {
-    alertAudioContext ||= new AudioContext();
-    await alertAudioContext.resume().catch(() => undefined);
+    await armOrderAlertAudio();
+    vibrateForNewOrder([70, 45, 70]);
   }
   updateOrderAlertControl();
   showToast(enable ? "Order alerts enabled" : "Order alerts paused", enable
-    ? "A banner, chime and system notification will signal every new order."
-    : "The live order feed will continue without audible alerts.");
+    ? typeof navigator.vibrate === "function"
+      ? "Every new order will trigger vibration, a chime and an on-screen alert."
+      : "Every new order will trigger a chime and an on-screen alert on this device."
+    : "The live order feed will continue without phone alerts.");
 }
 
 function playOrderChime(): void {
-  if (!alertAudioContext) return;
+  if (!alertAudioContext || alertAudioContext.state !== "running") {
+    void armOrderAlertAudio().then((armed) => { if (armed) playOrderChime(); });
+    return;
+  }
   const start = alertAudioContext.currentTime + .015;
   const master = alertAudioContext.createGain();
   const compressor = alertAudioContext.createDynamicsCompressor();
@@ -7023,15 +7062,20 @@ function announceNewOrder(order: CommerceOrder): void {
   updateNotificationBadge();
   announcement.textContent = `New order ${order.number} received from ${order.customer}.`;
   if (!orderAlertsEnabled()) return;
+  vibrateForNewOrder();
   playOrderChime();
   if ("Notification" in window && Notification.permission === "granted") {
-    new Notification(`New order #${order.number}`, {
-      body: isZelle
-        ? `Zelle · ${order.customer} · ${formatCurrency(order.total, order.currency)}`
-        : `${order.customer} · ${formatCurrency(order.total, order.currency)}`,
-      icon: "/phase-one-labz-logo.webp",
-      tag: `phaseone-order-${order.id}`,
-    });
+    try {
+      new Notification(`New order #${order.number}`, {
+        body: isZelle
+          ? `Zelle · ${order.customer} · ${formatCurrency(order.total, order.currency)}`
+          : `${order.customer} · ${formatCurrency(order.total, order.currency)}`,
+        icon: "/phase-one-labz-logo.webp",
+        tag: `phaseone-order-${order.id}`,
+      });
+    } catch {
+      // iPhone Safari still shows the in-app banner and chime when system notifications are unavailable.
+    }
   }
 }
 
@@ -7769,6 +7813,18 @@ function updateNotificationBadge(): void {
   badge.textContent = String(unread);
   badge.hidden = unread === 0;
   requiredElement<HTMLElement>("#notification-unread").textContent = `${unread} unread`;
+  const badgeNavigator = navigator as Navigator & {
+    setAppBadge?: (contents?: number) => Promise<void>;
+    clearAppBadge?: () => Promise<void>;
+  };
+  try {
+    const badgeUpdate = unread > 0
+      ? badgeNavigator.setAppBadge?.(unread)
+      : badgeNavigator.clearAppBadge?.();
+    void badgeUpdate?.catch(() => undefined);
+  } catch {
+    // App badges are an optional enhancement and never block the notification center.
+  }
 }
 
 function notificationTime(value: string): string {
@@ -10987,6 +11043,7 @@ requiredElement<HTMLInputElement>("#orders-date-to").addEventListener("change", 
   renderOrders();
 });
 requiredElement<HTMLButtonElement>("#order-alert-toggle").addEventListener("click", () => { void toggleOrderAlerts(); });
+requiredElement<HTMLButtonElement>("#order-alert-quick-toggle").addEventListener("click", () => { void toggleOrderAlerts(); });
 requiredElement<HTMLButtonElement>("#new-order-dismiss").addEventListener("click", () => {
   requiredElement<HTMLElement>("#new-order-banner").hidden = true;
 });
@@ -11619,6 +11676,8 @@ window.addEventListener("hashchange", () => {
   navigate(requestedView === "analytics" ? "monitor" : viewNames[requestedView] ? requestedView : "overview");
 });
 updateOrderAlertControl();
+window.addEventListener("pointerdown", primeOrderAlertAudioFromGesture);
+window.addEventListener("keydown", primeOrderAlertAudioFromGesture);
 void loadWorkspaceSession().then(() => {
   void loadNotifications();
   const activeView = location.hash.slice(1);
@@ -11632,7 +11691,7 @@ void loadCommerce().then(() => void loadLiveOrders(true));
 void loadMonthToDateFinancials(false);
 void loadInsuranceFundSummary().finally(() => void loadInsuranceFund(false, true));
 window.setInterval(() => {
-  if (!document.hidden) void loadLiveOrders();
+  void loadLiveOrders();
 }, 15_000);
 window.setInterval(() => {
   if (!document.hidden) void loadMonthToDateFinancials(true);

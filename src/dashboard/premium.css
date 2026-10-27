@@ -558,6 +558,26 @@ kbd { border-color: var(--line); background: var(--surface-soft); color: var(--m
 }
 .theme-toggle:hover, .icon-button:hover { border-color: var(--line); background: var(--surface); color: var(--ink); }
 .theme-toggle { padding: 0 9px; font-size: 10px; }
+.order-alert-quick {
+  position: relative;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 9px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.order-alert-quick:hover { border-color: var(--line-strong); color: var(--ink); }
+.order-alert-quick svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.order-alert-quick i { width: 6px; height: 6px; border-radius: 50%; background: var(--warning); box-shadow: 0 0 0 3px var(--warning-soft); }
+.order-alert-quick.is-enabled { border-color: color-mix(in srgb,var(--success) 28%,var(--line)); background: var(--success-soft); color: var(--success); }
+.order-alert-quick.is-enabled i { background: var(--success); box-shadow: 0 0 0 3px color-mix(in srgb,var(--success) 16%,transparent); }
 .account-button { min-height: 40px; padding: 3px 7px 3px 3px; border: 1px solid transparent; border-radius: 11px; }
 .account-button:hover { border-color: var(--line); background: var(--surface); }
 .account-button > span { width: 33px; height: 33px; border-radius: 9px; background: var(--ink); color: var(--surface); }
@@ -1903,6 +1923,12 @@ html[data-theme="dark"] .loyalty-simulator-summary span { color: #626267; }
   padding-inline: 4px;
   border-width: 2px;
   font-size: 8px;
+}
+
+@media (max-width: 760px) {
+  .order-alert-quick { width: 36px; justify-content: center; padding: 0; }
+  .order-alert-quick span { display: none; }
+  .order-alert-quick i { position: absolute; top: 4px; right: 4px; width: 5px; height: 5px; }
 }
 
 .account-menu { position: relative; }
