@@ -11,6 +11,13 @@ export default defineConfig({
   plugins: [{
     name: "phase-one-email-logo",
     generateBundle() {
+      // Keep the previous URL alive for already-delivered messages while
+      // replacing its damaged bytes with the repaired brand asset.
+      this.emitFile({
+        type: "asset",
+        fileName: "assets/phase-one-email-logo.webp",
+        source: readFileSync(resolve(dashboardRoot, "phase-one-labz-logo.webp")),
+      });
       this.emitFile({
         type: "asset",
         // Use a versioned PNG so mail proxies do not retain the previously
