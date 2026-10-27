@@ -19,6 +19,7 @@ import {
   type FinanceOrder,
   type FinanceSummary,
 } from "../shared/financeAnalytics";
+import { financePeriod, type FinanceRange } from "../shared/financePeriod";
 import { suggestedCoaVariationId } from "../shared/coaCatalogMapping";
 import { productSkuBase, productVariantSku } from "../shared/productSku";
 import {
@@ -1045,11 +1046,12 @@ type SalesInsightRange = "today" | "week" | "month";
 let salesInsightRange: SalesInsightRange = "today";
 let salesInsightLoading = false;
 let salesInsightComplete: { range: SalesInsightRange; orders: CommerceOrder[] } | undefined;
-type FinanceRange = "month" | "30" | "90" | "year";
 let financeRange: FinanceRange = "month";
-let financeLoading = false;
-let financeLoadedAt = 0;
-let financeReportData: { range: FinanceRange; orders: CommerceOrder[]; generatedAt: string } | undefined;
+let financeLoadingRange: FinanceRange | undefined;
+let financeLoadSequence = 0;
+let financeAbortController: AbortController | undefined;
+let financeError: { range: FinanceRange; message: string } | undefined;
+const financeReports = new Map<FinanceRange, { orders: CommerceOrder[]; generatedAt: string; loadedAt: number }>();
 let financeSkuSearch = "";
 let financeSkuSort: "profit" | "units" | "revenue" | "margin" | "risk" = "profit";
 let monthlyFinanceOrders: Array<MonthlyFinanceOrder & { id: number }> | undefined;
@@ -2500,26 +2502,17 @@ function renderSalesPerformance(): void {
 }
 
 function financeRangeStart(range = financeRange, now = new Date()): Date {
-  if (range === "month") return new Date(now.getFullYear(), now.getMonth(), 1);
-  if (range === "year") return new Date(now.getFullYear(), 0, 1);
-  const days = range === "90" ? 89 : 29;
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - days);
-}
-
-function financeRangeLabel(range = financeRange): string {
-  const now = new Date();
-  if (range === "month") return new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(now);
-  if (range === "year") return String(now.getFullYear());
-  return range === "90" ? "Last 90 days" : "Last 30 days";
+  return financePeriod(range, now).start;
 }
 
 function financeRangeRequest(range = financeRange): { after: Date; before: Date; label: string } {
-  return { after: financeRangeStart(range), before: new Date(Date.now() + 60_000), label: financeRangeLabel(range) };
+  const period = financePeriod(range);
+  return { after: period.start, before: new Date(Date.now() + 60_000), label: period.reportLabel };
 }
 
 function financeOrders(range = financeRange): CommerceOrder[] {
   const start = financeRangeStart(range).getTime();
-  const source = financeReportData?.range === range ? financeReportData.orders : commerceData?.orders || [];
+  const source = financeReports.get(range)?.orders || commerceData?.orders || [];
   return source.filter((order) => {
     const timestamp = Date.parse(order.paidAt || order.createdAt || "");
     return paidOrder(order) && Number.isFinite(timestamp) && timestamp >= start;
@@ -2633,16 +2626,25 @@ function renderFinanceSkuTable(summary: FinanceSummary): void {
 
 function renderFinance(): void {
   const summary = financeSummary();
-  const complete = financeReportData?.range === financeRange;
-  requiredElement<HTMLElement>("#finance-period-title").textContent = financeRangeLabel();
+  const period = financePeriod(financeRange);
+  const report = financeReports.get(financeRange);
+  const complete = Boolean(report);
+  const loading = financeLoadingRange === financeRange;
+  const error = financeError?.range === financeRange ? financeError.message : "";
+  requiredElement<HTMLElement>("#finance-period-title").textContent = period.title;
+  requiredElement<HTMLElement>("#finance-period-dates").textContent = period.dateLabel;
   requiredElement<HTMLElement>("#finance-period-detail").textContent = complete
-    ? `Complete period · ${formatNumber(summary.orders)} paid orders · synchronized ${relativeDate(financeReportData!.generatedAt)}`
-    : financeLoading ? "Loading every paid order in this period…" : "Fast preview from synchronized orders.";
+    ? `${formatNumber(summary.orders)} paid orders · Updated ${relativeDate(report!.generatedAt)}`
+    : loading
+      ? `Loading the complete ${period.title.toLocaleLowerCase("en")} history. Showing the latest synchronized preview meanwhile.`
+      : error
+        ? "Complete period unavailable · Showing the latest synchronized preview."
+        : "Latest synchronized preview · Refresh to load the complete period.";
   const sync = requiredElement<HTMLElement>("#finance-sync-state");
-  sync.classList.toggle("is-loading", financeLoading);
-  sync.classList.remove("is-error");
+  sync.classList.toggle("is-loading", loading);
+  sync.classList.toggle("is-error", Boolean(error) && !complete);
   const syncText = sync.querySelector<HTMLElement>("b");
-  if (syncText) syncText.textContent = financeLoading ? "Loading complete history" : complete ? `Updated ${relativeDate(financeReportData!.generatedAt)}` : "Preview data";
+  if (syncText) syncText.textContent = loading ? `Loading ${period.title.toLocaleLowerCase("en")}` : complete ? `Updated ${relativeDate(report!.generatedAt)}` : error ? "Complete history unavailable" : "Preview data";
   requiredElement<HTMLElement>("#finance-center-revenue").textContent = formatCurrency(summary.revenue, summary.currency);
   requiredElement<HTMLElement>("#finance-center-revenue-note").textContent = `${formatCurrency(summary.costs.refunds, summary.currency)} refunded`;
   requiredElement<HTMLElement>("#finance-center-profit").textContent = summary.profit === null ? formatCurrency(summary.knownProfit, summary.currency) : formatCurrency(summary.profit, summary.currency);
@@ -2669,34 +2671,50 @@ function renderFinance(): void {
 }
 
 async function loadFinance(force = false): Promise<void> {
-  if (financeLoading) return;
-  if (!force && financeReportData?.range === financeRange && Date.now() - financeLoadedAt < 60_000) {
+  const requestedRange = financeRange;
+  if (financeLoadingRange && financeLoadingRange !== requestedRange) {
+    financeAbortController?.abort();
+    financeLoadSequence += 1;
+    financeLoadingRange = undefined;
+    financeAbortController = undefined;
+    requiredElement<HTMLButtonElement>("#finance-refresh").disabled = false;
+  }
+  const cached = financeReports.get(requestedRange);
+  if (!force && cached && Date.now() - cached.loadedAt < 60_000) {
     renderFinance();
     return;
   }
-  financeLoading = true;
+  if (!force && financeLoadingRange === requestedRange) return;
+  financeAbortController?.abort();
+  const requestId = ++financeLoadSequence;
+  const controller = new AbortController();
+  financeAbortController = controller;
+  financeLoadingRange = requestedRange;
+  financeError = undefined;
   renderFinance();
   const refreshButton = requiredElement<HTMLButtonElement>("#finance-refresh");
   refreshButton.disabled = true;
   try {
-    const range = financeRangeRequest();
+    const range = financeRangeRequest(requestedRange);
     const params = new URLSearchParams({ after: range.after.toISOString(), before: range.before.toISOString() });
     if (force) params.set("fresh", "1");
-    const response = await fetch(`/api/commerce/sales-report?${params.toString()}`, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
+    const response = await fetch(`/api/commerce/sales-report?${params.toString()}`, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal: controller.signal });
     const payload: unknown = await response.json();
     if (!response.ok || !isRecord(payload) || !Array.isArray(payload.orders)) throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "Finance history is unavailable");
-    financeReportData = { range: financeRange, orders: payload.orders as CommerceOrder[], generatedAt: typeof payload.generatedAt === "string" ? payload.generatedAt : new Date().toISOString() };
-    financeLoadedAt = Date.now();
+    if (requestId !== financeLoadSequence) return;
+    financeReports.set(requestedRange, { orders: payload.orders as CommerceOrder[], generatedAt: typeof payload.generatedAt === "string" ? payload.generatedAt : new Date().toISOString(), loadedAt: Date.now() });
   } catch (error) {
-    const sync = requiredElement<HTMLElement>("#finance-sync-state");
-    sync.classList.add("is-error");
-    const label = sync.querySelector<HTMLElement>("b");
-    if (label) label.textContent = "Complete history unavailable";
+    if (controller.signal.aborted || requestId !== financeLoadSequence) return;
+    const message = error instanceof Error ? error.message : "Try refreshing again.";
+    financeError = { range: requestedRange, message };
     showToast("Finance data delayed", error instanceof Error ? error.message : "Try refreshing again.", false);
   } finally {
-    financeLoading = false;
-    refreshButton.disabled = false;
-    renderFinance();
+    if (requestId === financeLoadSequence) {
+      financeLoadingRange = undefined;
+      financeAbortController = undefined;
+      refreshButton.disabled = false;
+      renderFinance();
+    }
   }
 }
 
