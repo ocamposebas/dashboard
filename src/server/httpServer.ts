@@ -89,7 +89,9 @@ import { FulfillmentEvidenceNotificationWorkflow } from "./fulfillmentEvidenceNo
 import {
   orderNotificationPayload,
   ordersMissingFromSnapshot,
+  type OrderNotificationSource,
 } from "./orderNotifications.js";
+import type { OrderPushService } from "./orderPushService.js";
 import {
   buildMockShippingLabelDocument,
   FulfillmentShippingError,
@@ -183,6 +185,7 @@ const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
   ".map": "application/json; charset=utf-8",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -206,6 +209,9 @@ async function serveDashboardAsset(
   response.setHeader("Cache-Control", relativePath.startsWith("assets/")
     ? "public, max-age=31536000, immutable"
     : "private, no-cache");
+  if (relativePath === "service-worker.js") {
+    response.setHeader("Service-Worker-Allowed", "/");
+  }
   if (request.method === "HEAD") {
     response.end();
     return true;
@@ -428,6 +434,8 @@ export interface MonitorServerDependencies {
   barcodeLabels?: BarcodeLabelService;
   shipStationGateway?: ShipStationGateway;
   siteControlRepository?: SiteControlRepository;
+  orderPushService?: OrderPushService;
+  recordNewOrder?: (order: OrderNotificationSource) => Promise<void>;
 }
 
 export function createMonitorServer(
@@ -1360,9 +1368,20 @@ export function createMonitorServer(
     previousOrders: unknown,
   ): Promise<void> {
     const newlyReceived = ordersMissingFromSnapshot(orders, previousOrders);
-    await Promise.all(newlyReceived.map((order) => {
+    await Promise.all(newlyReceived.map(async (order) => {
+      if (dependencies.recordNewOrder) {
+        await dependencies.recordNewOrder(order);
+        return;
+      }
       const payload = orderNotificationPayload(order);
-      return store.addNotificationOnce(payload.dedupeKey, payload.notification);
+      const recorded = await store.addNotificationOnce(payload.dedupeKey, payload.notification);
+      if (!recorded || !dependencies.orderPushService) return;
+      await dependencies.orderPushService.sendNewOrder(order).catch((error: unknown) => {
+        console.warn(
+          "New-order push notification failed safely",
+          error instanceof Error ? error.message : "Unknown push error",
+        );
+      });
     }));
   }
 
@@ -2259,6 +2278,17 @@ export function createMonitorServer(
         return;
       }
 
+      if (
+        (url.pathname === "/manifest.webmanifest" || url.pathname === "/service-worker.js") &&
+        (request.method === "GET" || request.method === "HEAD")
+      ) {
+        if (!await serveDashboardAsset(request, response, url.pathname.slice(1))) {
+          response.statusCode = 404;
+          response.end("Not found");
+        }
+        return;
+      }
+
       if (url.pathname === "/api/affiliate-portal/login" && request.method === "POST") {
         if (!isLoginOriginAllowed(request, config)) {
           json(response, 403, { error: "Origin not allowed" });
@@ -2526,6 +2556,58 @@ export function createMonitorServer(
 
       if (url.pathname === "/api/session" && request.method === "GET") {
         json(response, 200, { authenticated: true, user: publicUser(currentUser), permissions: { administer: canAdminister, operate: canOperate } });
+        return;
+      }
+
+      if (url.pathname === "/api/push/config" && request.method === "GET") {
+        const service = dependencies.orderPushService;
+        json(response, 200, service
+          ? { configured: true, publicKey: service.publicKey() }
+          : { configured: false, publicKey: "" });
+        return;
+      }
+
+      if (url.pathname === "/api/push/subscribe" && request.method === "POST") {
+        if (!isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Origin not allowed" });
+          return;
+        }
+        const service = dependencies.orderPushService;
+        if (!service) {
+          json(response, 503, { error: "Phone notifications are not configured" });
+          return;
+        }
+        try {
+          const payload = JSON.parse(await readBody(request)) as unknown;
+          await service.subscribe(
+            currentUser.id,
+            payload,
+            firstHeaderValue(request.headers["user-agent"]).slice(0, 512),
+          );
+          json(response, 201, { subscribed: true });
+        } catch (error: unknown) {
+          json(response, 400, { error: error instanceof Error ? error.message : "Invalid push subscription" });
+        }
+        return;
+      }
+
+      if (url.pathname === "/api/push/unsubscribe" && request.method === "POST") {
+        if (!isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Origin not allowed" });
+          return;
+        }
+        const service = dependencies.orderPushService;
+        if (!service) {
+          json(response, 200, { subscribed: false });
+          return;
+        }
+        try {
+          const payload = JSON.parse(await readBody(request)) as Record<string, unknown>;
+          await service.unsubscribe(currentUser.id, payload.endpoint);
+          json(response, 200, { subscribed: false });
+        } catch (error: unknown) {
+          json(response, 400, { error: error instanceof Error ? error.message : "Invalid push subscription" });
+        }
         return;
       }
 

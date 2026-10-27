@@ -11,6 +11,7 @@ test("reconciles paid Woo orders and switches to an overlapping modified cursor"
   const requestedUrls: URL[] = [];
   let cursor: Date | null = null;
   let requestCount = 0;
+  const newOrderNotifications: Array<{ id: number; customer: string; total: number }> = [];
 
   const store = {
     async recordReconciledOrder(fingerprint: string, paidAt: Date) {
@@ -53,7 +54,12 @@ test("reconciles paid Woo orders and switches to an overlapping modified cursor"
           },
           {
             id: 103,
+            number: "103",
             status: "processing",
+            currency: "USD",
+            total: "149.50",
+            payment_method: "phaseone_zelle",
+            billing: { first_name: "Research", last_name: "Customer" },
             date_paid_gmt: "2026-10-09T17:45:00",
           },
         ];
@@ -74,7 +80,13 @@ test("reconciles paid Woo orders and switches to an overlapping modified cursor"
       backfillDays: 400,
     },
     store,
-    { fetchImpl, now: () => new Date(now) },
+    {
+      fetchImpl,
+      now: () => new Date(now),
+      onNewPaidOrder: async (order) => {
+        newOrderNotifications.push({ id: order.id, customer: order.customer, total: order.total });
+      },
+    },
   );
 
   assert.deepEqual(await sync.syncOnce(), {
@@ -104,4 +116,5 @@ test("reconciles paid Woo orders and switches to an overlapping modified cursor"
   assert.equal(recordedDates.get(firstFingerprint), "2026-10-08T14:30:00.000Z");
   assert.equal(recordedDates.get(secondFingerprint), "2026-10-09T17:45:00.000Z");
   assert.equal(seen.size, 2);
+  assert.deepEqual(newOrderNotifications, [{ id: 103, customer: "Research Customer", total: 149.5 }]);
 });

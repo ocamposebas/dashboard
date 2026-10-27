@@ -1,4 +1,5 @@
 import { analyticsFingerprint } from "./analyticsIdentity.js";
+import type { OrderNotificationSource } from "./orderNotifications.js";
 
 const PAGE_SIZE = 100;
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -7,7 +8,16 @@ const PAID_STATUSES = new Set(["processing", "completed"]);
 
 interface WooOrder {
   id?: number | string;
+  number?: number | string;
   status?: string;
+  currency?: string;
+  total?: number | string;
+  payment_method?: string;
+  billing?: {
+    first_name?: string;
+    last_name?: string;
+    email?: string;
+  };
   date_paid_gmt?: string | null;
   date_completed_gmt?: string | null;
   date_modified_gmt?: string | null;
@@ -43,6 +53,7 @@ interface WooOrderSyncOptions {
   fetchImpl?: typeof fetch;
   now?: () => Date;
   logger?: Pick<Console, "info" | "error">;
+  onNewPaidOrder?: (order: OrderNotificationSource) => Promise<void>;
 }
 
 function parseWooUtcDate(value: unknown): Date | null {
@@ -67,6 +78,7 @@ export class WooOrderSync {
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => Date;
   private readonly logger: Pick<Console, "info" | "error">;
+  private readonly onNewPaidOrder: ((order: OrderNotificationSource) => Promise<void>) | undefined;
   private timer: NodeJS.Timeout | undefined;
   private inFlight: Promise<void> | undefined;
 
@@ -78,6 +90,7 @@ export class WooOrderSync {
     this.fetchImpl = options.fetchImpl || fetch;
     this.now = options.now || (() => new Date());
     this.logger = options.logger || console;
+    this.onNewPaidOrder = options.onNewPaidOrder;
   }
 
   start(): void {
@@ -107,8 +120,23 @@ export class WooOrderSync {
       const status = String(order.status || "").toLowerCase();
       const id = String(order.id || "").trim();
       const paidDate = paidAt(order);
+      const firstName = String(order.billing?.first_name || "").trim();
+      const lastName = String(order.billing?.last_name || "").trim();
+      const email = String(order.billing?.email || "").trim();
+      const parsedTotal = Number(order.total);
       return PAID_STATUSES.has(status) && id && paidDate
-        ? [{ id, paidAt: paidDate }]
+        ? [{
+            id,
+            paidAt: paidDate,
+            notification: {
+              id: Number(id),
+              number: String(order.number || id),
+              customer: [firstName, lastName].filter(Boolean).join(" ") || email || "Customer",
+              currency: String(order.currency || "USD").toUpperCase(),
+              total: Number.isFinite(parsedTotal) ? parsedTotal : 0,
+              paymentMethodId: String(order.payment_method || ""),
+            } satisfies OrderNotificationSource,
+          }]
         : [];
     });
 
@@ -128,6 +156,11 @@ export class WooOrderSync {
         ),
       );
       recorded += results.filter(Boolean).length;
+      if (mode === "incremental" && this.onNewPaidOrder) {
+        await Promise.all(batch.flatMap((order, batchIndex) => results[batchIndex] && order.notification.id > 0
+          ? [this.onNewPaidOrder!(order.notification)]
+          : []));
+      }
     }
 
     await this.store.setOrderSyncCursor(startedAt);

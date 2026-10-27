@@ -16,6 +16,9 @@ import { AffiliateShadowSync } from "./affiliateShadowSync.js";
 import { ShipStationGateway } from "./shipStationGateway.js";
 import { SiteControlRepository } from "./siteControlRepository.js";
 import { FulfillmentEvidenceStorage } from "./fulfillmentEvidenceStorage.js";
+import { OrderPushRepository } from "./orderPushRepository.js";
+import { OrderPushService } from "./orderPushService.js";
+import { orderNotificationPayload, type OrderNotificationSource } from "./orderNotifications.js";
 
 const config = loadConfig();
 if (config.evidenceStorage) {
@@ -42,16 +45,26 @@ const shipStationGateway = new ShipStationGateway(config.shipStation);
 const siteControlRepository = fulfillmentDatabase
   ? new SiteControlRepository(fulfillmentDatabase)
   : undefined;
+const orderPushService = fulfillmentDatabase
+  ? await OrderPushService.create(new OrderPushRepository(fulfillmentDatabase))
+  : undefined;
 const store = new PresenceStore(
   config.redisUrl,
   config.redisKeyPrefix,
   config.presenceTtlMs,
   config.analyticsTimeZone,
 );
+const recordNewOrder = async (order: OrderNotificationSource): Promise<void> => {
+  const payload = orderNotificationPayload(order);
+  const recorded = await store.addNotificationOnce(payload.dedupeKey, payload.notification);
+  if (recorded && orderPushService) await orderPushService.sendNewOrder(order);
+};
 const server = createMonitorServer(config, store, {
   ...(fulfillmentDatabase ? { fulfillmentDatabase } : {}),
   ...(barcodeLabels ? { barcodeLabels } : {}),
   ...(siteControlRepository ? { siteControlRepository } : {}),
+  ...(orderPushService ? { orderPushService } : {}),
+  recordNewOrder,
   shipStationGateway,
 });
 const hub = new SocketHub(config, store);
@@ -70,6 +83,7 @@ const orderSync = config.wooCommerce
         analyticsHmacSecret: config.analyticsHmacSecret,
       },
       store,
+      { onNewPaidOrder: recordNewOrder },
     )
   : undefined;
 const affiliateShadowSync = config.wooCommerce && fulfillmentDatabase

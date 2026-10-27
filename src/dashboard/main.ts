@@ -6950,6 +6950,95 @@ function orderAlertsEnabled(): boolean {
 }
 
 let alertAudioContext: AudioContext | undefined;
+let orderPushRegistrationPromise: Promise<ServiceWorkerRegistration> | undefined;
+
+interface OrderPushConfig {
+  configured: boolean;
+  publicKey: string;
+}
+
+function isStandaloneWebApp(): boolean {
+  return window.matchMedia("(display-mode: standalone)").matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
+
+function isIosDevice(): boolean {
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+function pushApplicationServerKey(value: string): Uint8Array<ArrayBuffer> {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+  const decoded = atob(padded);
+  const bytes = new Uint8Array(new ArrayBuffer(decoded.length));
+  for (let index = 0; index < decoded.length; index += 1) bytes[index] = decoded.charCodeAt(index);
+  return bytes;
+}
+
+function registerOrderPushWorker(): Promise<ServiceWorkerRegistration> {
+  if (!("serviceWorker" in navigator)) return Promise.reject(new Error("Service workers are unavailable"));
+  orderPushRegistrationPromise ||= navigator.serviceWorker.register("/service-worker.js", { scope: "/" });
+  return orderPushRegistrationPromise;
+}
+
+async function orderPushConfig(): Promise<OrderPushConfig> {
+  const response = await fetch("/api/push/config", {
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new Error("Phone notifications are unavailable");
+  return await response.json() as OrderPushConfig;
+}
+
+async function saveOrderPushSubscription(subscription: PushSubscription): Promise<void> {
+  const response = await fetch("/api/push/subscribe", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(subscription.toJSON()),
+  });
+  if (!response.ok) throw new Error("The phone could not be registered for alerts");
+}
+
+async function enableOrderPush(): Promise<boolean> {
+  if (!("PushManager" in window)) return false;
+  const [registration, config] = await Promise.all([registerOrderPushWorker(), orderPushConfig()]);
+  if (!config.configured || !config.publicKey) throw new Error("Phone notifications are not configured yet");
+  const existing = await registration.pushManager.getSubscription();
+  const subscription = existing || await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: pushApplicationServerKey(config.publicKey),
+  });
+  await saveOrderPushSubscription(subscription);
+  return true;
+}
+
+async function disableOrderPush(): Promise<void> {
+  if (!("serviceWorker" in navigator)) return;
+  const registration = await navigator.serviceWorker.getRegistration("/");
+  const subscription = await registration?.pushManager.getSubscription();
+  if (!subscription) return;
+  await fetch("/api/push/unsubscribe", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ endpoint: subscription.endpoint }),
+  }).catch(() => undefined);
+  await subscription.unsubscribe();
+}
+
+async function restoreOrderPushSubscription(): Promise<void> {
+  if (
+    !orderAlertsEnabled() ||
+    !("Notification" in window) ||
+    Notification.permission !== "granted" ||
+    !("serviceWorker" in navigator)
+  ) return;
+  const registration = await registerOrderPushWorker();
+  const subscription = await registration.pushManager.getSubscription();
+  if (subscription) await saveOrderPushSubscription(subscription);
+}
 
 function updateOrderAlertControl(): void {
   const enabled = orderAlertsEnabled();
@@ -6994,8 +7083,20 @@ function primeOrderAlertAudioFromGesture(): void {
 
 async function toggleOrderAlerts(): Promise<void> {
   const enable = !orderAlertsEnabled();
-  if (enable && "Notification" in window && Notification.permission === "default") {
+  if (enable && isIosDevice() && !isStandaloneWebApp()) {
+    showToast("Add Phase One Ops to your Home Screen", "On iPhone tap Share, choose Add to Home Screen, open the new icon and tap Alerts again.");
+    return;
+  }
+  if (enable && !("Notification" in window)) {
+    showToast("System alerts are unavailable", "Keep this page open to receive the existing on-screen new-order alert.");
+    return;
+  }
+  if (enable && Notification.permission === "default") {
     await Notification.requestPermission().catch(() => "default");
+  }
+  if (enable && Notification.permission !== "granted") {
+    showToast("Notifications are blocked", "Allow notifications for Phase One Ops in this device's settings, then try again.");
+    return;
   }
   try {
     localStorage.setItem(ORDER_ALERTS_STORAGE_KEY, enable ? "enabled" : "disabled");
@@ -7005,13 +7106,21 @@ async function toggleOrderAlerts(): Promise<void> {
   if (enable) {
     await armOrderAlertAudio();
     vibrateForNewOrder([70, 45, 70]);
+    try {
+      const pushEnabled = await enableOrderPush();
+      showToast("Order alerts enabled", pushEnabled
+        ? "This phone will notify you when a new order arrives, even when the dashboard is closed."
+        : "Keep this page open to receive new-order alerts on this device.");
+    } catch (error: unknown) {
+      showToast("In-page alerts enabled", error instanceof Error
+        ? `${error.message}. The dashboard will still alert while it is open.`
+        : "The dashboard will still alert while it is open.");
+    }
+  } else {
+    await disableOrderPush().catch(() => undefined);
+    showToast("Order alerts paused", "The live order feed will continue without phone alerts.");
   }
   updateOrderAlertControl();
-  showToast(enable ? "Order alerts enabled" : "Order alerts paused", enable
-    ? typeof navigator.vibrate === "function"
-      ? "Every new order will trigger vibration, a chime and an on-screen alert."
-      : "Every new order will trigger a chime and an on-screen alert on this device."
-    : "The live order feed will continue without phone alerts.");
 }
 
 function playOrderChime(): void {
@@ -11676,10 +11785,12 @@ window.addEventListener("hashchange", () => {
   navigate(requestedView === "analytics" ? "monitor" : viewNames[requestedView] ? requestedView : "overview");
 });
 updateOrderAlertControl();
+void registerOrderPushWorker().catch(() => undefined);
 window.addEventListener("pointerdown", primeOrderAlertAudioFromGesture);
 window.addEventListener("keydown", primeOrderAlertAudioFromGesture);
 void loadWorkspaceSession().then(() => {
   void loadNotifications();
+  void restoreOrderPushSubscription().catch(() => undefined);
   const activeView = location.hash.slice(1);
   if (activeView === "team") void loadWorkspaceUsers();
   if (activeView === "seo") void loadSeo();

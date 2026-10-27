@@ -25,6 +25,16 @@ export default defineConfig({
         fileName: "assets/phase-one-email-logo-v2.png",
         source: readFileSync(resolve(dashboardRoot, "phase-one-email-logo-v2.png")),
       });
+      this.emitFile({
+        type: "asset",
+        fileName: "manifest.webmanifest",
+        source: readFileSync(resolve(dashboardRoot, "manifest.webmanifest")),
+      });
+      this.emitFile({
+        type: "asset",
+        fileName: "service-worker.js",
+        source: readFileSync(resolve(dashboardRoot, "service-worker.js")),
+      });
     },
   }],
   build: {
