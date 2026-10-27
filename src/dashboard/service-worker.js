@@ -1,4 +1,4 @@
-const APP_ICON = "/assets/phase-one-email-logo-v2.png";
+const APP_ICON = "/assets/phase-one-ops-icon-192-v1.png";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));

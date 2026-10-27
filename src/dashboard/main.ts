@@ -7197,7 +7197,7 @@ function announceNewOrder(order: CommerceOrder): void {
         body: isZelle
           ? `Zelle · ${order.customer} · ${formatCurrency(order.total, order.currency)}`
           : `${order.customer} · ${formatCurrency(order.total, order.currency)}`,
-        icon: "/phase-one-labz-logo.webp",
+        icon: "/assets/phase-one-ops-icon-192-v1.png",
         tag: `phaseone-order-${order.id}`,
       });
     } catch {

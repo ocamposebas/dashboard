@@ -9,7 +9,7 @@ export default defineConfig({
   root: dashboardRoot,
   publicDir: false,
   plugins: [{
-    name: "phase-one-email-logo",
+    name: "phase-one-brand-assets",
     generateBundle() {
       // Keep the previous URL alive for already-delivered messages while
       // replacing its damaged bytes with the repaired brand asset.
@@ -25,6 +25,19 @@ export default defineConfig({
         fileName: "assets/phase-one-email-logo-v2.png",
         source: readFileSync(resolve(dashboardRoot, "phase-one-email-logo-v2.png")),
       });
+      for (const fileName of [
+        "phase-one-ops-favicon-32-v1.png",
+        "phase-one-ops-apple-180-v1.png",
+        "phase-one-ops-icon-192-v1.png",
+        "phase-one-ops-icon-512-v1.png",
+        "phase-one-ops-maskable-512-v1.png",
+      ]) {
+        this.emitFile({
+          type: "asset",
+          fileName: `assets/${fileName}`,
+          source: readFileSync(resolve(dashboardRoot, fileName)),
+        });
+      }
       this.emitFile({
         type: "asset",
         fileName: "manifest.webmanifest",
