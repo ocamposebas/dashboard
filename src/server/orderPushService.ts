@@ -1,4 +1,4 @@
-import * as webPush from "web-push";
+import webPush from "web-push";
 
 import type { OrderNotificationSource } from "./orderNotifications.js";
 import {
