@@ -13,8 +13,10 @@ export default defineConfig({
     generateBundle() {
       this.emitFile({
         type: "asset",
-        fileName: "assets/phase-one-email-logo.webp",
-        source: readFileSync(resolve(dashboardRoot, "phase-one-labz-logo.webp")),
+        // Use a versioned PNG so mail proxies do not retain the previously
+        // published, corrupted WebP in their image cache.
+        fileName: "assets/phase-one-email-logo-v2.png",
+        source: readFileSync(resolve(dashboardRoot, "phase-one-email-logo-v2.png")),
       });
     },
   }],

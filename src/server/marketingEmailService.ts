@@ -52,7 +52,7 @@ export class MarketingEmailService {
       ...input,
       recipientName: "Phase One team",
       unsubscribeUrl: "https://phaseonelabz.com/",
-      logoUrl: `${this.publicOrigin}/assets/phase-one-email-logo.webp`,
+      logoUrl: `${this.publicOrigin}/assets/phase-one-email-logo-v2.png`,
       ...(template?.accent ? { accent: template.accent } : {}),
     });
     return this.transport.sendMarketingEmail({
@@ -103,7 +103,7 @@ export class MarketingEmailService {
         buttonUrl: delivery.campaign.buttonUrl,
         recipientName: delivery.firstName || delivery.lastName || "Research partner",
         unsubscribeUrl,
-        logoUrl: `${this.publicOrigin}/assets/phase-one-email-logo.webp`,
+        logoUrl: `${this.publicOrigin}/assets/phase-one-email-logo-v2.png`,
         products: delivery.campaign.products,
         ...(template?.accent ? { accent: template.accent } : {}),
       });

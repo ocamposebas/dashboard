@@ -36,7 +36,7 @@ test("renders the real Phase One logo and governed catalog product cards", () =>
     buttonUrl: "",
     recipientName: "Research partner",
     unsubscribeUrl: "https://phaseonelabz.is/api/public/marketing/unsubscribe?token=safe",
-    logoUrl: "https://phaseonelabz.is/assets/phase-one-email-logo.webp",
+    logoUrl: "https://phaseonelabz.is/assets/phase-one-email-logo-v2.png",
     products: [{
       productId: 42,
       name: "KPV <30MG>",
@@ -47,7 +47,8 @@ test("renders the real Phase One logo and governed catalog product cards", () =>
       productUrl: "https://phaseonelabz.com/product/kpv-30mg/",
     }],
   });
-  assert.match(rendered.html, /phase-one-email-logo\.webp/);
+  assert.match(rendered.html, /phase-one-email-logo-v2\.png/);
+  assert.match(rendered.html, /width="190" height="60"/);
   assert.match(rendered.html, /<img[^>]+kpv\.webp/);
   assert.match(rendered.html, /\$50\.00/);
   assert.match(rendered.html, /\$40\.00/);
