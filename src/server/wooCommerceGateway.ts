@@ -508,9 +508,10 @@ export interface CommerceSiteControls {
 export interface CommerceSiteControlsWrite {
   promo: {
     enabled: boolean;
-    type: "general" | "product" | "simple_gifts";
+    type: "general" | "product" | "storewide" | "simple_gifts";
     productId: number;
     salePrice: number;
+    discountPercent: number;
     sitewideLabel: string;
     eyebrow: string;
     title: string;

@@ -944,7 +944,7 @@ test("publishes Site Controls through the protected operations bridge", async ()
 
   const controls = await gateway.saveSiteControls({
     promo: {
-      enabled: true, type: "general", productId: 0, salePrice: 0, sitewideLabel: "10% SITEWIDE",
+      enabled: true, type: "general", productId: 0, salePrice: 0, discountPercent: 0, sitewideLabel: "10% SITEWIDE",
       eyebrow: "NOTICE", title: "Operational update", info: "Storewide announcement", ctaLabel: "View details",
       ctaUrl: "/shop", durationDays: 1, durationHours: 0, durationMinutes: 0, restart: true,
     },

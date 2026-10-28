@@ -185,6 +185,45 @@ html[data-theme="dark"] {
   background: var(--field);
   color: var(--ink);
 }
+
+.storewide-sale-editor {
+  padding: 15px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-radius: 10px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 5%, var(--surface)) 0%, var(--surface) 58%);
+}
+.storewide-sale-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(220px, .65fr); gap: 12px; margin-top: 13px; }
+.storewide-sale-settings { display: grid; grid-template-columns: minmax(0, 1fr) minmax(210px, .7fr); gap: 10px; }
+.sitewide-title-field,
+.storewide-discount-field { display: grid; gap: 6px; padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.sitewide-title-field > span,
+.storewide-discount-field > span { color: var(--muted); font-size: 7px; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; }
+.sitewide-title-field input,
+.storewide-discount-field input { width: 100%; min-height: 40px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); color: var(--ink); font: inherit; font-size: 10px; font-weight: 750; outline: 0; }
+.sitewide-title-field input { padding: 0 11px; }
+.sitewide-title-field input:focus,
+.storewide-discount-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.sitewide-title-field small { color: var(--muted); font-size: 7px; }
+.storewide-discount-field > div:first-of-type { display: grid; grid-template-columns: 76px auto; align-items: center; gap: 8px; }
+.storewide-discount-field input { padding: 0 9px; text-align: center; font-size: 17px; }
+.storewide-discount-field b { color: var(--accent); font-size: 10px; letter-spacing: .08em; }
+.storewide-discount-presets { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+.storewide-discount-presets button { min-height: 29px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-strong); color: var(--muted); font: inherit; font-size: 7px; font-weight: 800; cursor: pointer; }
+.storewide-discount-presets button:hover,
+.storewide-discount-presets button.is-active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.storewide-sale-preview { position: relative; overflow: hidden; display: grid; align-content: center; min-height: 146px; padding: 17px; border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line)); border-radius: 10px; background: linear-gradient(145deg, #071220, #0d2032); color: #fff; }
+.storewide-sale-preview::after { content: "%"; position: absolute; right: -8px; bottom: -34px; color: rgba(105, 221, 243, .08); font-size: 118px; font-weight: 900; }
+.storewide-sale-preview small { position: relative; z-index: 1; color: #79d8ea; font-size: 6px; font-weight: 850; letter-spacing: .16em; }
+.storewide-sale-preview > strong { position: relative; z-index: 1; margin-top: 7px; font-size: 21px; line-height: 1; }
+.storewide-sale-preview h3 { position: relative; z-index: 1; margin: 5px 0 0; color: #fff; font-size: 10px; }
+.storewide-sale-preview p { position: relative; z-index: 1; margin: 9px 0 0; color: #b8c9d7; font-size: 7px; }
+.storewide-sale-preview > span { position: relative; z-index: 1; margin-top: 5px; color: #6f8798; font-size: 6px; }
+
+@media (max-width: 900px) {
+  .storewide-sale-grid,
+  .storewide-sale-settings { grid-template-columns: 1fr; }
+  .storewide-sale-preview { min-height: 125px; }
+}
 .site-control-duration .site-control-restart { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 8px; }
 .site-control-duration .site-control-restart input { width: 15px; height: 15px; accent-color: var(--accent); }
 

@@ -19,6 +19,7 @@ function writeInput(): IndependentSiteControlsWrite {
       type: "general",
       productId: 0,
       salePrice: 0,
+      discountPercent: 0,
       sitewideLabel: "",
       eyebrow: "Notice",
       title: "Laboratory update",
@@ -87,6 +88,27 @@ test("a product campaign replaces an old CTA with the exact selected product URL
 
   assert.equal(value.promo.ctaUrl, "/product/test-compound/");
   assert.equal(value.promo.product?.promoPrice, 40);
+});
+
+test("a storewide campaign publishes one bounded discount for every checkout surface", () => {
+  const write = writeInput();
+  write.promo.enabled = true;
+  write.promo.type = "storewide";
+  write.promo.discountPercent = 20;
+  write.promo.title = "Anniversary sale";
+  const value = buildIndependentSiteControls(
+    write,
+    defaultIndependentSiteControls(),
+    null,
+    "Operations Admin",
+    new Date("2026-10-27T17:00:00.000Z"),
+  );
+
+  assert.equal(value.promo.type, "storewide");
+  assert.equal(value.promo.discountPercent, 20);
+  assert.equal(value.promo.title, "Anniversary sale");
+  assert.equal(value.promo.product, null);
+  assert.equal(value.promo.endsAt, "2026-10-28T17:00:00.000Z");
 });
 
 test("public Site Controls excludes the internal editor identity", () => {

@@ -661,6 +661,7 @@ interface SiteControls {
     endsAt: string | null;
     ctaLabel: string;
     ctaUrl: string;
+    discountPercent?: number;
     product: {
       id: number;
       name: string;
@@ -1020,7 +1021,7 @@ let customerSearch = "";
 let customerSort = "recent";
 let customerPage = 1;
 let extensionsData: ExtensionsPayload | undefined;
-let selectedPromoType: "general" | "product" | "simple_gifts" = "general";
+let selectedPromoType: "general" | "product" | "storewide" | "simple_gifts" = "general";
 let siteControlsDraft = initialSiteControlsDraftState();
 let orderStatusFilter = "all";
 let orderSearch = "";
@@ -7358,9 +7359,10 @@ function renderCoaReviewQueue(): void {
     : '<div class="module-empty"><span>✓</span><strong>No certificates are waiting for review.</strong><small>Upload a PDF or paste a laboratory link above.</small></div>';
 }
 
-function normalizePromoType(value: string): "general" | "product" | "simple_gifts" {
+function normalizePromoType(value: string): "general" | "product" | "storewide" | "simple_gifts" {
   if (value === "product") return "product";
-  if (value === "simple_gifts" || value === "sitewide") return "simple_gifts";
+  if (value === "storewide" || value === "sitewide") return "storewide";
+  if (value === "simple_gifts") return "simple_gifts";
   return "general";
 }
 
@@ -7431,6 +7433,14 @@ function updateSiteControlsQuickSummary(): void {
     promoDetail.textContent = product
       ? "The selected price will apply in the product, cart and checkout."
       : "Choose one product before publishing.";
+    return;
+  }
+  if (selectedPromoType === "storewide") {
+    const discount = Math.max(0, Number(requiredElement<HTMLInputElement>("#promo-discount-percent").value) || 0);
+    promoSummary.textContent = discount ? `${discount}% off the entire store` : "Storewide sale needs a discount";
+    promoDetail.textContent = discount
+      ? "Every eligible catalog price will match in the storefront, cart and checkout."
+      : "Choose the percentage before publishing.";
     return;
   }
   promoSummary.textContent = selectedPromoType === "simple_gifts" ? "Store message ready" : "Announcement ready";
@@ -7509,6 +7519,24 @@ function updatePromoProductPreview(): void {
   updateSiteControlsQuickSummary();
 }
 
+function updateStorewideSalePreview(): void {
+  const input = requiredElement<HTMLInputElement>("#promo-discount-percent");
+  const discount = Math.max(0, Number(input.value) || 0);
+  const titleInput = requiredElement<HTMLInputElement>("#promo-storewide-title");
+  const title = titleInput.value.trim() || "Storewide sale";
+  const valid = discount >= 1 && discount <= 80;
+  input.setAttribute("aria-invalid", String(Boolean(discount && !valid)));
+  requiredElement<HTMLElement>("#promo-storewide-preview-percent").textContent = valid ? `${discount}% OFF` : "—% OFF";
+  requiredElement<HTMLElement>("#promo-storewide-preview-title").textContent = title;
+  requiredElement<HTMLElement>("#promo-storewide-status").textContent = valid
+    ? "Ready for catalog + cart + checkout"
+    : "Choose a discount from 1% to 80%";
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-storewide-discount]")) {
+    button.classList.toggle("is-active", Number(button.dataset.storewideDiscount) === discount);
+  }
+  updateSiteControlsQuickSummary();
+}
+
 function updateMaintenancePreview(): void {
   const enabled = requiredElement<HTMLInputElement>("#maintenance-enabled").checked;
   const title = requiredElement<HTMLInputElement>("#maintenance-title").value.trim();
@@ -7566,9 +7594,11 @@ function renderSiteControls(options: { force?: boolean } = {}): void {
   requiredElement<HTMLInputElement>("#promo-eyebrow").value = controls.promo.eyebrow;
   requiredElement<HTMLInputElement>("#promo-cta").value = controls.promo.ctaLabel;
   requiredElement<HTMLInputElement>("#promo-title").value = controls.promo.title;
+  requiredElement<HTMLInputElement>("#promo-storewide-title").value = controls.promo.title;
   requiredElement<HTMLTextAreaElement>("#promo-info").value = controls.promo.info;
   requiredElement<HTMLInputElement>("#promo-cta-url").value = controls.promo.ctaUrl;
-  requiredElement<HTMLInputElement>("#promo-sitewide-label").value = "10% SITEWIDE";
+  requiredElement<HTMLInputElement>("#promo-sitewide-label").value = controls.promo.type === "simple_gifts" ? controls.promo.title : "10% SITEWIDE";
+  requiredElement<HTMLInputElement>("#promo-discount-percent").value = String(Math.max(1, Number(controls.promo.discountPercent) || 20));
   requiredElement<HTMLElement>("#promo-ends-at").textContent = controls.promo.endsAt
     ? `Ends ${formatCommerceTimestamp(controls.promo.endsAt)}`
     : "No active end date";
@@ -7582,6 +7612,7 @@ function renderSiteControls(options: { force?: boolean } = {}): void {
   requiredElement<HTMLInputElement>("#promo-sale-price-input").value = controls.promo.product?.promoPrice ? String(controls.promo.product.promoPrice) : "";
   renderPromoEditorMode();
   updatePromoProductPreview();
+  updateStorewideSalePreview();
   requiredElement<HTMLInputElement>("#maintenance-enabled").checked = controls.maintenance.enabled;
   requiredElement<HTMLInputElement>("#maintenance-title").value = controls.maintenance.title;
   requiredElement<HTMLTextAreaElement>("#maintenance-message").value = controls.maintenance.message;
@@ -7662,6 +7693,7 @@ async function saveSiteControls(): Promise<void> {
   const promotionEnabled = requiredElement<HTMLInputElement>("#promo-enabled").checked;
   const selectedProduct = siteControlProduct();
   const requestedSalePrice = Number(requiredElement<HTMLInputElement>("#promo-sale-price-input").value) || 0;
+  const requestedDiscountPercent = Number(requiredElement<HTMLInputElement>("#promo-discount-percent").value) || 0;
   if (promotionEnabled && selectedPromoType === "product") {
     const catalogPrice = selectedProduct?.regularPrice || selectedProduct?.price || 0;
     if (!selectedProduct) {
@@ -7679,6 +7711,16 @@ async function saveSiteControls(): Promise<void> {
       return;
     }
   }
+  if (promotionEnabled && selectedPromoType === "storewide" && (requestedDiscountPercent < 1 || requestedDiscountPercent > 80)) {
+    showToast("Check the storewide discount", "Choose a percentage from 1% to 80% before publishing.", false);
+    requiredElement<HTMLInputElement>("#promo-discount-percent").focus();
+    return;
+  }
+  if (promotionEnabled && selectedPromoType === "storewide" && !requiredElement<HTMLInputElement>("#promo-storewide-title").value.trim()) {
+    showToast("Name the sale", "Add a short reason such as Anniversary Sale or Weekend Sale.", false);
+    requiredElement<HTMLInputElement>("#promo-storewide-title").focus();
+    return;
+  }
   const save = requiredElement<HTMLButtonElement>("#site-controls-save");
   save.disabled = true;
   save.textContent = "Securing change…";
@@ -7689,9 +7731,12 @@ async function saveSiteControls(): Promise<void> {
       type: selectedPromoType,
       productId: Number(requiredElement<HTMLSelectElement>("#promo-product-select").value) || 0,
       salePrice: requestedSalePrice,
+      discountPercent: requestedDiscountPercent,
       sitewideLabel: requiredElement<HTMLInputElement>("#promo-sitewide-label").value.trim(),
       eyebrow: requiredElement<HTMLInputElement>("#promo-eyebrow").value.trim(),
-      title: requiredElement<HTMLInputElement>("#promo-title").value.trim(),
+      title: (selectedPromoType === "storewide"
+        ? requiredElement<HTMLInputElement>("#promo-storewide-title").value
+        : requiredElement<HTMLInputElement>("#promo-title").value).trim(),
       info: requiredElement<HTMLTextAreaElement>("#promo-info").value.trim(),
       ctaLabel: requiredElement<HTMLInputElement>("#promo-cta").value.trim(),
       ctaUrl: requiredElement<HTMLInputElement>("#promo-cta-url").value.trim(),
@@ -7734,10 +7779,16 @@ async function saveSiteControls(): Promise<void> {
       await loadExtensions();
     }
     showToast(
-      promotionEnabled && selectedPromoType === "product" ? "Promotion is live" : "Storefront controls published",
+      promotionEnabled && selectedPromoType === "product"
+        ? "Promotion is live"
+        : promotionEnabled && selectedPromoType === "storewide"
+          ? "Storewide sale is live"
+          : "Storefront controls published",
       promotionEnabled && selectedPromoType === "product"
         ? "The promotional price is synchronized with the product, cart and checkout."
-        : "research-peptides is now reading this revision directly.",
+        : promotionEnabled && selectedPromoType === "storewide"
+          ? `${requestedDiscountPercent}% off is active across the catalog with the live countdown.`
+          : "research-peptides is now reading this revision directly.",
     );
   } catch (error) {
     if (error instanceof Error && error.message.includes("another session")) {
@@ -10328,6 +10379,9 @@ requiredElement<HTMLButtonElement>("#print-barcode-label").addEventListener("cli
 for (const option of document.querySelectorAll<HTMLButtonElement>("[data-promo-option]")) {
   option.addEventListener("click", () => {
     selectedPromoType = normalizePromoType(option.dataset.promoOption || "general");
+    if (selectedPromoType === "storewide") {
+      requiredElement<HTMLInputElement>("#promo-cta-url").value = "/research-peptides/";
+    }
     markSiteControlsDirty();
     renderPromoEditorMode();
   });
@@ -10355,6 +10409,24 @@ requiredElement<HTMLSelectElement>("#promo-product-select").addEventListener("ch
   updatePromoProductPreview();
 });
 requiredElement<HTMLInputElement>("#promo-sale-price-input").addEventListener("input", updatePromoProductPreview);
+requiredElement<HTMLInputElement>("#promo-discount-percent").addEventListener("input", updateStorewideSalePreview);
+requiredElement<HTMLInputElement>("#promo-storewide-title").addEventListener("input", () => {
+  requiredElement<HTMLInputElement>("#promo-title").value = requiredElement<HTMLInputElement>("#promo-storewide-title").value;
+  updateStorewideSalePreview();
+});
+requiredElement<HTMLInputElement>("#promo-title").addEventListener("input", () => {
+  if (selectedPromoType === "storewide") {
+    requiredElement<HTMLInputElement>("#promo-storewide-title").value = requiredElement<HTMLInputElement>("#promo-title").value;
+    updateStorewideSalePreview();
+  }
+});
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-storewide-discount]")) {
+  button.addEventListener("click", () => {
+    requiredElement<HTMLInputElement>("#promo-discount-percent").value = button.dataset.storewideDiscount || "20";
+    updateStorewideSalePreview();
+    markSiteControlsDirty();
+  });
+}
 for (const button of document.querySelectorAll<HTMLButtonElement>("[data-promo-duration]")) {
   button.addEventListener("click", () => {
     const value = button.dataset.promoDuration || "custom";

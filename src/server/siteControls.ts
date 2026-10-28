@@ -27,6 +27,7 @@ export interface IndependentSiteControls {
     endsAt: string | null;
     ctaLabel: string;
     ctaUrl: string;
+    discountPercent: number;
     product: {
       id: number;
       name: string;
@@ -55,9 +56,10 @@ export interface IndependentSiteControls {
 export interface IndependentSiteControlsWrite {
   promo: {
     enabled: boolean;
-    type: "general" | "product" | "simple_gifts";
+    type: "general" | "product" | "storewide" | "simple_gifts";
     productId: number;
     salePrice: number;
+    discountPercent: number;
     sitewideLabel: string;
     eyebrow: string;
     title: string;
@@ -87,6 +89,7 @@ const DEFAULT_PROMO = {
   endsAt: null,
   ctaLabel: "Shop products",
   ctaUrl: "/research-peptides/",
+  discountPercent: 0,
   product: null,
 };
 
@@ -170,6 +173,9 @@ export function buildIndependentSiteControls(
       ctaUrl: write.promo.type === "product" && productSnapshot?.url
         ? productSnapshot.url
         : write.promo.ctaUrl,
+      discountPercent: write.promo.type === "storewide"
+        ? Math.max(1, Math.min(80, write.promo.discountPercent))
+        : 0,
       product: productSnapshot
         ? {
             ...productSnapshot,

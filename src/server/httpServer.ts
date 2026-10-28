@@ -5118,7 +5118,7 @@ export function createMonitorServer(
           ? undefined
           : integer(root.expectedRevision, 0, Number.MAX_SAFE_INTEGER);
         const promoType = cleanText(promo.type, 24);
-        if (!["general", "product", "simple_gifts"].includes(promoType)) {
+        if (!["general", "product", "storewide", "simple_gifts"].includes(promoType)) {
           json(response, 400, { error: "Select a valid promotion type" });
           return;
         }
@@ -5140,6 +5140,7 @@ export function createMonitorServer(
             type: promoType as IndependentSiteControlsWrite["promo"]["type"],
             productId: integer(promo.productId, 0, Number.MAX_SAFE_INTEGER),
             salePrice: Math.max(0, Number(promo.salePrice) || 0),
+            discountPercent: Math.max(0, Number(promo.discountPercent) || 0),
             sitewideLabel: cleanText(promo.sitewideLabel, 80),
             eyebrow: cleanText(promo.eyebrow, 80),
             title,
@@ -5160,6 +5161,12 @@ export function createMonitorServer(
         };
         if (siteControlsWrite.promo.enabled && siteControlsWrite.promo.type === "product" && (!siteControlsWrite.promo.productId || siteControlsWrite.promo.salePrice <= 0)) {
           json(response, 400, { error: "Choose a product and enter a valid sale price before activating the campaign" });
+          return;
+        }
+        if (siteControlsWrite.promo.enabled && siteControlsWrite.promo.type === "storewide" && (
+          siteControlsWrite.promo.discountPercent < 1 || siteControlsWrite.promo.discountPercent > 80
+        )) {
+          json(response, 400, { error: "Choose a storewide discount from 1% to 80% before activating the campaign" });
           return;
         }
         try {
