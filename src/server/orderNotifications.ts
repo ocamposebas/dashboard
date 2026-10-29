@@ -5,6 +5,25 @@ export interface OrderNotificationSource {
   currency: string;
   total: number;
   paymentMethodId: string;
+  status?: string;
+}
+
+export function ordersEnteringAttentionStatus<T extends { id: number; status?: string }>(
+  currentOrders: T[],
+  previousOrders: unknown,
+): T[] {
+  if (!Array.isArray(previousOrders)) return [];
+  const previous = new Map<number, string>();
+  for (const value of previousOrders) {
+    if (!value || typeof value !== "object") continue;
+    const item = value as Record<string, unknown>;
+    const id = Number(item.id);
+    if (Number.isSafeInteger(id) && id > 0) previous.set(id, String(item.status || "").toLowerCase());
+  }
+  return currentOrders.filter((order) => {
+    const status = String(order.status || "").toLowerCase();
+    return ["pending", "failed"].includes(status) && previous.has(order.id) && previous.get(order.id) !== status;
+  });
 }
 
 export interface OrderNotificationPayload {
@@ -34,13 +53,16 @@ export function ordersMissingFromSnapshot<T extends { id: number }>(
 
 export function orderNotificationPayload(order: OrderNotificationSource): OrderNotificationPayload {
   const manualReview = order.paymentMethodId === "phaseone_zelle";
+  const status = String(order.status || "").toLowerCase();
+  const needsAttention = status === "pending" || status === "failed";
+  const statusLabel = status === "failed" ? "failed" : "pending";
   return {
-    dedupeKey: `commerce-order:${order.id}`,
+    dedupeKey: needsAttention ? `commerce-order:${order.id}:${status}` : `commerce-order:${order.id}`,
     notification: {
       type: "order",
-      severity: manualReview ? "warning" : "success",
-      title: `New order #${order.number}`,
-      message: `${order.customer} · ${order.currency} ${order.total.toFixed(2)}${manualReview ? " · Payment review required" : ""}`,
+      severity: manualReview || needsAttention ? "warning" : "success",
+      title: needsAttention ? `Order #${order.number} ${statusLabel}` : `New order #${order.number}`,
+      message: `${order.customer} · ${order.currency} ${order.total.toFixed(2)}${status === "failed" ? " · Payment or checkout failed" : status === "pending" ? " · Waiting for payment or review" : manualReview ? " · Payment review required" : ""}`,
       actionView: "orders",
       actionEntityId: order.id,
     },

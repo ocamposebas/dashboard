@@ -125,6 +125,15 @@ function productBarcodeOrderItemIds(session: FulfillmentSession): Set<number> {
   }));
 }
 
+function manualOverrideOrderItemIds(session: FulfillmentSession): Set<number> {
+  const progress = record(session.progress);
+  if (!progress || !Array.isArray(progress.manualOverrideOrderItemIds)) return new Set();
+  return new Set(progress.manualOverrideOrderItemIds.flatMap((value) => {
+    const orderItemId = positiveInteger(value);
+    return orderItemId ? [orderItemId] : [];
+  }));
+}
+
 function coaIsApproved(
   coa: CommerceCoa,
   line: SecuredLine,
@@ -167,6 +176,7 @@ export function buildPackingSnapshot(input: {
   const progress = progressLines(input.session);
   const recordedAllocations = progressAllocations(input.session);
   const productBarcodeLines = productBarcodeOrderItemIds(input.session);
+  const manualOverrideLines = manualOverrideOrderItemIds(input.session);
   if (!secured.length || secured.length !== input.order.lineItems.length || progress.length !== secured.length) {
     throw new FulfillmentPackingError("The secured picking record is incomplete", "invalid_state");
   }
@@ -193,8 +203,9 @@ export function buildPackingSnapshot(input: {
       );
     }
     const verifiedWithProductBarcode = productBarcodeLines.has(line.orderItemId);
+    const verifiedWithManualOverride = manualOverrideLines.has(line.orderItemId);
     const lineAllocations = recordedAllocations.filter((item) => item.orderItemId === line.orderItemId);
-    const allocations = verifiedWithProductBarcode
+    const allocations = verifiedWithProductBarcode || verifiedWithManualOverride
       ? []
       : lineAllocations.length
       ? lineAllocations
@@ -206,7 +217,7 @@ export function buildPackingSnapshot(input: {
           quantity: counted.verifiedQuantity,
         }]
         : [];
-    const requiresVialQr = !verifiedWithProductBarcode && input.coas.some((coa) =>
+    const requiresVialQr = !verifiedWithProductBarcode && !verifiedWithManualOverride && input.coas.some((coa) =>
       coaRequiresVialQrForLine(coa, line));
     if (!allocations.length && requiresVialQr) {
       throw new FulfillmentPackingError(
@@ -252,6 +263,7 @@ export function buildPackingSnapshot(input: {
       lot: primary?.lot || "",
       batch: primary?.batch || "",
       allocations: packedAllocations,
+      ...(verifiedWithManualOverride ? { verificationMethod: "manual_override" as const } : {}),
     };
   });
   const totalUnits = lines.reduce((sum, line) => sum + line.requiredQuantity, 0);

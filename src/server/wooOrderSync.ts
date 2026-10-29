@@ -135,6 +135,7 @@ export class WooOrderSync {
               currency: String(order.currency || "USD").toUpperCase(),
               total: Number.isFinite(parsedTotal) ? parsedTotal : 0,
               paymentMethodId: String(order.payment_method || ""),
+              status,
             } satisfies OrderNotificationSource,
           }]
         : [];

@@ -16,10 +16,12 @@ export interface NewOrderPushPayload {
 
 export function newOrderPushPayload(order: OrderNotificationSource): NewOrderPushPayload {
   const manualReview = order.paymentMethodId === "phaseone_zelle";
+  const status = String(order.status || "").toLowerCase();
+  const needsAttention = status === "pending" || status === "failed";
   return {
-    title: `New order #${order.number}`,
-    body: `${manualReview ? "Zelle · " : ""}${order.customer} · ${order.currency} ${order.total.toFixed(2)}`,
-    tag: `phaseone-order-${order.id}`,
+    title: needsAttention ? `Order #${order.number} ${status}` : `New order #${order.number}`,
+    body: `${status === "failed" ? "Failed · " : status === "pending" ? "Pending · " : manualReview ? "Zelle · " : ""}${order.customer} · ${order.currency} ${order.total.toFixed(2)}`,
+    tag: `phaseone-order-${order.id}${needsAttention ? `-${status}` : ""}`,
     url: "/#orders",
   };
 }

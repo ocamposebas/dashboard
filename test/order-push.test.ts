@@ -34,3 +34,13 @@ test("builds a compact, order-specific phone notification", () => {
     url: "/#orders",
   });
 });
+
+test("builds attention push messages for pending and failed orders", () => {
+  const payload = newOrderPushPayload({
+    id: 44, number: "44", customer: "Review Customer", currency: "USD", total: 20,
+    paymentMethodId: "card", status: "pending",
+  });
+  assert.equal(payload.title, "Order #44 pending");
+  assert.match(payload.body, /^Pending/);
+  assert.equal(payload.tag, "phaseone-order-44-pending");
+});

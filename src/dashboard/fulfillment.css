@@ -171,6 +171,8 @@ html[data-theme="dark"] .fulfillment-status.is-packed { background: #2a2723; col
   .fulfillment-order-action { grid-column: 2 / 4; }
   .fulfillment-order-action .button { justify-content: center; }
 }
+
+.picking-manual-exception{margin-top:10px;border:0;border-bottom:1px solid currentColor;background:transparent;color:var(--muted);padding:3px 0;font:inherit;font-size:9px;font-weight:800;cursor:pointer}.picking-manual-exception:hover{color:#c27a2e}.picking-manual-exception:focus-visible{outline:2px solid #c27a2e;outline-offset:4px}
 @media (max-width: 960px) {
   .fulfillment-order-card { grid-template-columns: minmax(280px,1.15fr) minmax(260px,.85fr); gap: 13px 17px; }
   .fulfillment-order-facts { padding-right: 0; border-right: 0; }

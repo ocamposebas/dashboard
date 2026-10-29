@@ -89,6 +89,25 @@ test("one published product wins over stale draft or trashed duplicates", () => 
   assert.equal(exactAutomaticCoaProduct(coa, [draft, trashed, product])?.id, 533);
 });
 
+test("RT30 is recognized as the Retatrutide 30mg catalog presentation", () => {
+  const rt30 = { ...coa, productName: "RT30", familyName: "RT30", compound: "RT30", strength: "30mg" };
+  const reta = { ...product, id: 700, name: "Retatrutide 30mg", sku: "RT-30-MG", type: "simple" };
+  assert.equal(exactAutomaticCoaProduct(rt30, [reta])?.id, 700);
+});
+
+test("legacy repair replaces a demonstrably wrong product mapping with one exact catalog match", () => {
+  const rt30 = {
+    ...coa, id: "rt30", source: "wordpress_import", revision: 1, status: "Available",
+    productName: "RT30", familyName: "RT30", compound: "RT30", strength: "30mg",
+    matchedProductId: 999, matchedVariationId: 0, skus: [], currentShippingLot: true,
+  } as unknown as CommerceCoa & { source: string; revision: number };
+  const wrong = { ...product, id: 999, name: "Unrelated product", sku: "WRONG", type: "simple" };
+  const reta = { ...product, id: 700, name: "Retatrutide 30mg", sku: "RT-30-MG", type: "simple" };
+  const repairs = exactLegacyCoaCatalogRepairs([rt30], [wrong, reta], new Map());
+  assert.equal(repairs[0]?.productId, 700);
+  assert.deepEqual(repairs[0]?.skus, ["RT-30-MG"]);
+});
+
 test("an already available current lot is repaired when its catalog mapping is missing", () => {
   assert.equal(canAutomaticallyPublishCoa({
     ...coa,

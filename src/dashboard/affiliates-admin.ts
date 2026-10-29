@@ -278,6 +278,10 @@ function renderMetrics(): void {
   required("#affiliate-rule-minimum").textContent = money(settings.minimumPayout, settings.currency);
   required("#affiliate-rule-hold").textContent = `${settings.approvalHoldDays} days`;
   required("#affiliate-rule-currency").textContent = settings.currency;
+  required<HTMLInputElement>("#affiliate-setting-commission").value = String(settings.defaultCommissionRate);
+  required<HTMLInputElement>("#affiliate-setting-minimum").value = String(settings.minimumPayout);
+  required<HTMLInputElement>("#affiliate-setting-hold").value = String(settings.approvalHoldDays);
+  required<HTMLInputElement>("#affiliate-setting-currency").value = settings.currency;
   const navCount = required("#affiliates-nav-count");
   const pendingApplications = directory.applications.filter((application) => application.status === "pending").length;
   const attentionCount = metrics.pendingPayoutRequests + pendingApplications;
@@ -288,6 +292,36 @@ function renderMetrics(): void {
   sync.querySelector("b")!.textContent = directory.shadow.enabled ? "Dual tracking active" : "Affiliate tracking paused";
   sync.querySelector("small")!.textContent = `Synced ${new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(new Date(directory.syncedAt))}`;
   renderShadowComparison();
+}
+
+async function saveProgramSettings(): Promise<void> {
+  const button = required<HTMLButtonElement>("#affiliate-program-save");
+  const notice = required("#affiliate-program-notice");
+  button.disabled = true;
+  button.textContent = "Saving rules…";
+  notice.textContent = "Validating the new policy…";
+  try {
+    const response = await fetch("/api/affiliates/settings", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        defaultCommissionRate: Number(required<HTMLInputElement>("#affiliate-setting-commission").value),
+        minimumPayout: Number(required<HTMLInputElement>("#affiliate-setting-minimum").value),
+        approvalHoldDays: Number(required<HTMLInputElement>("#affiliate-setting-hold").value),
+        currency: required<HTMLInputElement>("#affiliate-setting-currency").value,
+      }),
+    });
+    const payload = await response.json() as { error?: string };
+    if (!response.ok) throw new Error(payload.error || "The program rules could not be saved");
+    await loadAffiliateAdmin(true);
+    notice.textContent = "Saved. Future commissions now use these rules.";
+  } catch (error: unknown) {
+    notice.textContent = error instanceof Error ? error.message : "The program rules could not be saved";
+  } finally {
+    button.disabled = false;
+    button.textContent = "Save program rules";
+  }
 }
 
 function renderShadowComparison(): void {
@@ -428,6 +462,10 @@ export function initAffiliateAdmin(): void {
     void saveAffiliateCoupon();
   });
   required("#affiliate-toggle-status").addEventListener("click", () => void toggleAffiliateStatus());
+  required<HTMLFormElement>("#affiliate-program-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    void saveProgramSettings();
+  });
   required<HTMLInputElement>("#affiliate-manage-code").addEventListener("input", (event) => {
     const input = event.currentTarget as HTMLInputElement;
     input.value = input.value.toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 40);

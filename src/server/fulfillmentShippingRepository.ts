@@ -237,6 +237,19 @@ export class FulfillmentShippingRepository {
     return row ? labelFromRow(row) : null;
   }
 
+  async getByOrderId(orderId: number): Promise<ShippingLabel | null> {
+    if (!Number.isSafeInteger(orderId) || orderId <= 0) {
+      throw new FulfillmentShippingRepositoryError("Order id is invalid", "invalid_input");
+    }
+    const result = await this.database.query<ShippingLabelRow>(`
+      SELECT * FROM fulfillment_shipping_labels
+      WHERE order_id = $1
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, [orderId]);
+    return result.rows[0] ? labelFromRow(result.rows[0]) : null;
+  }
+
   async getAttemptContext(fulfillmentId: string): Promise<{
     label: ShippingLabel;
     clientEventId: string;

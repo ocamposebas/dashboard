@@ -310,6 +310,21 @@ test("packing accepts an exact Available scanned COA without the current-shippin
   assert.equal(snapshot.lines[0]?.lot, "LOT-201");
 });
 
+test("packing records the one-line manual exception without inventing a COA allocation", () => {
+  const snapshot = pack({
+    session: session({
+      progress: {
+        verifiedUnits: 2, totalUnits: 2,
+        lines: [{ orderItemId: 701, requiredQuantity: 2, verifiedQuantity: 2 }],
+        allocations: [], productBarcodeOrderItemIds: [], manualOverrideOrderItemIds: [701],
+      },
+    }),
+  });
+  assert.equal(snapshot.lines[0]?.verificationMethod, "manual_override");
+  assert.equal(snapshot.lines[0]?.coaId, "");
+  assert.equal(snapshot.lines[0]?.lot, "");
+});
+
 test("packing preserves a legacy PLTZ lot after it was scanned for the current PL-TZ SKU", () => {
   const legacyOrder = order({
     lineItems: [{

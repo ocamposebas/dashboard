@@ -185,6 +185,48 @@ function tokenDigest(token: string): string {
 export class AffiliateRepository {
   constructor(private readonly database: Database) {}
 
+  async updateProgramSettings(input: {
+    defaultCommissionRate: number;
+    minimumPayout: number;
+    approvalHoldDays: number;
+    currency: string;
+    actorId: string;
+  }): Promise<void> {
+    await this.database.transaction(async (client) => {
+      const previous = await client.query<SettingsRow>(`
+        SELECT default_commission_rate, minimum_payout, approval_hold_days, currency,
+          shadow_mode_enabled, shadow_started_at, shadow_last_synced_at
+        FROM affiliate_program_settings
+        WHERE singleton = true
+        FOR UPDATE
+      `);
+      if (!previous.rows[0]) throw new Error("affiliate_settings_missing");
+      await client.query(`
+        UPDATE affiliate_program_settings
+        SET default_commission_rate = $1,
+            minimum_payout = $2,
+            approval_hold_days = $3,
+            currency = $4,
+            updated_at = now()
+        WHERE singleton = true
+      `, [input.defaultCommissionRate, input.minimumPayout, input.approvalHoldDays, input.currency]);
+      await this.audit(client, null, null, "program_settings_updated", "admin", input.actorId, {
+        previous: {
+          defaultCommissionRate: Number(previous.rows[0].default_commission_rate),
+          minimumPayout: Number(previous.rows[0].minimum_payout),
+          approvalHoldDays: previous.rows[0].approval_hold_days,
+          currency: previous.rows[0].currency,
+        },
+        next: {
+          defaultCommissionRate: input.defaultCommissionRate,
+          minimumPayout: input.minimumPayout,
+          approvalHoldDays: input.approvalHoldDays,
+          currency: input.currency,
+        },
+      });
+    });
+  }
+
   async importLegacy(coupons: LegacyAffiliateCoupon[]): Promise<void> {
     const grouped = new Map<number, LegacyAffiliateCoupon[]>();
     for (const coupon of coupons) {

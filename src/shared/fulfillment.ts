@@ -151,6 +151,7 @@ export interface FulfillmentQueuePayload {
 
 export type FulfillmentScanReasonCode =
   | "accepted"
+  | "manual_override"
   | "unknown_barcode"
   | "inactive_barcode"
   | "batch_required"
@@ -206,6 +207,7 @@ export interface FulfillmentPackingLineSnapshot {
   lot: string;
   batch: string;
   allocations: FulfillmentCoaAllocation[];
+  verificationMethod?: "scan" | "manual_override";
 }
 
 export interface FulfillmentCoaAllocation {

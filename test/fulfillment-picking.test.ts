@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { BarcodeRegistryRecord } from "../src/shared/barcodeFulfillment.js";
 import type { FulfillmentScanFeedback, FulfillmentSession } from "../src/shared/fulfillment.js";
-import { decideFulfillmentScan } from "../src/server/fulfillmentPicking.js";
+import { decideFulfillmentManualOverride, decideFulfillmentScan } from "../src/server/fulfillmentPicking.js";
 import type { CommerceCoa, CommerceOrder } from "../src/server/wooCommerceGateway.js";
 
 function order(overrides: Partial<CommerceOrder> = {}): CommerceOrder {
@@ -491,4 +491,48 @@ test("a live SKU or quantity change cannot be scanned into the secured session",
   });
   const decision = decideFulfillmentScan({ session: session(), barcode: barcode(), order: changedLine, coas: [coa()] });
   assert.equal(decision.reasonCode, "line_changed");
+});
+
+test("one unstarted product can be completed with an audited manual exception", () => {
+  const decision = decideFulfillmentManualOverride({
+    session: session(), order: order(), orderItemId: 601, reason: "Damaged item code",
+  });
+  assert.equal(decision.result, "accepted");
+  assert.equal(decision.reasonCode, "manual_override");
+  assert.equal(decision.quantityDelta, 2);
+  const progress = decision.nextProgress as unknown as {
+    verifiedUnits: number; manualOverrideOrderItemIds: number[];
+  };
+  assert.equal(progress.verifiedUnits, 2);
+  assert.deepEqual(progress.manualOverrideOrderItemIds, [601]);
+});
+
+test("a second manual product exception in the same order stays blocked", () => {
+  const decision = decideFulfillmentManualOverride({
+    session: session(0, {
+      progress: {
+        verifiedUnits: 1, totalUnits: 3,
+        lines: [
+          { orderItemId: 601, requiredQuantity: 2, verifiedQuantity: 0 },
+          { orderItemId: 602, requiredQuantity: 1, verifiedQuantity: 1 },
+        ],
+        manualOverrideOrderItemIds: [602],
+      },
+      sourceSnapshot: {
+        orderId: 1401,
+        lines: [
+          { orderItemId: 601, productId: 201, variationId: 301, sku: "BPC-10-BLUE", quantity: 2, locationCode: null, coaId: null, lot: null },
+          { orderItemId: 602, productId: 202, variationId: 0, sku: "CREAM", quantity: 1, locationCode: null, coaId: null, lot: null },
+        ],
+      },
+    }),
+    order: order({
+      lineItems: [
+        { id: 601, productId: 201, variationId: 301, name: "BPC", sku: "BPC-10-BLUE", quantity: 2, imageUrl: null },
+        { id: 602, productId: 202, variationId: 0, name: "Cream", sku: "CREAM", quantity: 1, imageUrl: null },
+      ] as CommerceOrder["lineItems"],
+    }),
+    orderItemId: 601, reason: "Unreadable code",
+  });
+  assert.equal(decision.reasonCode, "verification_method_changed");
 });

@@ -348,6 +348,7 @@ interface OrderOperations {
   coas: OrderCoaWorkspace;
   notes: Array<{ id: number; note: string; customerNote: boolean; createdAt: string | null; author: string }>;
   affiliateCommission?: AffiliateCommissionSummary | null;
+  shippingLabel?: ShippingLabel | null;
 }
 
 interface InventoryOperationsPayload {
@@ -3884,6 +3885,12 @@ function renderOrderDetail(order: CommerceOrder): void {
       <dl><div><dt>Eligible sale</dt><dd>${escapeHtml(formatCurrency(commission.eligibleAmount, commission.currency))}</dd></div><div><dt>Commission rule</dt><dd>${escapeHtml(commissionRule)}</dd></div><div><dt>Commission earned</dt><dd>${escapeHtml(formatCurrency(commission.commissionAmount, commission.currency))}</dd></div></dl>
       <div class="order-affiliate-state"><span class="affiliate-ledger-status is-${escapeHtml(commission.status)}">${escapeHtml(commissionStatusLabel)}</span><small>${escapeHtml(commissionTiming)}</small></div>
     </section>` : "";
+  const storedLabel = operations.shippingLabel;
+  const shippingLabelCard = storedLabel?.state === "label_ready"
+    ? `<section class="order-detail-section order-shipping-label"><div class="order-section-head"><div><p class="section-kicker">Purchased shipping label</p><h3>${escapeHtml(storedLabel.carrierName)} · ${escapeHtml(storedLabel.serviceName)}</h3><p>${escapeHtml(storedLabel.trackingNumber || "Tracking saved")} · ${formatCurrency(storedLabel.amount, storedLabel.currency)}</p></div><span>Printed ${storedLabel.printCount} time${storedLabel.printCount === 1 ? "" : "s"}</span></div><button class="button button--primary" type="button" data-order-reprint-label="/api/shipping/label/print?fulfillmentId=${encodeURIComponent(storedLabel.fulfillmentId)}">Reprint 4×6 shipping label</button><small>Reprinting opens the saved PDF only. It never purchases a second label.</small></section>`
+    : storedLabel
+      ? `<section class="order-detail-section order-shipping-label is-warning"><div class="order-section-head"><div><p class="section-kicker">Shipping label</p><h3>Label needs review</h3><p>${escapeHtml(storedLabel.failureMessage || `Current state: ${storedLabel.state}`)}</p></div></div></section>`
+      : "";
 
   detailContent.innerHTML = `
     ${order.repeatOperations?.operationalRepeat ? `<section class="order-repeat-notice"><span>↻</span><div><p class="section-kicker">Operational repeat</p><strong>Copied from order #${formatNumber(order.repeatOperations.sourceOrderId)}</strong><small>No customer charge was created and this order is excluded from revenue and profit.</small></div></section>` : ""}
@@ -3905,7 +3912,7 @@ function renderOrderDetail(order: CommerceOrder): void {
       <section class="agreement-card agreement-card--${order.agreement.status}"><div class="agreement-mark">${order.agreement.status === "sealed" ? "✓" : "—"}</div><div><p class="section-kicker">Signed agreement</p><h3>${order.agreement.status === "sealed" ? "Sealed and archived" : order.agreement.status === "accepted" ? "Accepted — archive pending" : "No agreement found"}</h3><p>${order.agreement.signer ? `Signed by ${escapeHtml(order.agreement.signer)} · ` : ""}${escapeHtml(formatCommerceTimestamp(order.agreement.acceptedAt))}${order.agreement.version ? ` · Version ${escapeHtml(order.agreement.version)}` : ""}</p></div>${order.agreement.downloadAvailable ? `<a class="button button--secondary" href="/api/commerce/order-agreement?orderId=${order.id}" target="_blank">Open signed PDF</a>` : ""}</section>
     </div>
     <div class="order-tab-panel" data-order-tab-panel="coas"${activeOrderTab === "coas" ? "" : " hidden"}><section class="coa-workspace-head"><div><p class="section-kicker">Lot traceability</p><h3>Assign certificates by product and quantity</h3><p>Use the verified shipping lot for every fulfilled unit.</p></div><span>${operations.coas.items.reduce((sum, line) => sum + line.assignments.length, 0)} assignments</span></section><div class="coa-order-list">${coaLines || `<div class="operations-empty"><strong>${operations.coas.unavailable ? "COA assignment needs the bridge update" : "No COA-compatible line items"}</strong><span>${operations.coas.unavailable ? "Install Operations Bridge 1.4 to manage order certificates." : "This order has no assignable certificate records."}</span></div>`}</div></div>
-    <div class="order-tab-panel" data-order-tab-panel="shipping"${activeOrderTab === "shipping" ? "" : " hidden"}><div class="shipping-status-grid"><article><span>Carrier sync</span><strong>${order.shippingOperations.exported ? "Exported" : "Not exported"}</strong><small>${escapeHtml(order.shippingOperations.carrier || "Carrier not assigned")} ${escapeHtml(order.shippingOperations.service || "")}</small></article><article><span>Tracking</span><strong>${escapeHtml(order.shippingOperations.trackingNumber || "Not available")}</strong><small>${formatNumber(order.shippingOperations.shippedItemCount)} shipped items</small></article><article><span>Phase One protection</span><strong>${order.shippingOperations.protectionSelected ? "Internal reserve" : "Not selected"}</strong><small>${order.shippingOperations.protectionSelected ? `${escapeHtml(formatCurrency(order.shippingOperations.protectionFee, order.currency))} retained · carrier insurance $0` : "No protection fee recorded"}</small></article></div><section class="order-detail-section"><div class="order-section-head"><div><p class="section-kicker">Delivery destination</p><h3>Shipping address</h3></div></div><div class="address-card">${shippingLines.length ? shippingLines.map((line, index) => index === 0 ? `<strong>${escapeHtml(line)}</strong>` : `<span>${escapeHtml(line)}</span>`).join("") : '<span>No shipping address supplied.</span>'}</div></section></div>
+    <div class="order-tab-panel" data-order-tab-panel="shipping"${activeOrderTab === "shipping" ? "" : " hidden"}>${shippingLabelCard}<div class="shipping-status-grid"><article><span>Carrier sync</span><strong>${order.shippingOperations.exported ? "Exported" : "Not exported"}</strong><small>${escapeHtml(order.shippingOperations.carrier || "Carrier not assigned")} ${escapeHtml(order.shippingOperations.service || "")}</small></article><article><span>Tracking</span><strong>${escapeHtml(order.shippingOperations.trackingNumber || "Not available")}</strong><small>${formatNumber(order.shippingOperations.shippedItemCount)} shipped items</small></article><article><span>Phase One protection</span><strong>${order.shippingOperations.protectionSelected ? "Internal reserve" : "Not selected"}</strong><small>${order.shippingOperations.protectionSelected ? `${escapeHtml(formatCurrency(order.shippingOperations.protectionFee, order.currency))} retained · carrier insurance $0` : "No protection fee recorded"}</small></article></div><section class="order-detail-section"><div class="order-section-head"><div><p class="section-kicker">Delivery destination</p><h3>Shipping address</h3></div></div><div class="address-card">${shippingLines.length ? shippingLines.map((line, index) => index === 0 ? `<strong>${escapeHtml(line)}</strong>` : `<span>${escapeHtml(line)}</span>`).join("") : '<span>No shipping address supplied.</span>'}</div></section></div>
     <div class="order-tab-panel" data-order-tab-panel="timeline"${activeOrderTab === "timeline" ? "" : " hidden"}><section class="timeline-head"><div><p class="section-kicker">Audit trail</p><h3>Complete order history</h3></div><span>${timelineEntries.length} recorded events</span></section><div class="order-timeline">${timelineEntries.map((entry) => `<article><i></i><div><time>${escapeHtml(formatCommerceTimestamp(entry.at))}</time><strong>${escapeHtml(entry.title)}</strong><p>${escapeHtml(entry.copy)}</p></div></article>`).join("")}</div></div>
   `;
 
@@ -5129,7 +5136,7 @@ function renderPickingStation(order: FulfillmentQueueEntry): string {
       : "Scan the required code";
     return `<article class="picking-product-card${lineComplete ? " is-complete" : ""}${isNext ? " is-next" : ""}" data-picking-line="${line.orderItemId}">
       <div class="picking-product-image">${line.imageUrl ? `<img src="${escapeHtml(line.imageUrl)}" alt="" />` : '<span>P1</span>'}<i>${lineComplete ? "✓" : remaining}</i></div>
-      <div class="picking-product-copy"><div class="picking-product-state">${lineComplete ? "VERIFIED" : isNext ? "PICK THIS NOW" : "UP NEXT"}</div><h3>${escapeHtml(line.name)}</h3><p>SKU ${escapeHtml(line.sku)}${line.variationId ? ` · Variation ${line.variationId}` : ""}</p><div class="picking-product-tags"><span>Verification <b>${escapeHtml(capturedLots)}</b></span><span>Scan <b>item code</b></span></div></div>
+      <div class="picking-product-copy"><div class="picking-product-state">${lineComplete ? "VERIFIED" : isNext ? "PICK THIS NOW" : "UP NEXT"}</div><h3>${escapeHtml(line.name)}</h3><p>SKU ${escapeHtml(line.sku)}${line.variationId ? ` · Variation ${line.variationId}` : ""}</p><div class="picking-product-tags"><span>Verification <b>${escapeHtml(capturedLots)}</b></span><span>Scan <b>item code</b></span></div>${isNext && line.verifiedQuantity === 0 ? `<button class="picking-manual-exception" type="button" data-manual-verify-line="${line.orderItemId}" data-manual-verify-name="${escapeHtml(line.name)}">Continue without scanning this product</button>` : ""}</div>
       <div class="picking-location"><small>VERIFY WITH</small><strong>Item code</strong><span>Vial QR or product barcode</span></div>
       <div class="picking-quantity"><small>VERIFIED</small><strong>${line.verifiedQuantity}<span>/ ${line.quantity}</span></strong><p>${lineComplete ? "Complete" : `${remaining} remaining`}</p></div>
     </article>`;
@@ -6517,6 +6524,45 @@ function queueFulfillmentScan(value: string): void {
   const input = document.querySelector<HTMLInputElement>("#picking-scan-input");
   if (input) input.value = "";
   void processFulfillmentScans();
+}
+
+async function manuallyVerifyFulfillmentLine(orderItemId: number, productName: string): Promise<void> {
+  const order = selectedFulfillmentOrder();
+  if (!order?.session || order.session.state !== "open" || fulfillmentScanBusy) return;
+  if (!window.confirm(`Continue ${productName} without scanning?\n\nOnly one product per order can use this audited exception.`)) return;
+  const reason = window.prompt("Record the reason for continuing without a scan:", "Physical product confirmed by warehouse operator")?.trim() || "";
+  if (reason.length < 5) {
+    showToast("Reason required", "Record a short reason so the exception remains auditable.", false);
+    return;
+  }
+  fulfillmentScanBusy = true;
+  renderFulfillmentQueue();
+  try {
+    const response = await fetch("/api/fulfillment/manual-verify", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        fulfillmentId: order.session.id,
+        clientEventId: crypto.randomUUID(),
+        orderItemId,
+        reason,
+      }),
+    });
+    const body: unknown = await response.json();
+    if (!response.ok) throw new Error(isRecord(body) && typeof body.error === "string" ? body.error : "The exception could not be recorded");
+    if (!isRecord(body) || !isRecord(body.feedback) || !isRecord(body.session)) throw new Error("Invalid fulfillment response");
+    const payload = body as unknown as FulfillmentScanPayload;
+    fulfillmentScanFeedback = payload.feedback;
+    applyPickingScan(payload);
+    playPickingTone(payload.feedback.accepted);
+    showToast("Manual exception recorded", `${productName} can continue. The operator and reason are stored in the order audit.`);
+  } catch (error) {
+    showToast("Could not continue without scan", error instanceof Error ? error.message : "Refresh and try again.", false);
+  } finally {
+    fulfillmentScanBusy = false;
+    renderFulfillmentQueue();
+  }
 }
 
 type FulfillmentCameraState = "loading" | "scanning" | "warning" | "success" | "error";
@@ -10873,6 +10919,12 @@ orderDetailContent.addEventListener("click", (event) => {
   const decision = element?.closest<HTMLButtonElement>("[data-payment-decision]")?.dataset.paymentDecision;
   if (decision === "approve") openOrderActionDialog("confirm");
   if (decision === "reject") openOrderActionDialog("cancel");
+  const reprintUrl = element?.closest<HTMLButtonElement>("[data-order-reprint-label]")?.dataset.orderReprintLabel || "";
+  if (reprintUrl.startsWith("/api/shipping/label/print?")) {
+    window.open(reprintUrl, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => { if (activeOrder) void openOrderDrawer(activeOrder.id); }, 800);
+    return;
+  }
   const evidenceId = element?.closest<HTMLButtonElement>("[data-delete-evidence]")?.dataset.deleteEvidence;
   if (evidenceId) void deleteOrderEvidence(evidenceId);
   const removeCoa = element?.closest<HTMLButtonElement>("[data-remove-coa]");
@@ -11665,6 +11717,14 @@ function handleFulfillmentClick(event: Event): void {
   }
   if (target?.closest("[data-open-picking-camera]")) {
     void startFulfillmentCamera();
+    return;
+  }
+  const manualVerify = target?.closest<HTMLElement>("[data-manual-verify-line]");
+  if (manualVerify?.dataset.manualVerifyLine) {
+    void manuallyVerifyFulfillmentLine(
+      Number(manualVerify.dataset.manualVerifyLine),
+      manualVerify.dataset.manualVerifyName || "this product",
+    );
     return;
   }
   if (target?.closest("[data-open-packing-confirm]")) {

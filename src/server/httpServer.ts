@@ -22,6 +22,7 @@ import {
   AffiliateManagementError,
   affiliateApplicationDecisionInput,
   affiliateCouponInput,
+  affiliateProgramSettingsInput,
   affiliateStatusInput,
 } from "./affiliateManagement.js";
 import type { AppConfig } from "./config.js";
@@ -70,7 +71,7 @@ import {
   FulfillmentRepository,
   FulfillmentRepositoryError,
 } from "./fulfillmentRepository.js";
-import { decideFulfillmentScan } from "./fulfillmentPicking.js";
+import { decideFulfillmentManualOverride, decideFulfillmentScan } from "./fulfillmentPicking.js";
 import { buildPackingSnapshot, FulfillmentPackingError } from "./fulfillmentPacking.js";
 import { syncPackedCoaAssignments } from "./fulfillmentCoaSync.js";
 import {
@@ -88,6 +89,7 @@ import {
 import { FulfillmentEvidenceNotificationWorkflow } from "./fulfillmentEvidenceNotification.js";
 import {
   orderNotificationPayload,
+  ordersEnteringAttentionStatus,
   ordersMissingFromSnapshot,
   type OrderNotificationSource,
 } from "./orderNotifications.js";
@@ -1368,7 +1370,10 @@ export function createMonitorServer(
     previousOrders: unknown,
   ): Promise<void> {
     const newlyReceived = ordersMissingFromSnapshot(orders, previousOrders);
-    await Promise.all(newlyReceived.map(async (order) => {
+    const newIds = new Set(newlyReceived.map((order) => order.id));
+    const attentionChanges = ordersEnteringAttentionStatus(orders, previousOrders)
+      .filter((order) => !newIds.has(order.id));
+    await Promise.all([...newlyReceived, ...attentionChanges].map(async (order) => {
       if (dependencies.recordNewOrder) {
         await dependencies.recordNewOrder(order);
         return;
@@ -2940,6 +2945,30 @@ export function createMonitorServer(
         return;
       }
 
+      if (url.pathname === "/api/affiliates/settings" && request.method === "POST") {
+        if (!canAdminister || !affiliates || !isLoginOriginAllowed(request, config)) {
+          json(response, !canAdminister ? 403 : 503, {
+            error: !canAdminister ? "Administrator access is required" : "Affiliate settings are unavailable",
+          });
+          return;
+        }
+        let payload: Record<string, unknown>;
+        try { payload = JSON.parse(await readBody(request)) as Record<string, unknown>; }
+        catch { json(response, 400, { error: "Invalid request" }); return; }
+        try {
+          const settings = affiliateProgramSettingsInput(payload);
+          await affiliates.updateProgramSettings({ ...settings, actorId: currentUser.id });
+          json(response, 200, { saved: true, settings });
+        } catch (error: unknown) {
+          const clientError = error instanceof AffiliateManagementError;
+          console.error("Affiliate settings update failed", error);
+          json(response, clientError ? 400 : 502, {
+            error: clientError ? error.message : "The affiliate program settings could not be saved",
+          });
+        }
+        return;
+      }
+
       if (url.pathname === "/api/affiliates/status" && request.method === "POST") {
         if (!canAdminister || !affiliates || !isLoginOriginAllowed(request, config)) {
           json(response, !canAdminister ? 403 : 503, { error: !canAdminister ? "Administrator access is required" : "Affiliate management is unavailable" });
@@ -3342,6 +3371,61 @@ export function createMonitorServer(
           });
         } catch (error: unknown) {
           fulfillmentError(response, error, "The vial QR could not be verified safely");
+        }
+        return;
+      }
+
+      if (url.pathname === "/api/fulfillment/manual-verify" && request.method === "POST") {
+        const access = fulfillmentAccessForRole(currentUser.role);
+        if (!isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Origin not allowed" });
+          return;
+        }
+        if (!access.operateQueue) {
+          json(response, 403, { error: "Operations access required" });
+          return;
+        }
+        if (!commerce || !fulfillmentRepository) {
+          json(response, 503, { error: "Fulfillment services are not configured" });
+          return;
+        }
+        let payload: unknown;
+        try { payload = JSON.parse(await readBody(request)); } catch {
+          json(response, 400, { error: "Invalid JSON request" });
+          return;
+        }
+        const input = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+        const fulfillmentId = typeof input.fulfillmentId === "string" ? input.fulfillmentId : "";
+        const clientEventId = typeof input.clientEventId === "string" ? input.clientEventId : "";
+        const orderItemId = Number(input.orderItemId);
+        const reason = typeof input.reason === "string" ? input.reason.trim().replace(/\s+/g, " ") : "";
+        if (!Number.isSafeInteger(orderItemId) || orderItemId <= 0 || reason.length < 5 || reason.length > 200) {
+          json(response, 400, { error: "Select one product and record a short reason for the exception" });
+          return;
+        }
+        try {
+          const session = await fulfillmentRepository.getById(fulfillmentId);
+          if (!session) { json(response, 404, { error: "The picking session does not exist" }); return; }
+          const order = await commerce.getOrder(session.orderId);
+          const recorded = await fulfillmentRepository.recordIdempotentScan({
+            fulfillmentId,
+            clientEventId,
+            rawBarcode: `manual-override:${orderItemId}:${reason}`,
+            actorId: currentUser.id,
+          }, (lockedSession) => decideFulfillmentManualOverride({
+            session: lockedSession,
+            order,
+            orderItemId,
+            reason,
+          }));
+          json(response, 200, {
+            replayed: recorded.replayed,
+            session: recorded.session,
+            event: recorded.event,
+            feedback: recorded.event.responseSnapshot,
+          });
+        } catch (error: unknown) {
+          fulfillmentError(response, error, "The manual verification exception could not be recorded safely");
         }
         return;
       }
@@ -5621,7 +5705,7 @@ export function createMonitorServer(
             json(response, 200, { ...detailCache.payload, cacheAgeSeconds: Math.floor((Date.now() - detailCache.updatedAt) / 1_000) });
             return;
           }
-          const [order, evidenceResult, coaResult, notesResult, affiliateCommission] = await Promise.all([
+          const [order, evidenceResult, coaResult, notesResult, affiliateCommission, shippingLabel] = await Promise.all([
             commerce.getOrder(orderId),
             commerce.getOrderEvidence(orderId).catch((error: unknown) => {
               console.error("Order evidence fetch failed", error);
@@ -5639,6 +5723,10 @@ export function createMonitorServer(
               console.error("Order affiliate attribution fetch failed", error);
               return null;
             }) ?? Promise.resolve(null),
+            fulfillmentShipping?.getByOrderId(orderId).catch((error: unknown) => {
+              console.error("Order shipping label fetch failed", error);
+              return null;
+            }) ?? Promise.resolve(null),
           ]);
           const detailPayload: Record<string, unknown> = {
             order: await orderWithProfitability(order),
@@ -5648,6 +5736,7 @@ export function createMonitorServer(
               coas: coaResult || { orderId, items: [], unavailable: true },
               notes: notesResult,
               affiliateCommission,
+              shippingLabel,
             },
           };
           orderDetailCache.set(orderId, { payload: detailPayload, updatedAt: Date.now() });

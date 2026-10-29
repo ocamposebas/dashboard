@@ -10,6 +10,13 @@ export interface AffiliateCouponManagementInput {
   commissionValue: number;
 }
 
+export interface AffiliateProgramSettingsInput {
+  defaultCommissionRate: number;
+  minimumPayout: number;
+  approvalHoldDays: number;
+  currency: string;
+}
+
 export class AffiliateManagementError extends Error {
   constructor(public readonly code: string, message: string) {
     super(message);
@@ -44,6 +51,28 @@ export function affiliateCouponInput(value: Record<string, unknown>): AffiliateC
     code,
     discountValue: boundedPercent(value.discountValue, "Customer discount"),
     commissionValue: boundedPercent(value.commissionValue, "Affiliate commission"),
+  };
+}
+
+export function affiliateProgramSettingsInput(value: Record<string, unknown>): AffiliateProgramSettingsInput {
+  const defaultCommissionRate = boundedPercent(value.defaultCommissionRate, "Default commission");
+  const minimumPayout = Number(value.minimumPayout);
+  const approvalHoldDays = Number(value.approvalHoldDays);
+  const currency = typeof value.currency === "string" ? value.currency.trim().toUpperCase() : "";
+  if (!Number.isFinite(minimumPayout) || minimumPayout < 0 || minimumPayout > 1_000_000) {
+    throw new AffiliateManagementError("invalid_minimum_payout", "Minimum payout must be between 0 and 1,000,000");
+  }
+  if (!Number.isSafeInteger(approvalHoldDays) || approvalHoldDays < 0 || approvalHoldDays > 365) {
+    throw new AffiliateManagementError("invalid_hold_days", "Approval hold must be between 0 and 365 whole days");
+  }
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw new AffiliateManagementError("invalid_currency", "Currency must be a three-letter code");
+  }
+  return {
+    defaultCommissionRate,
+    minimumPayout: Math.round(minimumPayout * 100) / 100,
+    approvalHoldDays,
+    currency,
   };
 }
 

@@ -35,6 +35,7 @@ interface PickingProgress {
   totalUnits: number;
   lines: ProgressLine[];
   productBarcodeOrderItemIds: number[];
+  manualOverrideOrderItemIds: number[];
   allocations: Array<{
     orderItemId: number;
     coaId: string;
@@ -115,6 +116,12 @@ function progressFor(session: FulfillmentSession, lines: SnapshotLine[]): Pickin
       return orderItemId && lines.some((line) => line.orderItemId === orderItemId) ? [orderItemId] : [];
     }))]
     : [];
+  const manualOverrideOrderItemIds = stored && Array.isArray(stored.manualOverrideOrderItemIds)
+    ? [...new Set(stored.manualOverrideOrderItemIds.flatMap((value) => {
+      const orderItemId = positiveInteger(value);
+      return orderItemId && lines.some((line) => line.orderItemId === orderItemId) ? [orderItemId] : [];
+    }))]
+    : [];
   const storedAllocations = stored && Array.isArray(stored.allocations) ? stored.allocations : [];
   const allocations = lines.flatMap((line) => {
     const verified = progressLines.find((item) => item.orderItemId === line.orderItemId)?.verifiedQuantity || 0;
@@ -147,6 +154,7 @@ function progressFor(session: FulfillmentSession, lines: SnapshotLine[]): Pickin
     totalUnits: lines.reduce((sum, line) => sum + line.quantity, 0),
     lines: progressLines,
     productBarcodeOrderItemIds,
+    manualOverrideOrderItemIds,
     allocations,
   };
 }
@@ -378,6 +386,7 @@ export function decideFulfillmentScan(input: {
         ...progress.productBarcodeOrderItemIds,
         line.orderItemId,
       ])],
+      manualOverrideOrderItemIds: progress.manualOverrideOrderItemIds,
       allocations: progress.allocations,
     };
     const current = nextLines.find((item) => item.orderItemId === line.orderItemId)!;
@@ -453,6 +462,7 @@ export function decideFulfillmentScan(input: {
     totalUnits: progress.totalUnits,
     lines: nextLines,
     productBarcodeOrderItemIds: progress.productBarcodeOrderItemIds,
+    manualOverrideOrderItemIds: progress.manualOverrideOrderItemIds,
     allocations: nextAllocations,
   };
   const current = nextLines.find((item) => item.orderItemId === line.orderItemId)!;
@@ -478,5 +488,72 @@ export function decideFulfillmentScan(input: {
     orderItemId: line.orderItemId,
     coaId: input.barcode.coaId!,
     lot: input.barcode.lot!,
+  };
+}
+
+export function decideFulfillmentManualOverride(input: {
+  session: FulfillmentSession;
+  order: CommerceOrder;
+  orderItemId: number;
+  reason: string;
+}): FulfillmentScanDecision {
+  const lines = snapshotLines(input.session);
+  const progress = progressFor(input.session, lines);
+  const eligibility = evaluateFulfillmentEligibility(input.order);
+  if (!eligibility.eligible) {
+    return rejected(progress, "order_ineligible", eligibility.reasons[0]?.message || "This order is no longer eligible for picking.");
+  }
+  if (input.session.sourceModifiedAt !== input.order.modifiedAt) {
+    return rejected(progress, "order_changed", "The live order changed. Review it before using a manual exception.");
+  }
+  if (!lines.length || !liveLinesStillMatch(input.order, lines)) {
+    return rejected(progress, "line_changed", "The order items no longer match the secured picking session.");
+  }
+  const line = lines.find((candidate) => candidate.orderItemId === input.orderItemId);
+  const current = progress.lines.find((candidate) => candidate.orderItemId === input.orderItemId);
+  const productName = input.order.lineItems.find((item) => item.id === input.orderItemId)?.name || "Product";
+  if (!line || !current) {
+    return rejected(progress, "line_changed", "The selected product is no longer part of this order.");
+  }
+  if (current.verifiedQuantity >= current.requiredQuantity) {
+    return rejected(progress, "quantity_complete", "This product is already fully verified.", { line, productName });
+  }
+  if (progress.manualOverrideOrderItemIds.length > 0) {
+    return rejected(progress, "verification_method_changed", "Only one product can be continued without scanning in each order.", { line, productName });
+  }
+  if (progress.allocations.some((allocation) => allocation.orderItemId === line.orderItemId) || progress.productBarcodeOrderItemIds.includes(line.orderItemId)) {
+    return rejected(progress, "verification_method_changed", "This product already has verified scans. Finish it with the same code.", { line, productName });
+  }
+  const quantityDelta = current.requiredQuantity - current.verifiedQuantity;
+  const nextLines = progress.lines.map((item) => item.orderItemId === line.orderItemId
+    ? { ...item, verifiedQuantity: item.requiredQuantity }
+    : item);
+  const nextProgress: PickingProgress = {
+    verifiedUnits: progress.verifiedUnits + quantityDelta,
+    totalUnits: progress.totalUnits,
+    lines: nextLines,
+    productBarcodeOrderItemIds: progress.productBarcodeOrderItemIds,
+    manualOverrideOrderItemIds: [line.orderItemId],
+    allocations: progress.allocations,
+  };
+  const response = feedback(nextProgress, {
+    accepted: true,
+    reasonCode: "manual_override",
+    message: `${productName} was continued without a scan. Exception recorded: ${input.reason}`,
+    line,
+    productName,
+    verifiedQuantity: current.requiredQuantity,
+    lot: null,
+  });
+  return {
+    result: "accepted",
+    reasonCode: "manual_override",
+    quantityDelta,
+    nextProgress: nextProgress as unknown as JsonValue,
+    responseSnapshot: response as unknown as JsonValue,
+    barcodeType: "manual_override",
+    productId: line.productId,
+    variationId: line.variationId,
+    orderItemId: line.orderItemId,
   };
 }

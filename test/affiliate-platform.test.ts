@@ -7,7 +7,7 @@ import {
   readAffiliateSession,
 } from "../src/server/affiliateAuth.js";
 import { loadAffiliateServiceSecret } from "../src/server/config.js";
-import { affiliateCouponInput, affiliateStatusInput } from "../src/server/affiliateManagement.js";
+import { affiliateCouponInput, affiliateProgramSettingsInput, affiliateStatusInput } from "../src/server/affiliateManagement.js";
 import { WooCommerceGateway } from "../src/server/wooCommerceGateway.js";
 
 test("affiliate session cookies are scoped, signed and reject tampering", () => {
@@ -147,6 +147,15 @@ test("affiliate coupon administration normalizes safe values and rejects ambiguo
     affiliateId: "8af89730-3a76-4c04-b58e-62f5f319cc4f",
     status: "closed",
   }), /status action/);
+});
+
+test("affiliate program settings normalize editable values", () => {
+  assert.deepEqual(affiliateProgramSettingsInput({
+    defaultCommissionRate: "15", minimumPayout: "50", approvalHoldDays: "7", currency: "usd",
+  }), { defaultCommissionRate: 15, minimumPayout: 50, approvalHoldDays: 7, currency: "USD" });
+  assert.throws(() => affiliateProgramSettingsInput({
+    defaultCommissionRate: 15, minimumPayout: -1, approvalHoldDays: 7, currency: "USD",
+  }), /Minimum payout/);
 });
 
 test("managed coupons are provisioned with the legacy bridge metadata and can be paused", async () => {

@@ -14,7 +14,7 @@ const GENERIC_PRODUCT_WORDS = new Set([
 ]);
 
 export function automaticCoaProductIdentity(value: string): string {
-  return value
+  const identity = value
     .toLocaleLowerCase("en")
     .normalize("NFKD")
     .replace(/[μµ]/g, "u")
@@ -24,6 +24,14 @@ export function automaticCoaProductIdentity(value: string): string {
     .filter((word) => word && !GENERIC_PRODUCT_WORDS.has(word))
     .join(" ")
     .trim();
+  const knownAliases: Record<string, string> = {
+    "rt30": "retatrutide",
+    "rt 30": "retatrutide",
+    "reta": "retatrutide",
+    "reta 30": "retatrutide",
+    "lipo c blend": "lipo c",
+  };
+  return knownAliases[identity] || identity;
 }
 
 function skuIdentity(value: string): string {
@@ -136,7 +144,10 @@ export function exactLegacyCoaCatalogRepairs(
   const candidates = available.flatMap((coa) => {
     const mappedProduct = products.find((product) =>
       product.id === coa.matchedProductId && product.status !== "trash");
-    const product = mappedProduct || exactAutomaticCoaProduct(coa, products);
+    const exactProduct = exactAutomaticCoaProduct(coa, products);
+    const product = exactProduct && mappedProduct && exactProduct.id !== mappedProduct.id
+      ? exactProduct
+      : mappedProduct || exactProduct;
     if (!product) return [];
 
     const variations = variationsByProduct.get(product.id) || [];

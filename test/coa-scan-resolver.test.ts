@@ -4,6 +4,7 @@ import test from "node:test";
 import type { CommerceCoa } from "../src/server/wooCommerceGateway.js";
 import {
   canonicalizeCoaScanValue,
+  coaMatchesCatalogLine,
   coaScanProvider,
   coaScanIdentity,
   resolveCoaQrScan,
@@ -154,6 +155,15 @@ test("resolves the original laboratory URL after the COA document is copied into
   assert.equal(result?.coaId, "phas2610050320");
   assert.equal(result?.variationId, 2847);
   assert.equal(result?.lot, "P1KPV30");
+});
+
+test("a migrated parent COA matches only the ordered presentation with the same strength", () => {
+  const migrated = coa({
+    id: "rt30", matchedProductId: 700, matchedVariationId: 0,
+    productName: "Retatrutide", strength: "30mg", skus: ["RT"],
+  });
+  assert.equal(coaMatchesCatalogLine(migrated, { productId: 700, variationId: 730, sku: "RT-30-MG" }), true);
+  assert.equal(coaMatchesCatalogLine(migrated, { productId: 700, variationId: 720, sku: "RT-20-MG" }), false);
 });
 
 test("resolves a Freedom vial QR by its exact certificate number when migration kept only a WordPress copy", () => {

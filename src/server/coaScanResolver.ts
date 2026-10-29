@@ -26,6 +26,14 @@ function canonicalProductSku(value: string | null | undefined): string {
   return normalized(value).replace(/[^a-z0-9]+/g, "");
 }
 
+function strengthIdentity(value: string | null | undefined): string {
+  const prepared = normalized(value)
+    .replace(/[μµ]/g, "u")
+    .replace(/[^a-z0-9.]+/g, " ");
+  const match = prepared.match(/(?:^|\s)(\d+(?:\.\d+)?)\s*(mcg|ug|mg|g)(?:\s|$)/);
+  return match ? `${Number(match[1])}${match[2] === "ug" ? "mcg" : match[2]}` : "";
+}
+
 export function coaMatchesCatalogLine(
   coa: CommerceCoa,
   line: { productId: number; variationId: number; sku: string },
@@ -36,11 +44,21 @@ export function coaMatchesCatalogLine(
   );
   const productMatches = coa.matchedProductId <= 0 || coa.matchedProductId === line.productId;
   const variationMatches = coa.matchedVariationId <= 0 || coa.matchedVariationId === line.variationId;
+  const legacyParentStrengthMatches = Boolean(
+    productMatches &&
+    coa.matchedVariationId <= 0 &&
+    line.variationId > 0 &&
+    strengthIdentity(coa.strength) &&
+    strengthIdentity(coa.strength) === strengthIdentity(line.sku),
+  );
+  const governedVariationMatches = coa.matchedVariationId > 0
+    ? variationMatches
+    : line.variationId === 0 || legacyParentStrengthMatches;
 
   // Exact catalog IDs remain authoritative. The SKU fallback is deliberately
   // strict after removing separators only, so legacy PLTZ-20-MG records can
   // match PL-TZ-20-MG without ever allowing another strength or variation.
-  return (productMatches && variationMatches) || skuMatches;
+  return (productMatches && governedVariationMatches) || skuMatches;
 }
 
 export function canonicalizeCoaScanValue(rawValue: string): string | null {
