@@ -25,11 +25,13 @@ export function automaticCoaProductIdentity(value: string): string {
     .join(" ")
     .trim();
   const knownAliases: Record<string, string> = {
-    "rt30": "retatrutide",
-    "rt 30": "retatrutide",
-    "reta": "retatrutide",
-    "reta 30": "retatrutide",
+    "rt30": "pl rt",
+    "rt 30": "pl rt",
+    "reta": "pl rt",
+    "reta 30": "pl rt",
+    "retatrutide": "pl rt",
     "lipo c blend": "lipo c",
+    "lipo c b12": "lipo c",
   };
   return knownAliases[identity] || identity;
 }
