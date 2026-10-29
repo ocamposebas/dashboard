@@ -1,0 +1,233 @@
+.integration-logo--tiktok,
+.tiktok-brand-mark {
+  background: #07090d;
+  color: #fff;
+  box-shadow: inset 3px 0 0 #25f4ee, inset -3px 0 0 #fe2c55;
+}
+
+.tiktok-pixel-console {
+  margin-bottom: 18px;
+  padding: clamp(20px, 3vw, 34px);
+  overflow: hidden;
+}
+
+.tiktok-pixel-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tiktok-brand-mark {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.tiktok-pixel-head h2 {
+  margin: 4px 0 6px;
+  color: var(--ink);
+  font-size: clamp(20px, 2.4vw, 30px);
+  letter-spacing: -.045em;
+}
+
+.tiktok-pixel-head p:not(.section-kicker) {
+  max-width: 760px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.tiktok-pixel-head > .integration-state {
+  margin-top: 0;
+  white-space: nowrap;
+}
+
+.tiktok-pixel-form {
+  display: grid;
+  gap: 22px;
+  padding-top: 22px;
+}
+
+.tiktok-pixel-primary {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(260px, .75fr);
+  gap: 14px;
+}
+
+.tiktok-pixel-id-field,
+.tiktok-enable-control,
+.tiktok-event-grid label {
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.tiktok-pixel-id-field {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 13px;
+}
+
+.tiktok-pixel-id-field > span,
+.tiktok-event-fieldset legend {
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.tiktok-pixel-id-field input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 13px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--ink);
+  font: 700 13px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .03em;
+}
+
+.tiktok-pixel-id-field input:focus {
+  outline: 3px solid rgba(37, 244, 238, .14);
+  border-color: #25a9a4;
+}
+
+.tiktok-pixel-id-field small,
+.tiktok-enable-control small,
+.tiktok-event-grid small,
+.tiktok-pixel-actions small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.tiktok-enable-control {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 16px;
+  border-radius: 13px;
+  cursor: pointer;
+}
+
+.tiktok-enable-control input,
+.tiktok-event-grid input {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  accent-color: #111827;
+}
+
+.tiktok-enable-control span,
+.tiktok-event-grid span {
+  display: grid;
+  gap: 4px;
+}
+
+.tiktok-enable-control b,
+.tiktok-event-grid b,
+.tiktok-pixel-actions strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.tiktok-event-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.tiktok-event-fieldset > p {
+  margin: 5px 0 12px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.tiktok-event-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tiktok-event-grid label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 68px;
+  padding: 13px;
+  border-radius: 11px;
+  cursor: pointer;
+}
+
+.tiktok-pixel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.tiktok-pixel-actions > div {
+  display: grid;
+  gap: 4px;
+  margin-right: auto;
+}
+
+.tiktok-pixel-form[aria-busy="true"] {
+  opacity: .7;
+  pointer-events: none;
+}
+
+.tiktok-pixel-form :disabled {
+  cursor: not-allowed;
+  opacity: .6;
+}
+
+html[data-theme="dark"] .integration-logo--tiktok,
+html[data-theme="dark"] .tiktok-brand-mark {
+  background: #f7f7f8;
+  color: #08090c;
+}
+
+html[data-theme="dark"] .tiktok-enable-control input,
+html[data-theme="dark"] .tiktok-event-grid input {
+  accent-color: #25f4ee;
+}
+
+@media (max-width: 820px) {
+  .tiktok-pixel-primary,
+  .tiktok-event-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tiktok-pixel-head {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .tiktok-pixel-head > .integration-state {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .tiktok-pixel-actions {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .tiktok-pixel-actions > div {
+    width: 100%;
+  }
+
+  .tiktok-pixel-actions .button {
+    flex: 1 1 150px;
+  }
+}

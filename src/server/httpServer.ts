@@ -162,6 +162,17 @@ import {
   SiteControlRepositoryError,
 } from "./siteControlRepository.js";
 import {
+  TikTokPixelRepository,
+  TikTokPixelRepositoryError,
+} from "./tiktokPixelRepository.js";
+import {
+  defaultTikTokPixelSettings,
+  normalizeTikTokPixelEvents,
+  normalizeTikTokPixelId,
+  publicTikTokPixelSettings,
+  type TikTokPixelSettings,
+} from "../shared/tiktokPixel.js";
+import {
   CommerceServiceError,
   WooCommerceGateway,
   type CommerceCoa,
@@ -436,6 +447,7 @@ export interface MonitorServerDependencies {
   barcodeLabels?: BarcodeLabelService;
   shipStationGateway?: ShipStationGateway;
   siteControlRepository?: SiteControlRepository;
+  tiktokPixelRepository?: TikTokPixelRepository;
   orderPushService?: OrderPushService;
   recordNewOrder?: (order: OrderNotificationSource) => Promise<void>;
 }
@@ -532,6 +544,19 @@ export function createMonitorServer(
       ? new SiteControlRepository(dependencies.fulfillmentDatabase)
       : undefined
   );
+  const tiktokPixelRepository = dependencies.tiktokPixelRepository || (
+    dependencies.fulfillmentDatabase
+      ? new TikTokPixelRepository(dependencies.fulfillmentDatabase)
+      : undefined
+  );
+
+  async function currentTikTokPixelSettings(): Promise<TikTokPixelSettings> {
+    const durable = await tiktokPixelRepository?.get().catch((error: unknown) => {
+      console.error("TikTok Pixel settings read failed; preserving the migrated production configuration", error);
+      return null;
+    });
+    return durable || defaultTikTokPixelSettings();
+  }
 
   const publicUser = (user: ManagedUserRecord) => ({
     id: user.id, username: user.username, displayName: user.displayName, email: user.email,
@@ -1933,6 +1958,32 @@ export function createMonitorServer(
         return;
       }
 
+      if (url.pathname === "/api/public/integrations/tiktok-pixel" && request.method === "GET") {
+        const suppliedOrigin = firstHeaderValue(request.headers.origin);
+        const normalizedOrigin = suppliedOrigin ? normalizeOrigin(suppliedOrigin) : null;
+        if (normalizedOrigin && config.trackerOrigins.has(normalizedOrigin)) {
+          response.setHeader("Access-Control-Allow-Origin", normalizedOrigin);
+          response.setHeader("Access-Control-Allow-Methods", "GET");
+        }
+        const settings = publicTikTokPixelSettings(await currentTikTokPixelSettings());
+        const body = Buffer.from(JSON.stringify(settings));
+        const etag = `\"${createHash("sha256").update(body).digest("base64url")}\"`;
+        response.setHeader("Cache-Control", "public, max-age=5, stale-while-revalidate=30, stale-if-error=3600");
+        response.setHeader("Content-Type", "application/json; charset=utf-8");
+        response.setHeader("ETag", etag);
+        response.setHeader("Vary", "Origin");
+        response.setHeader("X-TikTok-Pixel-Revision", String(settings.revision));
+        if (firstHeaderValue(request.headers["if-none-match"]) === etag) {
+          response.statusCode = 304;
+          response.end();
+          return;
+        }
+        response.statusCode = 200;
+        response.setHeader("Content-Length", String(body.byteLength));
+        response.end(body);
+        return;
+      }
+
       if (url.pathname === "/api/public/site-control" && request.method === "GET") {
         const suppliedOrigin = firstHeaderValue(request.headers.origin);
         const normalizedOrigin = suppliedOrigin ? normalizeOrigin(suppliedOrigin) : null;
@@ -2561,6 +2612,71 @@ export function createMonitorServer(
 
       if (url.pathname === "/api/session" && request.method === "GET") {
         json(response, 200, { authenticated: true, user: publicUser(currentUser), permissions: { administer: canAdminister, operate: canOperate } });
+        return;
+      }
+
+      if (url.pathname === "/api/integrations/tiktok-pixel" && request.method === "GET") {
+        json(response, 200, {
+          settings: await currentTikTokPixelSettings(),
+          writable: Boolean(tiktokPixelRepository && canAdminister),
+          delivery: "phaseonelabz.com",
+          installation: "managed-no-code",
+        });
+        return;
+      }
+
+      if (url.pathname === "/api/integrations/tiktok-pixel" && request.method === "POST") {
+        if (!isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Origin not allowed" });
+          return;
+        }
+        if (!canAdminister) {
+          json(response, 403, { error: "Administrator access is required to change tracking integrations" });
+          return;
+        }
+        if (!tiktokPixelRepository) {
+          json(response, 503, { error: "The TikTok Pixel control plane is not configured" });
+          return;
+        }
+        let payload: Record<string, unknown>;
+        try {
+          payload = JSON.parse((await readBodyBuffer(request, 32 * 1024)).toString("utf8")) as Record<string, unknown>;
+        } catch {
+          json(response, 400, { error: "Invalid JSON request" });
+          return;
+        }
+        const expectedRevision = payload.expectedRevision === undefined
+          ? undefined
+          : Math.floor(Number(payload.expectedRevision));
+        try {
+          const settings = await tiktokPixelRepository.save({
+            enabled: payload.enabled === true,
+            pixelId: normalizeTikTokPixelId(payload.pixelId),
+            events: normalizeTikTokPixelEvents(payload.events),
+            updatedBy: `${currentUser.displayName} (${currentUser.username})`,
+          }, expectedRevision);
+          await store.addNotification({
+            type: "system",
+            severity: settings.enabled ? "success" : "warning",
+            title: settings.enabled ? "TikTok Pixel activated" : "TikTok Pixel paused",
+            message: settings.enabled
+              ? `${currentUser.displayName} published Pixel ${settings.pixelId} to phaseonelabz.com without editing storefront code.`
+              : `${currentUser.displayName} paused TikTok browser tracking.`,
+            actionView: "integrations",
+          });
+          json(response, 200, {
+            settings,
+            writable: true,
+            delivery: "phaseonelabz.com",
+            installation: "managed-no-code",
+          });
+        } catch (error: unknown) {
+          const conflict = error instanceof TikTokPixelRepositoryError && error.code === "revision_conflict";
+          const invalid = error instanceof TikTokPixelRepositoryError && error.code === "invalid_record";
+          json(response, conflict ? 409 : invalid ? 400 : 500, {
+            error: error instanceof Error ? error.message : "TikTok Pixel settings could not be saved",
+          });
+        }
         return;
       }
 

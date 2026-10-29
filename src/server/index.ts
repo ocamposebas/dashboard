@@ -15,6 +15,8 @@ import { AffiliateRepository } from "./affiliateRepository.js";
 import { AffiliateShadowSync } from "./affiliateShadowSync.js";
 import { ShipStationGateway } from "./shipStationGateway.js";
 import { SiteControlRepository } from "./siteControlRepository.js";
+import { TikTokPixelRepository } from "./tiktokPixelRepository.js";
+import { defaultTikTokPixelSettings } from "../shared/tiktokPixel.js";
 import { FulfillmentEvidenceStorage } from "./fulfillmentEvidenceStorage.js";
 import { OrderPushRepository } from "./orderPushRepository.js";
 import { OrderPushService } from "./orderPushService.js";
@@ -45,6 +47,9 @@ const shipStationGateway = new ShipStationGateway(config.shipStation);
 const siteControlRepository = fulfillmentDatabase
   ? new SiteControlRepository(fulfillmentDatabase)
   : undefined;
+const tiktokPixelRepository = fulfillmentDatabase
+  ? new TikTokPixelRepository(fulfillmentDatabase)
+  : undefined;
 const orderPushService = fulfillmentDatabase
   ? await OrderPushService.create(new OrderPushRepository(fulfillmentDatabase))
   : undefined;
@@ -63,6 +68,7 @@ const server = createMonitorServer(config, store, {
   ...(fulfillmentDatabase ? { fulfillmentDatabase } : {}),
   ...(barcodeLabels ? { barcodeLabels } : {}),
   ...(siteControlRepository ? { siteControlRepository } : {}),
+  ...(tiktokPixelRepository ? { tiktokPixelRepository } : {}),
   ...(orderPushService ? { orderPushService } : {}),
   recordNewOrder,
   shipStationGateway,
@@ -168,6 +174,13 @@ if (siteControlRepository) {
     console.log(previousIndependentControls
       ? "Independent Site Controls migrated from Redis to PostgreSQL"
       : "Independent Site Controls initialized in PostgreSQL");
+  }
+}
+if (tiktokPixelRepository) {
+  const durablePixel = await tiktokPixelRepository.get();
+  if (!durablePixel) {
+    await tiktokPixelRepository.seed(defaultTikTokPixelSettings());
+    console.log("TikTok Pixel integration initialized from the existing production pixel");
   }
 }
 hub.attach(server);

@@ -4,8 +4,14 @@ import "./labels.css";
 import "./fulfillment.css";
 import "./clean-ui.css";
 import "./finance.css";
+import "./tiktok-integration.css";
 import { initAffiliateAdmin, loadAffiliateAdmin } from "./affiliates-admin";
 import type { AffiliateCommissionSummary } from "../shared/affiliates";
+import {
+  TIKTOK_PIXEL_EVENT_KEYS,
+  type TikTokPixelEventKey,
+  type TikTokPixelSettings,
+} from "../shared/tiktokPixel";
 import { calculateProductProfitability } from "../shared/productProfitability";
 import {
   monthToDateStart,
@@ -1022,6 +1028,8 @@ let customerSearch = "";
 let customerSort = "recent";
 let customerPage = 1;
 let extensionsData: ExtensionsPayload | undefined;
+let tiktokPixelSettings: TikTokPixelSettings | undefined;
+let tiktokPixelWritable = false;
 let selectedPromoType: "general" | "product" | "storewide" | "simple_gifts" = "general";
 let siteControlsDraft = initialSiteControlsDraftState();
 let orderStatusFilter = "all";
@@ -7731,6 +7739,121 @@ async function loadIndependentSiteControls(forceRender = false): Promise<void> {
   }
 }
 
+function renderTikTokPixelSettings(): void {
+  const settings = tiktokPixelSettings;
+  const state = requiredElement<HTMLElement>("#tiktok-integration-state");
+  const consoleState = requiredElement<HTMLElement>("#tiktok-console-state");
+  const form = requiredElement<HTMLFormElement>("#tiktok-pixel-form");
+  const pixelId = requiredElement<HTMLInputElement>("#tiktok-pixel-id");
+  const enabled = requiredElement<HTMLInputElement>("#tiktok-pixel-enabled");
+  const save = requiredElement<HTMLButtonElement>("#save-tiktok-pixel");
+  const summary = requiredElement<HTMLElement>("#tiktok-pixel-summary");
+  const updated = requiredElement<HTMLElement>("#tiktok-pixel-updated");
+  const inputs = form.querySelectorAll<HTMLInputElement>("input");
+
+  if (!settings) {
+    state.textContent = "Unavailable";
+    state.className = "integration-state integration-state--warning";
+    consoleState.textContent = "Configuration unavailable";
+    consoleState.className = "integration-state integration-state--warning";
+    summary.textContent = "The managed Pixel configuration could not be loaded.";
+    updated.textContent = "The storefront remains protected from incomplete tracking code.";
+    inputs.forEach((input) => { input.disabled = true; });
+    save.disabled = true;
+    return;
+  }
+
+  const active = settings.enabled && Boolean(settings.pixelId);
+  state.textContent = active ? "Active" : settings.pixelId ? "Paused" : "Not configured";
+  state.className = `integration-state${active ? " integration-state--connected" : " integration-state--planned"}`;
+  consoleState.textContent = active ? "Live on phaseonelabz.com" : settings.pixelId ? "Paused" : "Needs Pixel ID";
+  consoleState.className = `integration-state${active ? " integration-state--connected" : " integration-state--planned"}`;
+  pixelId.value = settings.pixelId;
+  enabled.checked = settings.enabled;
+  for (const key of TIKTOK_PIXEL_EVENT_KEYS) {
+    const input = form.querySelector<HTMLInputElement>(`[data-tiktok-event="${key}"]`);
+    if (input) input.checked = settings.events[key];
+  }
+  inputs.forEach((input) => { input.disabled = !tiktokPixelWritable; });
+  save.disabled = !tiktokPixelWritable;
+  save.textContent = tiktokPixelWritable ? "Save & publish" : "Administrator access required";
+  summary.textContent = active
+    ? `Pixel ${settings.pixelId} is managed by Operations Suite.`
+    : settings.pixelId
+      ? `Pixel ${settings.pixelId} is saved but not loading on the storefront.`
+      : "Add the Pixel ID from TikTok Ads Manager to activate tracking.";
+  updated.textContent = `Revision ${settings.revision} · Updated ${formatCommerceTimestamp(settings.updatedAt)}${tiktokPixelWritable ? "" : " · Read only"}`;
+}
+
+async function loadTikTokPixelSettings(): Promise<void> {
+  try {
+    const response = await fetch("/api/integrations/tiktok-pixel", {
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    const payload: unknown = await response.json();
+    if (!response.ok || !isRecord(payload) || !isRecord(payload.settings)) {
+      throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "TikTok Pixel settings are unavailable");
+    }
+    tiktokPixelSettings = payload.settings as unknown as TikTokPixelSettings;
+    tiktokPixelWritable = payload.writable === true;
+  } catch {
+    tiktokPixelSettings = undefined;
+    tiktokPixelWritable = false;
+  }
+  renderTikTokPixelSettings();
+}
+
+async function saveTikTokPixelSettings(): Promise<void> {
+  if (!tiktokPixelWritable || !tiktokPixelSettings) {
+    showToast("Administrator access required", "Only an owner or administrator can change conversion tracking.", false);
+    return;
+  }
+  const form = requiredElement<HTMLFormElement>("#tiktok-pixel-form");
+  const save = requiredElement<HTMLButtonElement>("#save-tiktok-pixel");
+  const events = Object.fromEntries(TIKTOK_PIXEL_EVENT_KEYS.map((key) => [
+    key,
+    Boolean(form.querySelector<HTMLInputElement>(`[data-tiktok-event="${key}"]`)?.checked),
+  ])) as Record<TikTokPixelEventKey, boolean>;
+  const payload = {
+    expectedRevision: tiktokPixelSettings.revision,
+    pixelId: requiredElement<HTMLInputElement>("#tiktok-pixel-id").value.trim(),
+    enabled: requiredElement<HTMLInputElement>("#tiktok-pixel-enabled").checked,
+    events,
+  };
+  form.setAttribute("aria-busy", "true");
+  save.textContent = "Publishing…";
+  try {
+    const response = await fetch("/api/integrations/tiktok-pixel", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result: unknown = await response.json();
+    if (!response.ok || !isRecord(result) || !isRecord(result.settings)) {
+      throw new Error(isRecord(result) && typeof result.error === "string" ? result.error : "TikTok Pixel settings could not be saved");
+    }
+    tiktokPixelSettings = result.settings as unknown as TikTokPixelSettings;
+    tiktokPixelWritable = result.writable === true;
+    renderTikTokPixelSettings();
+    showToast(
+      tiktokPixelSettings.enabled ? "TikTok Pixel is live" : "TikTok Pixel paused",
+      tiktokPixelSettings.enabled
+        ? "phaseonelabz.com will load this Pixel and send the selected commerce events automatically."
+        : "The Pixel ID remains saved, but the storefront will not load TikTok tracking.",
+    );
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("another session")) await loadTikTokPixelSettings();
+    showToast("Unable to publish Pixel", error instanceof Error ? error.message : "Try again from the Integrations panel.", false);
+  } finally {
+    form.removeAttribute("aria-busy");
+    save.textContent = tiktokPixelWritable ? "Save & publish" : "Administrator access required";
+    save.disabled = !tiktokPixelWritable;
+  }
+}
+
 async function saveSiteControls(): Promise<void> {
   if (!workspaceSession?.permissions.operate) {
     showToast("Read-only access", "An operations or administrator role is required to change the storefront.", false);
@@ -8987,6 +9110,15 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (ev
   if (!storedTheme()) applyTheme(event.matches ? "dark" : "light");
 });
 
+requiredElement<HTMLButtonElement>("#open-tiktok-integration").addEventListener("click", () => {
+  requiredElement<HTMLElement>("#tiktok-pixel-console").scrollIntoView({ behavior: "smooth", block: "start" });
+  window.setTimeout(() => requiredElement<HTMLInputElement>("#tiktok-pixel-id").focus(), 350);
+});
+requiredElement<HTMLFormElement>("#tiktok-pixel-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void saveTikTokPixelSettings();
+});
+
 function navigate(view: string): void {
   if (view === "analytics") view = "monitor";
   const requestedTeamSettings = view === "team";
@@ -9015,6 +9147,7 @@ function navigate(view: string): void {
   if (view === "marketing") void loadMarketingEmailCenter();
   if (view === "loyalty") void loadLoyalty();
   if (view === "seo") void loadSeo();
+  if (view === "integrations") void loadTikTokPixelSettings();
   if (view === "settings") showSettingsView(requestedTeamSettings ? "team" : "general");
   if (view === "labels") void loadFulfillmentLocations();
   if (view === "fulfillment") void loadFulfillmentQueue();
@@ -11945,7 +12078,9 @@ void loadWorkspaceSession().then(() => {
   if (activeView === "team") void loadWorkspaceUsers();
   if (activeView === "seo") void loadSeo();
   if (activeView === "loyalty") void loadLoyalty();
+  if (activeView === "integrations") void loadTikTokPixelSettings();
 });
+void loadTikTokPixelSettings();
 void loadExtensions();
 void loadIndependentSiteControls();
 void loadCommerce().then(() => void loadLiveOrders(true));
