@@ -2364,12 +2364,14 @@ export class WooCommerceGateway {
     coaId: string,
     quantity: number,
     eventId?: string,
+    confirmed = false,
   ): Promise<CommerceOrderCoaWorkspace> {
     await this.requestRoute(`/wp-json/phaseone-ops/v1/orders/${orderId}/items/${itemId}/coas`, {
       method: "POST",
       body: {
         coa_id: coaId,
         quantity,
+        confirmed,
         ...(eventId ? { event_id: eventId } : {}),
       },
       headers: this.operationsHeaders(),

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Phase One Operations Bridge
  * Description: Secure bridge between Phase One Operations Suite, storefront controls, customer rewards and existing COA Manager records.
- * Version: 2.1.0
+ * Version: 2.1.1
  * Author: Phase One Labz
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -163,7 +163,7 @@ final class Phase_One_Operations_Bridge {
     public static function status() {
         return rest_ensure_response([
             'connected' => true,
-            'version' => '2.1.0',
+            'version' => '2.1.1',
             'capabilities' => array_values(array_filter([
                 'edit_coa',
                 'read_customer_rewards',
@@ -762,6 +762,10 @@ final class Phase_One_Operations_Bridge {
         if (!is_array($input) || empty($input['coa_id']) || empty($input['quantity'])) {
             return new WP_Error('phaseone_invalid_coa_assignment', 'COA and quantity are required.', ['status' => 400]);
         }
+        $confirmed = true === filter_var($input['confirmed'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        if (!$confirmed) {
+            return new WP_Error('phaseone_coa_confirmation_required', 'Confirm that the selected lot was physically packed.', ['status' => 400]);
+        }
         $event_id = strtolower(sanitize_text_field((string) ($input['event_id'] ?? '')));
         if ($event_id !== '' && !preg_match('/^[a-f0-9]{64}$/', $event_id)) {
             return new WP_Error('phaseone_invalid_coa_event', 'A valid COA assignment event id is required.', ['status' => 400]);
@@ -796,7 +800,7 @@ final class Phase_One_Operations_Bridge {
             'POST',
             '/phaseone/v1/order-coas/orders/' . $order_id . '/items/' . $item_id . '/assign',
             null,
-            ['coa_id' => $coa_id, 'quantity' => $quantity]
+            ['coa_id' => $coa_id, 'quantity' => $quantity, 'confirmed' => true]
         );
         if (is_wp_error($result)) {
             if ($lock_key !== '') {

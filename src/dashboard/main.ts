@@ -3859,7 +3859,7 @@ function renderOrderDetail(order: CommerceOrder): void {
       ? line.assignments.map((assignment) => `<div class="coa-assignment"><span><strong>${escapeHtml(assignment.lot || assignment.coaId)}</strong><small>${formatNumber(assignment.quantity)} unit${assignment.quantity === 1 ? "" : "s"} · ${escapeHtml(assignment.source || "Manual assignment")}</small></span><button type="button" data-remove-coa="${escapeHtml(assignment.assignmentId)}" data-coa-item="${line.itemId}">Remove</button></div>`).join("")
       : '<p class="operations-empty operations-empty--compact"><strong>No certificate assigned</strong><span>Select a verified lot below.</span></p>';
     const candidates = line.candidates.map((candidate) => `<option value="${escapeHtml(candidate.id)}">${escapeHtml(candidate.number || candidate.productName)} · Lot ${escapeHtml(candidate.lot || "unlisted")}${candidate.currentShippingLot ? " · Current shipping lot" : ""}</option>`).join("");
-    return `<article class="coa-line"><header><div><strong>${escapeHtml(line.name)}</strong><small>${escapeHtml(line.sku || `Line ${line.itemId}`)} · ${formatNumber(line.quantity)} ordered</small></div><span>${formatNumber(line.remainingQuantity)} unassigned</span></header><div class="coa-assignment-list">${assignments}</div><form data-coa-assignment-form data-item-id="${line.itemId}"><label><span>Verified lot</span><select name="coaId" required><option value="">Choose a certificate</option>${candidates}</select></label><label><span>Quantity</span><input name="quantity" type="number" min="1" max="${Math.max(1, line.remainingQuantity)}" value="${Math.max(1, line.remainingQuantity)}" required /></label><button class="button button--secondary" type="submit"${!candidates || line.remainingQuantity < 1 ? " disabled" : ""}>Assign COA</button></form></article>`;
+    return `<article class="coa-line"><header><div><strong>${escapeHtml(line.name)}</strong><small>${escapeHtml(line.sku || `Line ${line.itemId}`)} · ${formatNumber(line.quantity)} ordered</small></div><span>${formatNumber(line.remainingQuantity)} unassigned</span></header><div class="coa-assignment-list">${assignments}</div><form data-coa-assignment-form data-item-id="${line.itemId}"><label><span>Verified lot</span><select name="coaId" required><option value="">Choose a certificate</option>${candidates}</select></label><label><span>Quantity</span><input name="quantity" type="number" min="1" max="${Math.max(1, line.remainingQuantity)}" value="${Math.max(1, line.remainingQuantity)}" required /></label><label><span>Physical confirmation</span><span><input name="confirmed" type="checkbox" required /> This exact lot was packed</span></label><button class="button button--secondary" type="submit"${!candidates || line.remainingQuantity < 1 ? " disabled" : ""}>Assign COA</button></form></article>`;
   }).join("");
   const timelineEntries = [
     ...operations.notes.map((note) => ({ id: `note-${note.id}`, at: note.createdAt, title: note.customerNote ? "Customer note" : note.author || "Order action", copy: note.note })),
@@ -9727,7 +9727,7 @@ async function deleteOrderEvidence(evidenceId: string): Promise<void> {
   }
 }
 
-async function updateOrderCoa(input: { action: "assign" | "remove"; itemId: number; coaId?: string; quantity?: number; assignmentId?: string }): Promise<void> {
+async function updateOrderCoa(input: { action: "assign" | "remove"; itemId: number; coaId?: string; quantity?: number; assignmentId?: string; confirmed?: boolean }): Promise<void> {
   if (!activeOrder || !activeOrderOperations) return;
   try {
     const response = await fetch("/api/commerce/order-coa", {
@@ -11079,8 +11079,9 @@ orderDetailContent.addEventListener("submit", (event) => {
     const itemId = Number(form.dataset.itemId);
     const coaId = String(data.get("coaId") || "");
     const quantity = Number(data.get("quantity"));
+    const confirmed = data.get("confirmed") === "on";
     if (Number.isSafeInteger(itemId) && itemId > 0 && coaId && Number.isSafeInteger(quantity) && quantity > 0) {
-      void updateOrderCoa({ action: "assign", itemId, coaId, quantity });
+      void updateOrderCoa({ action: "assign", itemId, coaId, quantity, confirmed });
     }
   }
 });

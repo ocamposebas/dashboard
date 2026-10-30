@@ -5962,16 +5962,21 @@ export function createMonitorServer(
         const coaId = typeof input.coaId === "string" ? input.coaId.trim() : "";
         const assignmentId = typeof input.assignmentId === "string" ? input.assignmentId.trim() : "";
         const action = input.action === "remove" ? "remove" : "assign";
+        const confirmed = input.confirmed === true;
         if (!Number.isSafeInteger(orderId) || orderId <= 0 || !Number.isSafeInteger(itemId) || itemId <= 0 ||
-          (action === "assign" && (!coaId || !Number.isSafeInteger(quantity) || quantity <= 0)) ||
+          (action === "assign" && (!coaId || !Number.isSafeInteger(quantity) || quantity <= 0 || !confirmed)) ||
           (action === "remove" && !assignmentId)) {
-          json(response, 400, { error: "The COA assignment is invalid" });
+          json(response, 400, {
+            error: action === "assign" && !confirmed
+              ? "Confirm that the selected lot was physically packed"
+              : "The COA assignment is invalid",
+          });
           return;
         }
         try {
           const coas = action === "remove"
             ? await commerce.removeOrderCoa(orderId, itemId, assignmentId)
-            : await commerce.assignOrderCoa(orderId, itemId, coaId, quantity);
+            : await commerce.assignOrderCoa(orderId, itemId, coaId, quantity, undefined, confirmed);
           orderDetailCache.delete(orderId);
           json(response, 200, { saved: true, coas });
         } catch (error: unknown) {

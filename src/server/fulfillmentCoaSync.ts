@@ -119,6 +119,7 @@ export async function syncPackedCoaAssignments(input: {
         allocation.coaId,
         missing,
         eventId(input.snapshot, allocation),
+        true,
       );
     } catch (error) {
       throw new FulfillmentCoaSyncError(

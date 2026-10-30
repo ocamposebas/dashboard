@@ -71,11 +71,11 @@ function workspace(assignments: CommerceOrderCoaWorkspace["items"][number]["assi
 
 test("packed vial allocations are assigned once with a stable protected event id", async () => {
   let current = workspace();
-  const calls: Array<{ quantity: number; eventId: string }> = [];
+  const calls: Array<{ quantity: number; eventId: string; confirmed: boolean }> = [];
   const gateway = {
     getOrderCoas: async () => current,
-    assignOrderCoa: async (_orderId: number, _itemId: number, coaId: string, quantity: number, eventId?: string) => {
-      calls.push({ quantity, eventId: eventId || "" });
+    assignOrderCoa: async (_orderId: number, _itemId: number, coaId: string, quantity: number, eventId?: string, confirmed = false) => {
+      calls.push({ quantity, eventId: eventId || "", confirmed });
       current = workspace([{
         assignmentId: "assignment-1",
         coaId,
@@ -92,6 +92,7 @@ test("packed vial allocations are assigned once with a stable protected event id
   assert.equal(first.assignedUnits, 2);
   assert.equal(calls.length, 1);
   assert.match(calls[0]!.eventId, /^[a-f0-9]{64}$/);
+  assert.equal(calls[0]!.confirmed, true);
 
   const replay = await syncPackedCoaAssignments({ snapshot: snapshot(), gateway });
   assert.equal(replay.assignedUnits, 0);

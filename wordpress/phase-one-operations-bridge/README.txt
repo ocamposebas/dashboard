@@ -46,6 +46,10 @@ existing Order COA workspace. A stable event fingerprint and atomic WordPress
 ledger make retries replay-safe while the dashboard still reconciles current
 assignments before requesting any missing quantity.
 
+Version 2.1.1 carries the immutable Packed confirmation through the protected
+COA assignment request. The bridge rejects unconfirmed manual writes and only
+forwards a physical-lot confirmation supplied by the authenticated dashboard.
+
 Version 1.7.0 adds idempotent native shipment tracking save and void support.
 
 Version 1.7.1 fixes inventory waitlist visibility. The bridge now reads active

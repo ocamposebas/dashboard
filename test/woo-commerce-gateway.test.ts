@@ -597,7 +597,7 @@ test("loads protected evidence, COA, timeline and restock operations", async () 
   const [evidence, coas, notes, restocks] = await Promise.all([
     gateway.getOrderEvidence(108), gateway.getOrderCoas(108), gateway.listOrderNotes(108), gateway.listRestocks(),
   ]);
-  await gateway.assignOrderCoa(108, 55, "coa-2", 1);
+  await gateway.assignOrderCoa(108, 55, "coa-2", 1, undefined, true);
   await gateway.notifyWaitlist(528);
 
   assert.equal(evidence.items[0]?.label, "Zelle proof");
@@ -607,7 +607,7 @@ test("loads protected evidence, COA, timeline and restock operations", async () 
   assert.equal(restocks[0]?.productName, "Wolverine");
   assert.ok(requests.filter((request) => request.path.includes("/phaseone-ops/")).every((request) => request.key === "ck_test"));
   const assignment = requests.find((request) => request.path.endsWith("/items/55/coas") && request.method === "POST");
-  assert.deepEqual(assignment?.body, { coa_id: "coa-2", quantity: 1 });
+  assert.deepEqual(assignment?.body, { coa_id: "coa-2", quantity: 1, confirmed: true });
   assert.equal(requests.some((request) => request.path.endsWith("/waitlist/notify")), true);
 });
 
