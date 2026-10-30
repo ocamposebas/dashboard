@@ -28,3 +28,18 @@ test("PWA manifest exposes square branded any and maskable icons", () => {
 test("Apple home-screen icon uses the required square dimensions", () => {
   assert.deepEqual(pngDimensions("phase-one-ops-apple-180-v1.png"), { width: 180, height: 180 });
 });
+
+test("dark app chrome uses the same graphite theme color everywhere", () => {
+  const manifest = JSON.parse(readFileSync(new URL("manifest.webmanifest", dashboardRoot), "utf8")) as {
+    background_color: string;
+    theme_color: string;
+  };
+  const indexHtml = readFileSync(new URL("index.html", dashboardRoot), "utf8");
+  const dashboardSource = readFileSync(new URL("main.ts", dashboardRoot), "utf8");
+  const darkThemeColor = "#070b12";
+
+  assert.equal(manifest.background_color, darkThemeColor);
+  assert.equal(manifest.theme_color, darkThemeColor);
+  assert.match(indexHtml, new RegExp(`name="theme-color" content="${darkThemeColor}"`));
+  assert.match(dashboardSource, new RegExp(`theme === "dark" \\? "${darkThemeColor}"`));
+});

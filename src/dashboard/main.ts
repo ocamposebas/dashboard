@@ -848,7 +848,7 @@ function applyTheme(theme: ColorTheme, persist = false): void {
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.colorScheme = theme;
   document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
-    ?.setAttribute("content", theme === "dark" ? "#0e1412" : "#f4f4f2");
+    ?.setAttribute("content", theme === "dark" ? "#070b12" : "#f4f4f2");
   const toggle = document.querySelector<HTMLButtonElement>("#theme-toggle");
   const label = document.querySelector<HTMLElement>("#theme-toggle-label");
   const icon = toggle?.querySelector<HTMLElement>(".theme-toggle-icon");

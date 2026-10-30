@@ -5,8 +5,8 @@
   "start_url": "/#overview",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0d1715",
-  "theme_color": "#0d1715",
+  "background_color": "#070b12",
+  "theme_color": "#070b12",
   "icons": [
     {
       "src": "/assets/phase-one-ops-icon-192-v1.png",
