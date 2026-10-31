@@ -4303,6 +4303,30 @@ export function createMonitorServer(
         return;
       }
 
+      if (url.pathname === "/api/users/delete" && request.method === "POST") {
+        if (!isLoginOriginAllowed(request, config)) { json(response, 403, { error: "Origin not allowed" }); return; }
+        if (currentUser.role !== "owner") { json(response, 403, { error: "Owner access required" }); return; }
+        let payload: unknown;
+        try { payload = JSON.parse(await readBody(request)); } catch { json(response, 400, { error: "Invalid JSON request" }); return; }
+        const input = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+        const id = typeof input.id === "string" ? input.id : "";
+        if (!id) { json(response, 400, { error: "Select a valid user" }); return; }
+        if (id === currentUser.id) { json(response, 409, { error: "You cannot delete your own owner account" }); return; }
+        const target = await store.getUserById(id);
+        if (!target) { json(response, 404, { error: "User not found" }); return; }
+        if (target.role === "owner") {
+          const activeOwners = (await store.listUsers()).filter((user) => user.role === "owner" && user.status === "active");
+          if (target.status === "active" && activeOwners.length <= 1) {
+            json(response, 409, { error: "The workspace must keep one active owner" }); return;
+          }
+        }
+        const deleted = await store.deleteUser(id);
+        if (!deleted) { json(response, 404, { error: "User not found" }); return; }
+        await store.addNotification({ type: "security", severity: "warning", title: `${target.displayName} was removed`, message: `${currentUser.displayName} permanently removed the ${target.role} account.`, actionView: "team" });
+        json(response, 200, { deleted: true });
+        return;
+      }
+
       if (url.pathname === "/api/users/password" && request.method === "POST") {
         if (!isLoginOriginAllowed(request, config)) { json(response, 403, { error: "Origin not allowed" }); return; }
         let payload: unknown;

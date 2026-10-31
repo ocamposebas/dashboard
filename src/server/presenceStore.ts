@@ -1202,6 +1202,10 @@ export class PresenceStore {
     return updated;
   }
 
+  async deleteUser(id: string): Promise<boolean> {
+    return (await this.client.hDel(this.usersKey, id)) > 0;
+  }
+
   async recordUserLogin(id: string): Promise<void> {
     const user = await this.getUserById(id);
     if (!user) return;

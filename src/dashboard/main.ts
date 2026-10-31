@@ -8029,9 +8029,10 @@ function renderWorkspaceUsers(): void {
     return;
   }
   const canAdminister = Boolean(workspaceSession?.permissions.administer);
+  const canDeleteUsers = workspaceSession?.user.role === "owner";
   container.innerHTML = users.map((user) => {
     const current = user.id === workspaceSession?.user.id;
-    return `<article class="team-member${user.status === "suspended" ? " is-suspended" : ""}" data-user-id="${escapeHtml(user.id)}"><span class="team-avatar">${escapeHtml(userInitials(user.displayName))}</span><div class="team-identity"><strong>${escapeHtml(user.displayName)}${current ? " <em>You</em>" : ""}</strong><span>@${escapeHtml(user.username)}${user.email ? ` · ${escapeHtml(user.email)}` : " · Primary account"}</span><small>${user.lastLoginAt ? `Last login ${escapeHtml(formatCommerceTimestamp(user.lastLoginAt))}` : "Has not signed in yet"}</small></div><div class="team-access"><select data-user-role aria-label="Role for ${escapeHtml(user.displayName)}" ${!canAdminister || current ? "disabled" : ""}>${(["owner", "administrator", "operations", "analyst"] as WorkspaceRole[]).map((role) => `<option value="${role}"${role === user.role ? " selected" : ""}>${roleLabel(role)}</option>`).join("")}</select><span class="team-status ${user.status === "active" ? "is-active" : ""}">${user.status === "active" ? "Active" : "Suspended"}</span></div><div class="team-actions"><button type="button" data-user-reset ${!canAdminister || current ? "disabled" : ""}>Reset password</button><button type="button" data-user-status ${!canAdminister || current ? "disabled" : ""}>${user.status === "active" ? "Suspend" : "Reactivate"}</button></div></article>`;
+    return `<article class="team-member${user.status === "suspended" ? " is-suspended" : ""}" data-user-id="${escapeHtml(user.id)}"><span class="team-avatar">${escapeHtml(userInitials(user.displayName))}</span><div class="team-identity"><strong>${escapeHtml(user.displayName)}${current ? " <em>You</em>" : ""}</strong><span>@${escapeHtml(user.username)}${user.email ? ` · ${escapeHtml(user.email)}` : " · Primary account"}</span><small>${user.lastLoginAt ? `Last login ${escapeHtml(formatCommerceTimestamp(user.lastLoginAt))}` : "Has not signed in yet"}</small></div><div class="team-access"><select data-user-role aria-label="Role for ${escapeHtml(user.displayName)}" ${!canAdminister || current ? "disabled" : ""}>${(["owner", "administrator", "operations", "analyst"] as WorkspaceRole[]).map((role) => `<option value="${role}"${role === user.role ? " selected" : ""}>${roleLabel(role)}</option>`).join("")}</select><span class="team-status ${user.status === "active" ? "is-active" : ""}">${user.status === "active" ? "Active" : "Suspended"}</span></div><div class="team-actions"><button type="button" data-user-reset ${!canAdminister || current ? "disabled" : ""}>Reset password</button><button type="button" data-user-status ${!canAdminister || current ? "disabled" : ""}>${user.status === "active" ? "Suspend" : "Reactivate"}</button>${canDeleteUsers && !current ? '<button type="button" class="is-danger" data-user-delete>Delete</button>' : ""}</div></article>`;
   }).join("");
 }
 
@@ -10826,7 +10827,7 @@ requiredElement<HTMLElement>("#team-list").addEventListener("change", async (eve
   finally { select.disabled = false; }
 });
 requiredElement<HTMLElement>("#team-list").addEventListener("click", async (event) => {
-  const trigger = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-user-status], [data-user-reset]") : null;
+  const trigger = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-user-status], [data-user-reset], [data-user-delete]") : null;
   const card = trigger?.closest<HTMLElement>("[data-user-id]");
   const user = workspaceUsers.find((item) => item.id === card?.dataset.userId);
   if (!trigger || !user) return;
@@ -10834,6 +10835,19 @@ requiredElement<HTMLElement>("#team-list").addEventListener("click", async (even
     resetPasswordUserId = user.id;
     requiredElement<HTMLElement>("#password-reset-copy").textContent = `Set a temporary password for ${user.displayName}. Every previous session will be closed.`;
     setDialogVisibility("#password-reset-dialog", "#password-reset-backdrop", true);
+    return;
+  }
+  if (trigger.hasAttribute("data-user-delete")) {
+    if (!window.confirm(`Permanently delete ${user.displayName}? This closes their access immediately and cannot be undone.`)) return;
+    trigger.disabled = true;
+    try {
+      const response = await fetch("/api/users/delete", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ id: user.id }) });
+      const payload: unknown = await response.json();
+      if (!response.ok) throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "Account could not be deleted");
+      await Promise.all([loadWorkspaceUsers(), loadNotifications()]);
+      showToast("Account deleted", `${user.displayName} no longer has access to the workspace.`);
+    } catch (error) { showToast("Account deletion failed", error instanceof Error ? error.message : "Try again.", false); }
+    finally { trigger.disabled = false; }
     return;
   }
   trigger.disabled = true;

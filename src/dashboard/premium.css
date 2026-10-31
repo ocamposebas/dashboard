@@ -1216,6 +1216,8 @@ tbody tr:hover td { background: var(--surface-hover); }
 .team-actions { display: flex; gap: 6px; }
 .team-actions button { min-height: 32px; padding: 0 9px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: var(--ink-soft); font-size: 9px; }
 .team-actions button:hover:not(:disabled) { border-color: var(--ink); background: var(--ink); color: var(--surface); }
+.team-actions button.is-danger { border-color: color-mix(in srgb, var(--danger) 42%, var(--line)); color: var(--danger); }
+.team-actions button.is-danger:hover:not(:disabled) { border-color: var(--danger); background: var(--danger); color: #fff; }
 .team-actions button:disabled { opacity: .35; cursor: not-allowed; }
 .password-center { display: grid; grid-template-columns: minmax(220px, .6fr) minmax(0, 1.4fr); gap: 34px; padding: 24px; }
 .password-center h2 { margin: 4px 0 7px; font-size: 18px; }
