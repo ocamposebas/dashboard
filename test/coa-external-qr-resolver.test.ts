@@ -311,6 +311,78 @@ test("never follows a Bitly redirect outside the approved laboratory allowlist",
   assert.equal(result, null);
 });
 
+test("resolves an unseen Kovera vial token by exact governed product and lot", async () => {
+  const lipo = coa({
+    id: "lipoc-kvr-2026-08234e",
+    coaNumber: "LIPOC-KVR-2026-08234E",
+    productName: "Lipo C + B12",
+    compound: "PL-MIC 10mg",
+    familyName: "Lipo C + B12",
+    matchedProductId: 542,
+    matchedVariationId: 0,
+    strength: "10mg",
+    batch: "CP10-03262026",
+    lot: "CP10-03262026",
+    skus: ["LIPO-C-AND-B12"],
+    fileUrl: "",
+    verifyUrl: "https://koveralabs.com/#/verify?t=stored-token",
+  });
+  let requestBody = "";
+  const result = await resolveExternalCoaQr({
+    rawValue: "https://koveralabs.com/#/verify?t=0d63cc9ee2f025f6214c6fbb",
+    coas: [lipo],
+    kovera: {
+      supabaseUrl: "https://public-test.supabase.co",
+      anonKey: "public-test-key",
+    },
+    fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
+      requestBody = String(init?.body || "");
+      return new Response(JSON.stringify({
+        coas: [{
+          coa_number: "KVR-2026-08234E",
+          report_id: "KVR-2026-08234E",
+          peptide_name: "Lipo-C + B12",
+          lot_number: "CP10-03262026",
+          verification_token: "0d63cc9ee2f025f6214c6fbb",
+          pdf_url: "https://public-test.supabase.co/storage/v1/object/public/coa-files/lipo.pdf",
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch,
+  });
+  assert.match(requestBody, /0d63cc9ee2f025f6214c6fbb/);
+  assert.deepEqual(result, {
+    coaReference: "LIPOC-KVR-2026-08234E",
+    provider: "kovera",
+    coaNumber: "KVR-2026-08234E",
+    pdfUrl: "https://public-test.supabase.co/storage/v1/object/public/coa-files/lipo.pdf",
+  });
+});
+
+test("an unseen Kovera token fails closed when product and lot are ambiguous", async () => {
+  const lipo = coa({
+    id: "lipo-one",
+    coaNumber: "LIPO-ONE",
+    productName: "Lipo C + B12",
+    matchedProductId: 542,
+    matchedVariationId: 0,
+    batch: "CP10-03262026",
+    lot: "CP10-03262026",
+  });
+  const result = await resolveExternalCoaQr({
+    rawValue: "https://koveralabs.com/#/verify?t=ambiguous-token",
+    coas: [lipo, { ...lipo, id: "lipo-two", coaNumber: "LIPO-TWO" }],
+    kovera: { supabaseUrl: "https://public-test.supabase.co", anonKey: "public-test-key" },
+    fetchImpl: (async () => new Response(JSON.stringify({
+      coas: [{
+        coa_number: "KVR-OTHER",
+        peptide_name: "Lipo-C + B12",
+        lot_number: "CP10-03262026",
+      }],
+    }), { status: 200 })) as typeof fetch,
+  });
+  assert.equal(result, null);
+});
+
 test("a Bitly redirect to an ILS portal QR still requires the ILS public record to match locally", async () => {
   const result = await resolveExternalCoaQr({
     rawValue: "https://bit.ly/KlowQr1",

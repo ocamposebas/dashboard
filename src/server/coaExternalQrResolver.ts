@@ -22,8 +22,27 @@ interface IlsPublicCoaPayload {
   concentration?: unknown;
 }
 
+interface KoveraPublicCoaPayload {
+  coa_number?: unknown;
+  report_id?: unknown;
+  peptide_name?: unknown;
+  lot_number?: unknown;
+  concentration?: unknown;
+  verification_token?: unknown;
+  pdf_url?: unknown;
+  document_url?: unknown;
+  results?: unknown;
+}
+
+interface KoveraVerificationResponse {
+  coas?: unknown;
+  redirect_token?: unknown;
+}
+
 const APPROVED_LAB_HOSTS = new Set([
   "coas.freedomdiagnosticstesting.com",
+  "d2xsxph8kpxj0f.cloudfront.net",
+  "f004.backblazeb2.com",
   "files.ils-lab.com",
   "portal.ils-lab.com",
   "koveralabs.com",
@@ -58,6 +77,19 @@ function ilsQrCodeId(rawValue: string): string | null {
   const parsed = new URL(canonical);
   if (parsed.hostname !== "portal.ils-lab.com") return null;
   return parsed.pathname.match(/^\/verify\/([A-Za-z0-9_-]{6,200})$/)?.[1] || null;
+}
+
+function koveraQrToken(rawValue: string): string | null {
+  const canonical = canonicalizeCoaScanValue(rawValue);
+  if (!canonical) return null;
+  const parsed = new URL(canonical);
+  if (parsed.hostname !== "koveralabs.com") return null;
+  const fragment = parsed.hash.replace(/^#/, "");
+  const query = fragment.includes("?")
+    ? fragment.slice(fragment.indexOf("?") + 1)
+    : parsed.search.replace(/^\?/, "");
+  const token = new URLSearchParams(query).get("t") || new URLSearchParams(query).get("code");
+  return token && /^[A-Za-z0-9_-]{6,200}$/.test(token) ? token : null;
 }
 
 function directlyMatchingCoas(coas: CommerceCoa[], rawValue: string): CommerceCoa[] {
@@ -213,6 +245,72 @@ async function fetchIlsPublicCoa(
   return null;
 }
 
+function koveraCoaPayload(value: unknown): IlsPublicCoaPayload | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const coa = value as KoveraPublicCoaPayload;
+  const results = coa.results && typeof coa.results === "object" && !Array.isArray(coa.results)
+    ? coa.results as Record<string, unknown>
+    : {};
+  const coaNumber = text(coa.coa_number) || text(coa.report_id);
+  const product = text(coa.peptide_name) || text(results.peptide_name);
+  const lotNumber = text(coa.lot_number) || text(results.lot_number);
+  const concentration = text(coa.concentration);
+  const pdfUrl = text(coa.pdf_url) || text(coa.document_url);
+  if (!coaNumber && !product && !lotNumber) return null;
+  return { coaNumber, product, lotNumber, concentration, pdfUrl };
+}
+
+async function fetchKoveraPublicCoa(input: {
+  token: string;
+  supabaseUrl: string;
+  anonKey: string;
+  fetchImpl: typeof fetch;
+  timeoutMs: number;
+}): Promise<IlsPublicCoaPayload | null> {
+  let token = input.token;
+  for (let redirect = 0; redirect < 2; redirect += 1) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await input.fetchImpl(
+          `${input.supabaseUrl.replace(/\/$/, "")}/rest/v1/rpc/verify_coa_by_token`,
+          {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${input.anonKey}`,
+              apikey: input.anonKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ p_token: token }),
+            redirect: "error",
+            signal: AbortSignal.timeout(input.timeoutMs),
+          },
+        );
+        if (!response.ok) {
+          if (attempt === 0 && (response.status === 408 || response.status === 429 || response.status >= 500)) continue;
+          return null;
+        }
+        const declaredLength = Number(response.headers.get("content-length") || 0);
+        if (declaredLength > 1_000_000) return null;
+        const body = await response.text();
+        if (body.length > 1_000_000) return null;
+        const payload = JSON.parse(body) as KoveraVerificationResponse;
+        const redirectedToken = text(payload.redirect_token);
+        if (redirectedToken && redirectedToken !== token && redirect === 0 && /^[A-Za-z0-9_-]{6,200}$/.test(redirectedToken)) {
+          token = redirectedToken;
+          break;
+        }
+        const coas = Array.isArray(payload.coas) ? payload.coas : [];
+        if (coas.length !== 1) return null;
+        return koveraCoaPayload(coas[0]);
+      } catch {
+        if (attempt === 1) return null;
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Resolves a previously unseen ILS vial QR through ILS' public, read-only COA
  * endpoint. The remote response is never trusted on its own: it must match one
@@ -223,6 +321,10 @@ export async function resolveExternalCoaQr(input: {
   coas: CommerceCoa[];
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  kovera?: {
+    supabaseUrl: string;
+    anonKey: string;
+  };
 }): Promise<ExternalCoaQrResolution | null> {
   const fetchImpl = input.fetchImpl || fetch;
   const timeoutMs = input.timeoutMs ?? 8_000;
@@ -231,6 +333,27 @@ export async function resolveExternalCoaQr(input: {
     ? await resolveBitlyDestination(input.rawValue, fetchImpl, Math.min(timeoutMs, 4_000))
     : input.rawValue;
   if (!resolvedValue) return null;
+
+  const koveraToken = koveraQrToken(resolvedValue);
+  if (koveraToken) {
+    if (!input.kovera) return null;
+    const publicCoa = await fetchKoveraPublicCoa({
+      token: koveraToken,
+      supabaseUrl: input.kovera.supabaseUrl,
+      anonKey: input.kovera.anonKey,
+      fetchImpl,
+      timeoutMs,
+    });
+    if (!publicCoa) return null;
+    const matches = matchingCoas(input.coas, publicCoa);
+    if (matches.length !== 1) return null;
+    return {
+      coaReference: matches[0]!.coaNumber || matches[0]!.id,
+      provider: shortLink ? "bitly-kovera" : "kovera",
+      coaNumber: text(publicCoa.coaNumber),
+      pdfUrl: text(publicCoa.pdfUrl),
+    };
+  }
 
   if (shortLink) {
     const directMatches = directlyMatchingCoas(input.coas, resolvedValue);

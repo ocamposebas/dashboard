@@ -48,6 +48,10 @@ export interface AppConfig {
     redirectUri: string;
     preferredSiteUrl: string;
   };
+  kovera?: {
+    supabaseUrl: string;
+    anonKey: string;
+  };
   fulfillmentDatabase?: DatabaseOptions;
   barcodeSigningSecret?: string;
   affiliateServiceSecret?: string;
@@ -242,6 +246,24 @@ function loadGoogleSearchConsoleConfig(dashboardOrigin: string): AppConfig["goog
   return { clientId, clientSecret, redirectUri: parsedRedirect.toString(), preferredSiteUrl };
 }
 
+export function loadKoveraConfig(): AppConfig["kovera"] {
+  const supabaseUrl = process.env.KOVERA_SUPABASE_URL?.trim() || "";
+  const anonKey = process.env.KOVERA_SUPABASE_ANON_KEY?.trim() || "";
+  const supplied = [supabaseUrl, anonKey].filter(Boolean).length;
+  if (supplied === 0) return undefined;
+  if (supplied !== 2) {
+    throw new Error("KOVERA_SUPABASE_URL and KOVERA_SUPABASE_ANON_KEY must be set together");
+  }
+  const parsed = new URL(supabaseUrl);
+  if (parsed.protocol !== "https:" || !parsed.hostname.endsWith(".supabase.co")) {
+    throw new Error("KOVERA_SUPABASE_URL must be an HTTPS Supabase origin");
+  }
+  if (anonKey.length > 2_048 || /\s/.test(anonKey)) {
+    throw new Error("KOVERA_SUPABASE_ANON_KEY has an invalid format");
+  }
+  return { supabaseUrl: parsed.origin, anonKey };
+}
+
 export function loadConfig(): AppConfig {
   const nodeEnvRaw = process.env.NODE_ENV?.trim() || "development";
   const nodeEnv =
@@ -282,6 +304,7 @@ export function loadConfig(): AppConfig {
   const wooCommerce = loadWooCommerceConfig();
   const upstreamMonitor = loadUpstreamMonitorConfig();
   const googleSearchConsole = loadGoogleSearchConsoleConfig(dashboardOrigin);
+  const kovera = loadKoveraConfig();
   const fulfillmentDatabase = loadFulfillmentDatabaseConfig();
   const barcodeSigningSecret = loadBarcodeSigningSecret();
   const affiliateServiceSecret = loadAffiliateServiceSecret();
@@ -317,6 +340,7 @@ export function loadConfig(): AppConfig {
     ...(upstreamMonitor ? { upstreamMonitor } : {}),
     ...(wooCommerce ? { wooCommerce } : {}),
     ...(googleSearchConsole ? { googleSearchConsole } : {}),
+    ...(kovera ? { kovera } : {}),
     ...(fulfillmentDatabase ? { fulfillmentDatabase } : {}),
     ...(barcodeSigningSecret ? { barcodeSigningSecret } : {}),
     ...(affiliateServiceSecret ? { affiliateServiceSecret } : {}),

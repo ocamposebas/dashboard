@@ -5,9 +5,17 @@ import type { CoaScanIdentifier } from "./coaScanIdentifierRepository.js";
 const SECURE_EQUIVALENT_HOSTS = new Set([
   "bit.ly",
   "coas.freedomdiagnosticstesting.com",
+  "d2xsxph8kpxj0f.cloudfront.net",
+  "f004.backblazeb2.com",
   "files.ils-lab.com",
   "portal.ils-lab.com",
   "koveralabs.com",
+]);
+
+const ILS_DOCUMENT_HOSTS = new Set([
+  "d2xsxph8kpxj0f.cloudfront.net",
+  "f004.backblazeb2.com",
+  "files.ils-lab.com",
 ]);
 
 const LAB_HOST_ALIASES = new Map([
@@ -82,7 +90,11 @@ export function canonicalizeCoaScanValue(rawValue: string): string | null {
   // These providers use the path or fragment token as the durable certificate
   // identity. Marketing/tracking query parameters and harmless fragments must
   // not make a QR already printed on a vial appear to be a different code.
-  if (parsed.hostname === "coas.freedomdiagnosticstesting.com" || parsed.hostname === "portal.ils-lab.com") {
+  if (
+    parsed.hostname === "coas.freedomdiagnosticstesting.com" ||
+    parsed.hostname === "portal.ils-lab.com" ||
+    ILS_DOCUMENT_HOSTS.has(parsed.hostname)
+  ) {
     parsed.search = "";
     parsed.hash = "";
   }
@@ -121,6 +133,12 @@ export function coaScanIdentity(rawValue: string): string | null {
   if (parsed.hostname === "portal.ils-lab.com") {
     const match = parsed.pathname.match(/^\/verify\/([A-Za-z0-9_-]{6,200})$/);
     return match?.[1] ? `ils:${match[1]}` : null;
+  }
+  if (ILS_DOCUMENT_HOSTS.has(parsed.hostname)) {
+    const document = decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop() || "").trim();
+    if (!/\.pdf$/i.test(document)) return null;
+    const certificate = document.replace(/\.pdf$/i, "").trim();
+    return certificate ? `ils-document:${certificate.toLocaleLowerCase("en")}` : null;
   }
   if (parsed.hostname === "koveralabs.com") {
     const fragment = parsed.hash.replace(/^#/, "");

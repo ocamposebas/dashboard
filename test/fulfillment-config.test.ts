@@ -5,6 +5,7 @@ import {
   loadBarcodeSigningSecret,
   loadEvidenceStorageConfig,
   loadFulfillmentDatabaseConfig,
+  loadKoveraConfig,
   loadShipStationConfig,
 } from "../src/server/config.js";
 
@@ -22,6 +23,8 @@ const managedKeys = [
   "EVIDENCE_STORAGE_PATH",
   "EVIDENCE_ENCRYPTION_SECRET",
   "EVIDENCE_NOTIFICATION_MODE",
+  "KOVERA_SUPABASE_URL",
+  "KOVERA_SUPABASE_ANON_KEY",
 ] as const;
 
 function withDatabaseEnvironment(
@@ -147,5 +150,23 @@ test("ShipStation credentials stay optional and use an explicit safe data mode",
   });
   withDatabaseEnvironment({ SHIPSTATION_LABEL_PURCHASE_ENABLED: "yes" }, () => {
     assert.throws(() => loadShipStationConfig(), /must be true or false/);
+  });
+});
+
+test("Kovera public verification remains optional and requires both server values", () => {
+  withDatabaseEnvironment({}, () => {
+    assert.equal(loadKoveraConfig(), undefined);
+  });
+  withDatabaseEnvironment({ KOVERA_SUPABASE_URL: "https://public-test.supabase.co" }, () => {
+    assert.throws(() => loadKoveraConfig(), /must be set together/);
+  });
+  withDatabaseEnvironment({
+    KOVERA_SUPABASE_URL: "https://public-test.supabase.co/path",
+    KOVERA_SUPABASE_ANON_KEY: "public-anon-key",
+  }, () => {
+    assert.deepEqual(loadKoveraConfig(), {
+      supabaseUrl: "https://public-test.supabase.co",
+      anonKey: "public-anon-key",
+    });
   });
 });

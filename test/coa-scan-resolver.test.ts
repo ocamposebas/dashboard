@@ -112,6 +112,45 @@ test("resolves a current COA URL directly from governed catalog data", () => {
   assert.equal(result?.lot, "CP10-03262026");
 });
 
+test("treats the known ILS CDN and file hosts as the same exact PDF identity", () => {
+  const fileName = "phase-one-labz-P1-50AM-26-RSsaXV.pdf";
+  const result = resolveCoaQrScan({
+    rawValue: `https://d2xsxph8kpxj0f.cloudfront.net/119092094/library/coa-pdfs/${fileName}`,
+    coas: [coa({
+      id: "five-amino-50",
+      matchedProductId: 552,
+      matchedVariationId: 1875,
+      productName: "5-Amino-1MQ - 50MG",
+      lot: "P1-50AM-26",
+      batch: "P1-50AM-26",
+      verifyUrl: `https://files.ils-lab.com/coa-pdfs/${fileName}`,
+      currentCoa: {
+        ...coa().currentCoa,
+        verifyUrl: `https://files.ils-lab.com/coa-pdfs/${fileName}`,
+      },
+    })],
+  });
+  assert.equal(result?.coaId, "five-amino-50");
+  assert.equal(result?.variationId, 1875);
+});
+
+test("recognizes exact ILS documents served from the legacy Backblaze host", () => {
+  const url = "https://f004.backblazeb2.com/file/ils-lab-assets/coa-pdfs/phase-one-labz-mfg726-sVbGmi.pdf";
+  const result = resolveCoaQrScan({
+    rawValue: `${url}?download=1`,
+    coas: [coa({
+      id: "reta-60-legacy",
+      matchedProductId: 534,
+      matchedVariationId: 1817,
+      productName: "PL-RT - 60MG",
+      lot: "mfg726",
+      batch: "mfg726",
+      verifyUrl: url,
+    })],
+  });
+  assert.equal(result?.coaId, "reta-60-legacy");
+});
+
 test("resolves a printed ILS portal QR through its registered COA alias", () => {
   const rawValue = "http://portal.ils-lab.com/verify/MkH533f-jOUYkKsp";
   const result = resolveCoaQrScan({

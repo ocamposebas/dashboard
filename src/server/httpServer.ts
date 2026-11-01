@@ -3455,9 +3455,18 @@ export function createMonitorServer(
             }),
             coaScanIdentifiers.resolve(rawBarcode),
           ]);
+          const directBarcode = resolveCoaQrScan({
+            rawValue: rawBarcode,
+            coas,
+            registeredIdentifier: storedIdentifier,
+          });
           let registeredIdentifier = storedIdentifier;
-          if (!registeredIdentifier) {
-            const externalResolution = await resolveExternalCoaQr({ rawValue: rawBarcode, coas });
+          if (!directBarcode && !registeredIdentifier) {
+            const externalResolution = await resolveExternalCoaQr({
+              rawValue: rawBarcode,
+              coas,
+              ...(config.kovera ? { kovera: config.kovera } : {}),
+            });
             if (externalResolution) {
               registeredIdentifier = await coaScanIdentifiers.register({
                 rawValue: rawBarcode,
@@ -3467,7 +3476,7 @@ export function createMonitorServer(
               });
             }
           }
-          const registeredBarcode = resolveCoaQrScan({
+          const registeredBarcode = directBarcode || resolveCoaQrScan({
             rawValue: rawBarcode,
             coas,
             registeredIdentifier,
