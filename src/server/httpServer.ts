@@ -71,7 +71,11 @@ import {
   FulfillmentRepository,
   FulfillmentRepositoryError,
 } from "./fulfillmentRepository.js";
-import { decideFulfillmentManualOverride, decideFulfillmentScan } from "./fulfillmentPicking.js";
+import {
+  decideFulfillmentLineCompletion,
+  decideFulfillmentManualOverride,
+  decideFulfillmentScan,
+} from "./fulfillmentPicking.js";
 import { buildPackingSnapshot, FulfillmentPackingError } from "./fulfillmentPacking.js";
 import { syncPackedCoaAssignments } from "./fulfillmentCoaSync.js";
 import {
@@ -3487,6 +3491,63 @@ export function createMonitorServer(
           });
         } catch (error: unknown) {
           fulfillmentError(response, error, "The vial QR could not be verified safely");
+        }
+        return;
+      }
+
+      if (url.pathname === "/api/fulfillment/complete-line" && request.method === "POST") {
+        const access = fulfillmentAccessForRole(currentUser.role);
+        if (!isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Origin not allowed" });
+          return;
+        }
+        if (!access.operateQueue) {
+          json(response, 403, { error: "Operations access required" });
+          return;
+        }
+        if (!commerce || !fulfillmentRepository) {
+          json(response, 503, { error: "Fulfillment services are not configured" });
+          return;
+        }
+        let payload: unknown;
+        try { payload = JSON.parse(await readBody(request)); } catch {
+          json(response, 400, { error: "Invalid JSON request" });
+          return;
+        }
+        const input = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+        const fulfillmentId = typeof input.fulfillmentId === "string" ? input.fulfillmentId : "";
+        const clientEventId = typeof input.clientEventId === "string" ? input.clientEventId : "";
+        const orderItemId = Number(input.orderItemId);
+        if (!Number.isSafeInteger(orderItemId) || orderItemId <= 0) {
+          json(response, 400, { error: "Select a valid product line" });
+          return;
+        }
+        try {
+          const session = await fulfillmentRepository.getById(fulfillmentId);
+          if (!session) { json(response, 404, { error: "The picking session does not exist" }); return; }
+          const [order, coas] = await Promise.all([
+            commerce.getOrder(session.orderId),
+            fulfillmentCoas(),
+          ]);
+          const recorded = await fulfillmentRepository.recordIdempotentScan({
+            fulfillmentId,
+            clientEventId,
+            rawBarcode: `confirm-remaining:${orderItemId}`,
+            actorId: currentUser.id,
+          }, (lockedSession) => decideFulfillmentLineCompletion({
+            session: lockedSession,
+            order,
+            coas,
+            orderItemId,
+          }));
+          json(response, 200, {
+            replayed: recorded.replayed,
+            session: recorded.session,
+            event: recorded.event,
+            feedback: recorded.event.responseSnapshot,
+          });
+        } catch (error: unknown) {
+          fulfillmentError(response, error, "The remaining units could not be confirmed safely");
         }
         return;
       }

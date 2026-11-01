@@ -5142,9 +5142,12 @@ function renderPickingStation(order: FulfillmentQueueEntry): string {
     const capturedLots = line.verifiedLots.length
       ? line.verifiedLots.map((allocation) => `${allocation.lot} × ${allocation.quantity}`).join(" · ")
       : "Scan the required code";
+    const repeatVerification = line.verifiedLots.length
+      ? "Same product and exact lot as the first scan"
+      : "Same product as the first registered item code";
     return `<article class="picking-product-card${lineComplete ? " is-complete" : ""}${isNext ? " is-next" : ""}" data-picking-line="${line.orderItemId}">
       <div class="picking-product-image">${line.imageUrl ? `<img src="${escapeHtml(line.imageUrl)}" alt="" />` : '<span>P1</span>'}<i>${lineComplete ? "✓" : remaining}</i></div>
-      <div class="picking-product-copy"><div class="picking-product-state">${lineComplete ? "VERIFIED" : isNext ? "PICK THIS NOW" : "UP NEXT"}</div><h3>${escapeHtml(line.name)}</h3><p>SKU ${escapeHtml(line.sku)}${line.variationId ? ` · Variation ${line.variationId}` : ""}</p><div class="picking-product-tags"><span>Verification <b>${escapeHtml(capturedLots)}</b></span><span>Scan <b>item code</b></span></div>${isNext && line.verifiedQuantity === 0 ? `<button class="picking-manual-exception" type="button" data-manual-verify-line="${line.orderItemId}" data-manual-verify-name="${escapeHtml(line.name)}">Continue without scanning this product</button>` : ""}</div>
+      <div class="picking-product-copy"><div class="picking-product-state">${lineComplete ? "VERIFIED" : isNext ? "PICK THIS NOW" : "UP NEXT"}</div><h3>${escapeHtml(line.name)}</h3><p>SKU ${escapeHtml(line.sku)}${line.variationId ? ` · Variation ${line.variationId}` : ""}</p><div class="picking-product-tags"><span>Verification <b>${escapeHtml(capturedLots)}</b></span><span>Scan <b>item code</b></span></div>${isNext && line.verifiedQuantity === 0 ? `<button class="picking-manual-exception" type="button" data-manual-verify-line="${line.orderItemId}" data-manual-verify-name="${escapeHtml(line.name)}">Continue without scanning this product</button>` : ""}${isNext && line.verifiedQuantity > 0 && remaining > 0 ? `<button class="picking-repeat-confirm" type="button" data-confirm-line-remainder="${line.orderItemId}" data-confirm-line-name="${escapeHtml(line.name)}" data-confirm-line-count="${remaining}"${fulfillmentScanBusy ? " disabled" : ""}><span>✓</span><strong>Confirm remaining ${remaining}</strong><small>${escapeHtml(repeatVerification)}</small></button>` : ""}</div>
       <div class="picking-location"><small>VERIFY WITH</small><strong>Item code</strong><span>Vial QR or product barcode</span></div>
       <div class="picking-quantity"><small>VERIFIED</small><strong>${line.verifiedQuantity}<span>/ ${line.quantity}</span></strong><p>${lineComplete ? "Complete" : `${remaining} remaining`}</p></div>
     </article>`;
@@ -6567,6 +6570,63 @@ async function manuallyVerifyFulfillmentLine(orderItemId: number, productName: s
     showToast("Manual exception recorded", `${productName} can continue. The operator and reason are stored in the order audit.`);
   } catch (error) {
     showToast("Could not continue without scan", error instanceof Error ? error.message : "Refresh and try again.", false);
+  } finally {
+    fulfillmentScanBusy = false;
+    renderFulfillmentQueue();
+  }
+}
+
+async function confirmFulfillmentLineRemainder(
+  orderItemId: number,
+  productName: string,
+  remaining: number,
+): Promise<void> {
+  const order = selectedFulfillmentOrder();
+  if (!order?.session || order.session.state !== "open" || fulfillmentScanBusy || remaining < 1) return;
+  if (!window.confirm(`Confirm the remaining ${remaining} ${productName} unit${remaining === 1 ? "" : "s"}?\n\nThey must be the same exact product and, when a vial QR was scanned, the same physical lot.`)) return;
+  const clientEventId = crypto.randomUUID();
+  fulfillmentScanBusy = true;
+  renderFulfillmentQueue();
+  try {
+    let response: Response | undefined;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        response = await fetch("/api/fulfillment/complete-line", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            fulfillmentId: order.session.id,
+            clientEventId,
+            orderItemId,
+          }),
+        });
+        if (response.status < 500 || attempt === 1) break;
+      } catch (error) {
+        lastError = error;
+        if (attempt === 1) throw error;
+      }
+    }
+    if (!response) throw lastError instanceof Error ? lastError : new Error("Confirmation connection unavailable");
+    const body: unknown = await response.json();
+    if (!response.ok || !isRecord(body) || !isRecord(body.feedback) || !isRecord(body.session)) {
+      throw new Error(isRecord(body) && typeof body.error === "string" ? body.error : "The remaining units could not be confirmed");
+    }
+    const payload = body as unknown as FulfillmentScanPayload;
+    fulfillmentScanFeedback = payload.feedback;
+    applyPickingScan(payload);
+    playPickingTone(payload.feedback.accepted);
+    if (!payload.feedback.accepted) {
+      showToast("Remaining units not confirmed", payload.feedback.message, false);
+      return;
+    }
+    showToast(
+      "Remaining units confirmed",
+      `${remaining} identical ${productName} unit${remaining === 1 ? "" : "s"} were added with the first verified scan.`,
+    );
+  } catch (error) {
+    showToast("Could not confirm remaining units", error instanceof Error ? error.message : "Refresh and try again.", false);
   } finally {
     fulfillmentScanBusy = false;
     renderFulfillmentQueue();
@@ -11872,6 +11932,15 @@ function handleFulfillmentClick(event: Event): void {
     void manuallyVerifyFulfillmentLine(
       Number(manualVerify.dataset.manualVerifyLine),
       manualVerify.dataset.manualVerifyName || "this product",
+    );
+    return;
+  }
+  const confirmRemainder = target?.closest<HTMLElement>("[data-confirm-line-remainder]");
+  if (confirmRemainder?.dataset.confirmLineRemainder) {
+    void confirmFulfillmentLineRemainder(
+      Number(confirmRemainder.dataset.confirmLineRemainder),
+      confirmRemainder.dataset.confirmLineName || "this product",
+      Number(confirmRemainder.dataset.confirmLineCount),
     );
     return;
   }

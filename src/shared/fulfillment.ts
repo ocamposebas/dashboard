@@ -151,6 +151,7 @@ export interface FulfillmentQueuePayload {
 
 export type FulfillmentScanReasonCode =
   | "accepted"
+  | "bulk_confirmed"
   | "manual_override"
   | "unknown_barcode"
   | "inactive_barcode"

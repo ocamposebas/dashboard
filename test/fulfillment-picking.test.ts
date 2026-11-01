@@ -3,7 +3,11 @@ import test from "node:test";
 
 import type { BarcodeRegistryRecord } from "../src/shared/barcodeFulfillment.js";
 import type { FulfillmentScanFeedback, FulfillmentSession } from "../src/shared/fulfillment.js";
-import { decideFulfillmentManualOverride, decideFulfillmentScan } from "../src/server/fulfillmentPicking.js";
+import {
+  decideFulfillmentLineCompletion,
+  decideFulfillmentManualOverride,
+  decideFulfillmentScan,
+} from "../src/server/fulfillmentPicking.js";
 import type { CommerceCoa, CommerceOrder } from "../src/server/wooCommerceGateway.js";
 
 function order(overrides: Partial<CommerceOrder> = {}): CommerceOrder {
@@ -118,6 +122,118 @@ test("a valid batch scan verifies one unit and returns immediate picking feedbac
   assert.equal(feedback.verifiedQuantity, 1);
   assert.equal(feedback.requiredQuantity, 2);
   assert.equal(feedback.complete, false);
+});
+
+test("one verified vial can confirm the remaining identical quantity with the same lot", () => {
+  const repeatedOrder = order({
+    lineItems: [{ ...order().lineItems[0]!, quantity: 10 }],
+  });
+  const repeatedSession = session(1, {
+    sourceSnapshot: {
+      orderId: 1401,
+      lines: [{
+        orderItemId: 601, productId: 201, variationId: 301, sku: "BPC-10-BLUE",
+        quantity: 10, locationCode: "A-01", coaId: "coa-201", lot: "LOT-201",
+      }],
+    },
+    progress: {
+      verifiedUnits: 1,
+      totalUnits: 10,
+      lines: [{ orderItemId: 601, requiredQuantity: 10, verifiedQuantity: 1 }],
+      allocations: [{ orderItemId: 601, coaId: "coa-201", lot: "LOT-201", quantity: 1 }],
+    },
+  });
+  const decision = decideFulfillmentLineCompletion({
+    session: repeatedSession,
+    order: repeatedOrder,
+    coas: [coa()],
+    orderItemId: 601,
+  });
+  assert.equal(decision.result, "accepted");
+  assert.equal(decision.reasonCode, "bulk_confirmed");
+  assert.equal(decision.quantityDelta, 9);
+  const progress = decision.nextProgress as unknown as {
+    verifiedUnits: number;
+    lines: Array<{ verifiedQuantity: number }>;
+    allocations: Array<{ lot: string; quantity: number }>;
+  };
+  assert.equal(progress.verifiedUnits, 10);
+  assert.equal(progress.lines[0]?.verifiedQuantity, 10);
+  assert.deepEqual(progress.allocations, [{ orderItemId: 601, coaId: "coa-201", lot: "LOT-201", quantity: 10 }]);
+});
+
+test("one registered product barcode can confirm the remaining identical quantity", () => {
+  const repeatedOrder = order({
+    lineItems: [{ ...order().lineItems[0]!, quantity: 10 }],
+  });
+  const repeatedSession = session(1, {
+    sourceSnapshot: {
+      orderId: 1401,
+      lines: [{
+        orderItemId: 601, productId: 201, variationId: 301, sku: "BPC-10-BLUE",
+        quantity: 10, locationCode: "A-01", coaId: null, lot: null,
+      }],
+    },
+    progress: {
+      verifiedUnits: 1,
+      totalUnits: 10,
+      lines: [{ orderItemId: 601, requiredQuantity: 10, verifiedQuantity: 1 }],
+      productBarcodeOrderItemIds: [601],
+      allocations: [],
+    },
+  });
+  const decision = decideFulfillmentLineCompletion({
+    session: repeatedSession,
+    order: repeatedOrder,
+    coas: [],
+    orderItemId: 601,
+  });
+  assert.equal(decision.result, "accepted");
+  assert.equal(decision.quantityDelta, 9);
+  assert.equal(decision.barcodeType, "product_repeat");
+});
+
+test("mixed scanned lots never use the one-tap remaining-unit shortcut", () => {
+  const mixedOrder = order({ lineItems: [{ ...order().lineItems[0]!, quantity: 10 }] });
+  const mixedSession = session(2, {
+    sourceSnapshot: {
+      orderId: 1401,
+      lines: [{
+        orderItemId: 601, productId: 201, variationId: 301, sku: "BPC-10-BLUE",
+        quantity: 10, locationCode: "A-01", coaId: "coa-201", lot: "LOT-201",
+      }],
+    },
+    progress: {
+      verifiedUnits: 2,
+      totalUnits: 10,
+      lines: [{ orderItemId: 601, requiredQuantity: 10, verifiedQuantity: 2 }],
+      allocations: [
+        { orderItemId: 601, coaId: "coa-201", lot: "LOT-201", quantity: 1 },
+        { orderItemId: 601, coaId: "coa-202", lot: "LOT-202", quantity: 1 },
+      ],
+    },
+  });
+  const decision = decideFulfillmentLineCompletion({
+    session: mixedSession,
+    order: mixedOrder,
+    coas: [coa(), coa({ id: "coa-202", lot: "LOT-202" })],
+    orderItemId: 601,
+  });
+  assert.equal(decision.result, "rejected");
+  assert.equal(decision.quantityDelta, 0);
+  assert.equal(decision.reasonCode, "verification_method_changed");
+});
+
+test("remaining units cannot be confirmed before the first successful scan", () => {
+  const decision = decideFulfillmentLineCompletion({
+    session: session(),
+    order: order(),
+    coas: [coa()],
+    orderItemId: 601,
+  });
+  assert.equal(decision.result, "rejected");
+  assert.equal(decision.quantityDelta, 0);
+  assert.equal(decision.reasonCode, "verification_method_changed");
 });
 
 test("wrong product, wrong variation and an unknown COA never change quantity", () => {

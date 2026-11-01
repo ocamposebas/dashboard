@@ -491,6 +491,101 @@ export function decideFulfillmentScan(input: {
   };
 }
 
+export function decideFulfillmentLineCompletion(input: {
+  session: FulfillmentSession;
+  order: CommerceOrder;
+  coas: CommerceCoa[];
+  orderItemId: number;
+}): FulfillmentScanDecision {
+  const lines = snapshotLines(input.session);
+  const progress = progressFor(input.session, lines);
+  const eligibility = evaluateFulfillmentEligibility(input.order);
+  if (!eligibility.eligible) {
+    return rejected(progress, "order_ineligible", eligibility.reasons[0]?.message || "This order is no longer eligible for picking.");
+  }
+  if (input.session.sourceModifiedAt !== input.order.modifiedAt) {
+    return rejected(progress, "order_changed", "The live order changed. Review it before confirming repeated units.");
+  }
+  if (!lines.length || !liveLinesStillMatch(input.order, lines)) {
+    return rejected(progress, "line_changed", "The order items no longer match the secured picking session.");
+  }
+  const line = lines.find((candidate) => candidate.orderItemId === input.orderItemId);
+  const current = progress.lines.find((candidate) => candidate.orderItemId === input.orderItemId);
+  const productName = input.order.lineItems.find((item) => item.id === input.orderItemId)?.name || "Product";
+  if (!line || !current) {
+    return rejected(progress, "line_changed", "The selected product is no longer part of this order.");
+  }
+  if (current.verifiedQuantity >= current.requiredQuantity) {
+    return rejected(progress, "quantity_complete", "This product is already fully verified.", { line, productName });
+  }
+  if (current.verifiedQuantity < 1) {
+    return rejected(progress, "verification_method_changed", "Scan the first unit before confirming identical remaining units.", { line, productName });
+  }
+  if (progress.manualOverrideOrderItemIds.includes(line.orderItemId)) {
+    return rejected(progress, "verification_method_changed", "This product was continued with a manual exception and cannot reuse a scan.", { line, productName });
+  }
+
+  const lineAllocations = progress.allocations.filter((allocation) => allocation.orderItemId === line.orderItemId);
+  const usesProductBarcode = progress.productBarcodeOrderItemIds.includes(line.orderItemId);
+  if (lineAllocations.length && usesProductBarcode) {
+    return rejected(progress, "verification_method_changed", "The verification method for this product is inconsistent. Scan each remaining unit.", { line, productName });
+  }
+  if (lineAllocations.length > 1 || (lineAllocations[0] && lineAllocations[0].quantity !== current.verifiedQuantity)) {
+    return rejected(progress, "verification_method_changed", "More than one lot has already been scanned. Continue scanning each remaining vial.", { line, productName });
+  }
+  if (!lineAllocations.length && !usesProductBarcode) {
+    return rejected(progress, "verification_method_changed", "The first verified scan could not be reused. Scan the next unit normally.", { line, productName });
+  }
+
+  const quantityDelta = current.requiredQuantity - current.verifiedQuantity;
+  const allocation = lineAllocations[0] || null;
+  if (allocation) {
+    const coa = input.coas.find((candidate) =>
+      candidate.id === allocation.coaId &&
+      normalized(candidate.lot || candidate.batch) === normalized(allocation.lot));
+    if (!coa || !coaIsAvailableForVialScan(coa) || !coaMatchesCatalogLine(coa, line)) {
+      return rejected(progress, "invalid_coa", "The first scanned lot is no longer Available for this exact product. Scan the remaining vials individually.", { line, productName });
+    }
+  }
+
+  const nextLines = progress.lines.map((item) => item.orderItemId === line.orderItemId
+    ? { ...item, verifiedQuantity: item.requiredQuantity }
+    : item);
+  const nextAllocations = progress.allocations.map((item) =>
+    allocation && item === allocation ? { ...item, quantity: item.quantity + quantityDelta } : item);
+  const nextProgress: PickingProgress = {
+    verifiedUnits: progress.verifiedUnits + quantityDelta,
+    totalUnits: progress.totalUnits,
+    lines: nextLines,
+    productBarcodeOrderItemIds: progress.productBarcodeOrderItemIds,
+    manualOverrideOrderItemIds: progress.manualOverrideOrderItemIds,
+    allocations: nextAllocations,
+  };
+  const response = feedback(nextProgress, {
+    accepted: true,
+    reasonCode: "bulk_confirmed",
+    message: allocation
+      ? `${quantityDelta} identical ${productName} unit${quantityDelta === 1 ? "" : "s"} confirmed with lot ${allocation.lot}.`
+      : `${quantityDelta} identical ${productName} unit${quantityDelta === 1 ? "" : "s"} confirmed with the first registered item code.`,
+    line,
+    productName,
+    verifiedQuantity: current.requiredQuantity,
+    lot: allocation?.lot || null,
+  });
+  return {
+    result: "accepted",
+    reasonCode: "bulk_confirmed",
+    quantityDelta,
+    nextProgress: nextProgress as unknown as JsonValue,
+    responseSnapshot: response as unknown as JsonValue,
+    barcodeType: allocation ? "batch_repeat" : "product_repeat",
+    productId: line.productId,
+    variationId: line.variationId,
+    orderItemId: line.orderItemId,
+    ...(allocation ? { coaId: allocation.coaId, lot: allocation.lot } : {}),
+  };
+}
+
 export function decideFulfillmentManualOverride(input: {
   session: FulfillmentSession;
   order: CommerceOrder;
