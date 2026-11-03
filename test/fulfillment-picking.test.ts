@@ -126,20 +126,20 @@ test("a valid batch scan verifies one unit and returns immediate picking feedbac
 
 test("one verified vial can confirm the remaining identical quantity with the same lot", () => {
   const repeatedOrder = order({
-    lineItems: [{ ...order().lineItems[0]!, quantity: 10 }],
+    lineItems: [{ ...order().lineItems[0]!, quantity: 15 }],
   });
   const repeatedSession = session(1, {
     sourceSnapshot: {
       orderId: 1401,
       lines: [{
         orderItemId: 601, productId: 201, variationId: 301, sku: "BPC-10-BLUE",
-        quantity: 10, locationCode: "A-01", coaId: "coa-201", lot: "LOT-201",
+        quantity: 15, locationCode: "A-01", coaId: "coa-201", lot: "LOT-201",
       }],
     },
     progress: {
       verifiedUnits: 1,
-      totalUnits: 10,
-      lines: [{ orderItemId: 601, requiredQuantity: 10, verifiedQuantity: 1 }],
+      totalUnits: 15,
+      lines: [{ orderItemId: 601, requiredQuantity: 15, verifiedQuantity: 1 }],
       allocations: [{ orderItemId: 601, coaId: "coa-201", lot: "LOT-201", quantity: 1 }],
     },
   });
@@ -151,15 +151,15 @@ test("one verified vial can confirm the remaining identical quantity with the sa
   });
   assert.equal(decision.result, "accepted");
   assert.equal(decision.reasonCode, "bulk_confirmed");
-  assert.equal(decision.quantityDelta, 9);
+  assert.equal(decision.quantityDelta, 14);
   const progress = decision.nextProgress as unknown as {
     verifiedUnits: number;
     lines: Array<{ verifiedQuantity: number }>;
     allocations: Array<{ lot: string; quantity: number }>;
   };
-  assert.equal(progress.verifiedUnits, 10);
-  assert.equal(progress.lines[0]?.verifiedQuantity, 10);
-  assert.deepEqual(progress.allocations, [{ orderItemId: 601, coaId: "coa-201", lot: "LOT-201", quantity: 10 }]);
+  assert.equal(progress.verifiedUnits, 15);
+  assert.equal(progress.lines[0]?.verifiedQuantity, 15);
+  assert.deepEqual(progress.allocations, [{ orderItemId: 601, coaId: "coa-201", lot: "LOT-201", quantity: 15 }]);
 });
 
 test("one registered product barcode can confirm the remaining identical quantity", () => {

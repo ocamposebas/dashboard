@@ -5122,9 +5122,14 @@ function pickingFeedbackMarkup(): string {
   const mismatchMarkup = mismatch
     ? `<div class="picking-mismatch-comparison"><span><small>SCANNED VIAL</small><strong>${escapeHtml(feedback.scannedProductName || "Different product")}</strong>${feedback.scannedSku ? `<b>SKU ${escapeHtml(feedback.scannedSku)}</b>` : ""}</span><i aria-hidden="true">≠</i><span><small>ORDER REQUIRES</small><strong>${escapeHtml(feedback.expectedProductName || "Review order item")}</strong>${feedback.expectedSku ? `<b>SKU ${escapeHtml(feedback.expectedSku)}</b>` : ""}</span></div><em class="picking-mismatch-action">Put this vial aside and scan the product shown in the order. Nothing was added.</em>`
     : "";
+  const remaining = Math.max(0, feedback.requiredQuantity - feedback.verifiedQuantity);
+  const skipRepeatedScans = feedback.accepted && feedback.reasonCode === "accepted" && feedback.orderItemId && remaining > 0
+    ? `<button class="picking-skip-remainder" type="button" data-confirm-line-remainder="${feedback.orderItemId}" data-confirm-line-name="${escapeHtml(feedback.productName || "this product")}" data-confirm-line-count="${remaining}"${fulfillmentScanBusy ? " disabled" : ""}><span>SKIP ${remaining}</span><strong>Skip the other ${remaining} scan${remaining === 1 ? "" : "s"}</strong><small>${feedback.lot ? `Apply the same verified lot ${escapeHtml(feedback.lot)}` : "Apply the same verified product code"}</small></button>`
+    : "";
   return `<div class="picking-feedback ${feedback.accepted ? "is-accepted" : "is-rejected"}" role="status" aria-live="assertive">
     <span class="picking-feedback-icon">${feedback.accepted ? "✓" : "!"}</span>
-    <div><small>${feedback.accepted ? (feedback.lot ? "VIAL VERIFIED" : "PRODUCT VERIFIED") : mismatch ? "WRONG PRODUCT — NOT ADDED" : "CODE NOT ACCEPTED"}</small><strong>${escapeHtml(mismatch ? "This item does not match the order" : feedback.productName || (feedback.accepted ? "Product verified" : "Check this code"))}</strong><p>${escapeHtml(feedback.message)}</p>${mismatchMarkup}${feedback.accepted && feedback.requiredQuantity ? `<b>${feedback.verifiedQuantity} of ${feedback.requiredQuantity} verified</b>` : ""}</div>
+    <div class="picking-feedback-copy"><small>${feedback.accepted ? (feedback.lot ? "VIAL VERIFIED" : "PRODUCT VERIFIED") : mismatch ? "WRONG PRODUCT — NOT ADDED" : "CODE NOT ACCEPTED"}</small><strong>${escapeHtml(mismatch ? "This item does not match the order" : feedback.productName || (feedback.accepted ? "Product verified" : "Check this code"))}</strong><p>${escapeHtml(feedback.message)}</p>${mismatchMarkup}${feedback.accepted && feedback.requiredQuantity ? `<b>${feedback.verifiedQuantity} of ${feedback.requiredQuantity} verified</b>` : ""}</div>
+    ${skipRepeatedScans}
   </div>`;
 }
 
@@ -5150,7 +5155,7 @@ function renderPickingStation(order: FulfillmentQueueEntry): string {
       : "Same product as the first registered item code";
     return `<article class="picking-product-card${lineComplete ? " is-complete" : ""}${isNext ? " is-next" : ""}" data-picking-line="${line.orderItemId}">
       <div class="picking-product-image">${line.imageUrl ? `<img src="${escapeHtml(line.imageUrl)}" alt="" />` : '<span>P1</span>'}<i>${lineComplete ? "✓" : remaining}</i></div>
-      <div class="picking-product-copy"><div class="picking-product-state">${lineComplete ? "VERIFIED" : isNext ? "PICK THIS NOW" : "UP NEXT"}</div><h3>${escapeHtml(line.name)}</h3><p>SKU ${escapeHtml(line.sku)}${line.variationId ? ` · Variation ${line.variationId}` : ""}</p><div class="picking-product-tags"><span>Verification <b>${escapeHtml(capturedLots)}</b></span><span>Scan <b>item code</b></span></div>${isNext && line.verifiedQuantity === 0 ? `<button class="picking-manual-exception" type="button" data-manual-verify-line="${line.orderItemId}" data-manual-verify-name="${escapeHtml(line.name)}">Continue without scanning this product</button>` : ""}${isNext && line.verifiedQuantity > 0 && remaining > 0 ? `<button class="picking-repeat-confirm" type="button" data-confirm-line-remainder="${line.orderItemId}" data-confirm-line-name="${escapeHtml(line.name)}" data-confirm-line-count="${remaining}"${fulfillmentScanBusy ? " disabled" : ""}><span>✓</span><strong>Confirm remaining ${remaining}</strong><small>${escapeHtml(repeatVerification)}</small></button>` : ""}</div>
+      <div class="picking-product-copy"><div class="picking-product-state">${lineComplete ? "VERIFIED" : isNext ? "PICK THIS NOW" : "UP NEXT"}</div><h3>${escapeHtml(line.name)}</h3><p>SKU ${escapeHtml(line.sku)}${line.variationId ? ` · Variation ${line.variationId}` : ""}</p><div class="picking-product-tags"><span>Verification <b>${escapeHtml(capturedLots)}</b></span><span>Scan <b>item code</b></span></div>${isNext && line.verifiedQuantity === 0 ? `<button class="picking-manual-exception" type="button" data-manual-verify-line="${line.orderItemId}" data-manual-verify-name="${escapeHtml(line.name)}">Continue without scanning this product</button>` : ""}${isNext && line.verifiedQuantity > 0 && remaining > 0 ? `<button class="picking-repeat-confirm" type="button" data-confirm-line-remainder="${line.orderItemId}" data-confirm-line-name="${escapeHtml(line.name)}" data-confirm-line-count="${remaining}"${fulfillmentScanBusy ? " disabled" : ""}><span>»</span><strong>Skip remaining ${remaining} scans</strong><small>${escapeHtml(repeatVerification)}</small></button>` : ""}</div>
       <div class="picking-location"><small>VERIFY WITH</small><strong>Item code</strong><span>Vial QR or product barcode</span></div>
       <div class="picking-quantity"><small>VERIFIED</small><strong>${line.verifiedQuantity}<span>/ ${line.quantity}</span></strong><p>${lineComplete ? "Complete" : `${remaining} remaining`}</p></div>
     </article>`;
@@ -6647,7 +6652,7 @@ async function confirmFulfillmentLineRemainder(
 ): Promise<void> {
   const order = selectedFulfillmentOrder();
   if (!order?.session || order.session.state !== "open" || fulfillmentScanBusy || remaining < 1) return;
-  if (!window.confirm(`Confirm the remaining ${remaining} ${productName} unit${remaining === 1 ? "" : "s"}?\n\nThey must be the same exact product and, when a vial QR was scanned, the same physical lot.`)) return;
+  if (!window.confirm(`Skip the other ${remaining} scan${remaining === 1 ? "" : "s"} for ${productName}?\n\nConfirm that all remaining units are the exact same product and, when a vial QR was scanned, the same physical lot. This action is saved in the audit.`)) return;
   const clientEventId = crypto.randomUUID();
   fulfillmentScanBusy = true;
   renderFulfillmentQueue();
@@ -6686,8 +6691,8 @@ async function confirmFulfillmentLineRemainder(
       return;
     }
     showToast(
-      "Remaining units confirmed",
-      `${remaining} identical ${productName} unit${remaining === 1 ? "" : "s"} were added with the first verified scan.`,
+      "Repeated scans skipped",
+      `${remaining} identical ${productName} unit${remaining === 1 ? "" : "s"} were verified from the first scan and recorded in the audit.`,
     );
   } catch (error) {
     showToast("Could not confirm remaining units", error instanceof Error ? error.message : "Refresh and try again.", false);
