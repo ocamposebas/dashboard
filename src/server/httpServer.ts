@@ -1658,7 +1658,12 @@ export function createMonitorServer(
         : ["conflict", "invalid_state", "order_ineligible", "active_conflict", "version_conflict", "idempotency_conflict", "purchase_unknown"].includes(error.code)
           ? 409
           : 400;
-      json(response, status, { error: error.message });
+      const retryable = error instanceof ShipStationGatewayError &&
+        ["upstream_unavailable", "rate_limited"].includes(error.code);
+      json(response, status, {
+        error: error.message,
+        ...(error instanceof ShipStationGatewayError ? { code: error.code, retryable } : {}),
+      });
       return;
     }
     console.error(fallback, error);
@@ -1757,9 +1762,13 @@ export function createMonitorServer(
     if (!commerce || !productLocations || !fulfillmentRepository) {
       throw new Error("Fulfillment queue services are not configured");
     }
+    await restoreCommerceCache();
+    const cachedProducts = Array.isArray(commerceCache?.payload.products)
+      ? commerceCache.payload.products as CommerceProduct[]
+      : null;
     const [recentOrders, products, coas, sessions, locations] = await Promise.all([
       commerce.listFulfillmentOrders(),
-      commerce.listProducts(),
+      cachedProducts ? Promise.resolve(cachedProducts) : commerce.listProducts(),
       fulfillmentCoas(),
       fulfillmentRepository.list(),
       productLocations.list(),

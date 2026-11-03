@@ -1158,3 +1158,36 @@ test("uses WordPress pagination headers without probing nonexistent customer pag
   assert.equal(directory.customers.length, 250);
   assert.deepEqual(customerPages.sort((left, right) => left - right), [1, 2, 3]);
 });
+
+test("fulfillment queue fetches only processing orders", async () => {
+  const statuses: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = new URL(String(input));
+    statuses.push(url.searchParams.get("status") || "");
+    return new Response(JSON.stringify([{
+      id: 3180,
+      number: "3180",
+      status: "processing",
+      currency: "USD",
+      total: "144.43",
+      payment_method_title: "Card",
+      date_created_gmt: "2026-11-02T18:00:00",
+      billing: { first_name: "Candyce", last_name: "Murphy", city: "Orlando", country: "US" },
+      shipping: { first_name: "Candyce", last_name: "Murphy", city: "Orlando", country: "US" },
+      line_items: [{ product_id: 22, name: "Research Vial", sku: "RV-10", quantity: 1, total: "144.43" }],
+    }]), {
+      status: 200,
+      headers: { "X-WP-TotalPages": "1" },
+    });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example",
+    consumerKey: "ck_test",
+    consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  const orders = await gateway.listFulfillmentOrders();
+
+  assert.equal(orders.length, 1);
+  assert.deepEqual(statuses, ["processing"]);
+});

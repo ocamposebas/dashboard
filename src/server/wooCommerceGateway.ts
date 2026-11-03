@@ -1987,14 +1987,13 @@ export class WooCommerceGateway {
 
   async listFulfillmentOrders(): Promise<CommerceOrder[]> {
     const fields = "id,customer_id,number,status,currency,total,total_tax,cart_tax,shipping_total,shipping_tax,discount_total,discount_tax,payment_method,payment_method_title,transaction_id,customer_note,date_created_gmt,date_modified_gmt,date_paid_gmt,date_completed_gmt,billing,shipping,line_items,fee_lines,coupon_lines,refunds,meta_data";
-    const pages = await Promise.all(["processing", "on-hold", "pending"].map((status) =>
-      this.requestAllPages("orders", {
-        status,
-        orderby: "date",
-        order: "desc",
-        _fields: fields,
-      })));
-    const orders = pages.flat().flatMap((value) => {
+    const payload = await this.requestAllPages("orders", {
+      status: "processing",
+      orderby: "date",
+      order: "desc",
+      _fields: fields,
+    });
+    const orders = payload.flatMap((value) => {
       try { return [mapOrder(value)]; } catch { return []; }
     });
     return [...new Map(orders.map((order) => [order.id, order])).values()]

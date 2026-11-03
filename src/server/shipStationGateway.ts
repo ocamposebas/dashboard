@@ -119,6 +119,41 @@ function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function providerErrorMessage(body: string): string {
+  if (!body) return "";
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    payload = body;
+  }
+  const messages: string[] = [];
+  const visit = (value: unknown, depth = 0): void => {
+    if (depth > 4 || messages.length >= 4) return;
+    if (typeof value === "string") {
+      const message = value.replace(/\s+/g, " ").trim();
+      if (message && message.length <= 500) messages.push(message);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.slice(0, 4).forEach((item) => visit(item, depth + 1));
+      return;
+    }
+    const source = record(value);
+    if (!source) return;
+    for (const key of ["message", "error", "errors", "detail", "exception_message"]) {
+      if (key in source) visit(source[key], depth + 1);
+    }
+  };
+  visit(payload);
+  return [...new Set(messages)].join(" · ").slice(0, 500);
+}
+
+function temporaryCarrierFailure(status: number, message: string): boolean {
+  if (status === 408 || status === 425 || status === 429 || status >= 500) return true;
+  return /(?:gateway\s*time[- ]?out|service\s+temporarily\s+unavailable|temporarily\s+unreachable|carrier\s+error\s+code\s*:\s*(?:429|5\d\d)|\b(?:502|503|504)\b)/i.test(message);
+}
+
 function boolValue(value: unknown): boolean {
   return value === true;
 }
@@ -432,7 +467,12 @@ export class ShipStationGateway {
         outcomeSensitive ? "purchase_unknown" : "upstream_unavailable",
       );
     }
+    const body = await response.text();
+    if (body.length > MAX_RESPONSE_BYTES) {
+      throw new ShipStationGatewayError("ShipStation returned an oversized response", "invalid_response");
+    }
     if (!response.ok) {
+      const providerMessage = providerErrorMessage(body);
       if (response.status === 401) {
         throw new ShipStationGatewayError("The ShipStation API credential was not accepted", "unauthorized");
       }
@@ -442,22 +482,27 @@ export class ShipStationGateway {
       if (response.status === 429) {
         throw new ShipStationGatewayError("ShipStation rate limits are temporarily active", "rate_limited");
       }
-      if (outcomeSensitive && response.status >= 500) {
+      const temporaryFailure = temporaryCarrierFailure(response.status, providerMessage);
+      if (outcomeSensitive && temporaryFailure) {
         throw new ShipStationGatewayError(
           "The label request outcome is uncertain and must be reconciled before retrying",
           "purchase_unknown",
         );
       }
+      if (!outcomeSensitive && temporaryFailure) {
+        throw new ShipStationGatewayError(
+          "The FedEx carrier network is temporarily unavailable. Nothing was charged; the system can retry this quote safely.",
+          response.status === 429 ? "rate_limited" : "upstream_unavailable",
+        );
+      }
       throw new ShipStationGatewayError(
         outcomeSensitive
           ? `ShipStation rejected the label request with status ${response.status}`
-          : `ShipStation returned status ${response.status}`,
-        outcomeSensitive ? "purchase_rejected" : "upstream_unavailable",
+          : providerMessage
+            ? `ShipStation could not rate this shipment: ${providerMessage}`
+            : `ShipStation rejected the rate request with status ${response.status}`,
+        outcomeSensitive ? "purchase_rejected" : "invalid_response",
       );
-    }
-    const body = await response.text();
-    if (body.length > MAX_RESPONSE_BYTES) {
-      throw new ShipStationGatewayError("ShipStation returned an oversized response", "invalid_response");
     }
     try {
       return body ? JSON.parse(body) : {};

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ShipStationGateway } from "../src/server/shipStationGateway.js";
+import { ShipStationGateway, ShipStationGatewayError } from "../src/server/shipStationGateway.js";
 
 test("ShipStation V2 uses a server-side API-Key header for read-only account discovery", async () => {
   const secret = "server-only-shipstation-key";
@@ -432,4 +432,48 @@ test("local mock rates never call ShipStation and remain clearly identified", as
   assert.ok(rates.length >= 3);
   assert.ok(rates.every((rate) => rate.rateId.startsWith("mock-rate-") && rate.isEstimate));
   assert.equal(requested, false);
+});
+
+test("surfaces a temporary FedEx carrier outage hidden inside ShipStation status 400", async () => {
+  const gateway = new ShipStationGateway({
+    apiKey: "server-only-key", rateMode: "live", warehouseId: "se-origin", labelPurchaseEnabled: false,
+  }, async (input) => {
+    const url = String(input);
+    if (url.includes("/carriers")) {
+      return new Response(JSON.stringify({ carriers: [{
+        carrier_id: "se-fedex", carrier_code: "fedex", friendly_name: "FedEx",
+        services: [{ service_code: "fedex_2day", name: "FedEx 2Day" }],
+        packages: [{ package_code: "fedex_one_rate_pak", name: "FedEx One Rate Pak" }],
+      }] }), { status: 200 });
+    }
+    if (url.includes("/warehouses")) {
+      return new Response(JSON.stringify({ warehouses: [{
+        warehouse_id: "se-origin", name: "Main warehouse",
+        origin_address: { city_locality: "Miami", state_province: "FL", postal_code: "33101", country_code: "US" },
+      }] }), { status: 200 });
+    }
+    return new Response(JSON.stringify({
+      errors: [{ message: "Service Temporarily Unavailable (Unknown, Carrier Error Code: 503)." }],
+    }), { status: 400 });
+  }, "https://shipstation.example/v2");
+
+  await assert.rejects(
+    gateway.rates({
+      carrierIds: ["se-fedex"],
+      package: { weightOz: 16, packageCode: "fedex_one_rate_pak" },
+      destination: {
+        name: "Test Customer", address1: "100 Test Street", city: "Orlando", state: "FL",
+        postalCode: "32801", countryCode: "US",
+      },
+      externalShipmentId: "p1-temporary-fedex-outage",
+      orderNumber: "3180",
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof ShipStationGatewayError);
+      assert.equal(error.code, "upstream_unavailable");
+      assert.match(error.message, /temporarily unavailable/i);
+      assert.doesNotMatch(error.message, /status 400/i);
+      return true;
+    },
+  );
 });

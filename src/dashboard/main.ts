@@ -1095,6 +1095,9 @@ let fulfillmentLocations: FulfillmentLocationsPayload | undefined;
 let fulfillmentLocationsLoading = false;
 let fulfillmentQueue: FulfillmentQueuePayload | undefined;
 let fulfillmentQueueLoading = false;
+let fulfillmentQueueRestoredFromCache = false;
+const FULFILLMENT_QUEUE_CACHE_KEY = "phaseone:fulfillment-queue-v1";
+const FULFILLMENT_QUEUE_CACHE_MAX_AGE_MS = 10 * 60_000;
 let fulfillmentQueueFilter: FulfillmentQueueEntry["queueStatus"] = "waiting";
 let selectedFulfillmentOrderId: number | null = null;
 let fulfillmentScanFeedback: FulfillmentScanFeedback | null = null;
@@ -5313,7 +5316,7 @@ function shippingWorkspaceMarkup(order: FulfillmentQueueEntry, state: Fulfillmen
       <label class="shipping-carrier-field"><span>Carrier</span><select name="carrierId"${policyReady ? "" : " disabled"}><option value="${escapeHtml(selectedCarrier?.id || "")}" selected>FedEx</option></select><small>Only the approved carrier · ${escapeHtml(capabilities.originName || "Origin ready")}</small></label>
       <label class="shipping-package-field"><span>Package type</span><select name="packageCode"${policyReady ? "" : " disabled"}><option value="${PHASE_ONE_SHIPPING_POLICY.packageCode}" selected>${PHASE_ONE_SHIPPING_POLICY.packageName}</option></select><small>Only FedEx One Rate Pak is enabled for fulfillment</small></label>
       <fieldset class="is-carrier-package"><legend>Package</legend><label><span>Weight</span><div><input name="weightOz" type="number" min="0.1" max="2400" step="0.1" value="${state.package.weightOz}" required><b>oz</b></div></label><div class="shipping-carrier-package-note"><strong>${PHASE_ONE_SHIPPING_POLICY.packageName}</strong><small>FedEx supplies the Pak dimensions automatically.</small></div></fieldset>
-      <button class="button button--primary" type="submit"${state.rateLoading || !policyReady ? " disabled" : ""}>${state.rateLoading ? "Loading One Rate…" : "Load One Rate"}</button>
+      <button class="button button--primary" type="submit"${state.rateLoading || !policyReady ? " disabled" : ""}>${state.rateLoading ? "Connecting to FedEx…" : state.error ? "Retry One Rate" : "Load One Rate"}</button>
     </form>
     ${destination ? `<div class="shipping-destination"><span>SHIP TO</span><strong>${escapeHtml(destination.city)}, ${escapeHtml(destination.state)} ${escapeHtml(destination.postalCode)}</strong><small>${escapeHtml(destination.countryCode)} · Address remains sourced from the order</small></div>` : ""}
     ${state.error ? `<p class="shipping-error" role="alert"><span>!</span>${escapeHtml(state.error)}</p>` : ""}
@@ -5412,22 +5415,51 @@ async function compareShippingRates(): Promise<void> {
   state.selectedRateIndex = null;
   renderFulfillmentShipping(order);
   try {
-    const response = await fetch("/api/shipping/rates", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ fulfillmentId, carrierIds, package: state.package }),
-    });
-    const payload: unknown = await response.json();
-    if (!response.ok || !isRecord(payload) || !Array.isArray(payload.rates)) {
-      throw new Error(isRecord(payload) && typeof payload.error === "string"
-        ? payload.error
-        : "Rates could not be retrieved.");
+    const body = JSON.stringify({ fulfillmentId, carrierIds, package: state.package });
+    let ratesPayload: ShippingRatesPayload | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let response: Response;
+      let payload: unknown;
+      try {
+        response = await fetch("/api/shipping/rates", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body,
+          signal: AbortSignal.timeout(15_000),
+        });
+        payload = await response.json();
+      } catch (error) {
+        if (attempt >= 2) throw error;
+        state.error = `FedEx did not answer. Reconnecting automatically (${attempt + 2}/3)…`;
+        renderFulfillmentShipping(order);
+        await new Promise((resolve) => window.setTimeout(resolve, 900 * (attempt + 1)));
+        continue;
+      }
+      if (response.ok && isRecord(payload) && Array.isArray(payload.rates)) {
+        ratesPayload = payload as unknown as ShippingRatesPayload;
+        break;
+      }
+      const retryable = isRecord(payload) && payload.retryable === true;
+      if (!retryable || attempt >= 2) {
+        throw new Error(isRecord(payload) && typeof payload.error === "string"
+          ? payload.error
+          : "Rates could not be retrieved.");
+      }
+      state.error = `FedEx is temporarily unavailable. Retrying safely (${attempt + 2}/3)…`;
+      renderFulfillmentShipping(order);
+      await new Promise((resolve) => window.setTimeout(resolve, 900 * (attempt + 1)));
     }
-    state.rates = payload as unknown as ShippingRatesPayload;
+    if (!ratesPayload) throw new Error("FedEx did not return a rate. Nothing was charged; try again in a moment.");
+    state.error = null;
+    state.rates = ratesPayload;
     state.selectedRateIndex = state.rates.rates.length === 1 ? 0 : null;
   } catch (error) {
-    state.error = error instanceof Error ? error.message : "Rates could not be retrieved.";
+    state.error = error instanceof Error && error.name === "TimeoutError"
+      ? "FedEx took too long to answer. Nothing was charged; try One Rate again."
+      : error instanceof Error
+        ? error.message
+        : "Rates could not be retrieved.";
   } finally {
     state.rateLoading = false;
     renderFulfillmentShipping(order);
@@ -6057,7 +6089,7 @@ function renderFulfillmentQueue(): void {
   const live = requiredElement<HTMLElement>("#fulfillment-live-state");
   live.className = `fulfillment-live-state${fulfillmentQueue?.connected ? " is-ready" : fulfillmentQueue?.error ? " is-error" : ""}`;
   live.querySelector<HTMLElement>("b")!.textContent = fulfillmentQueueLoading
-    ? "Verifying live orders"
+    ? fulfillmentQueue ? "Refreshing live orders" : "Verifying live orders"
     : fulfillmentQueue?.connected
       ? "Live verification ready"
       : fulfillmentQueue?.error || "Service unavailable";
@@ -6131,7 +6163,26 @@ function renderFulfillmentQueue(): void {
 
 async function loadFulfillmentQueue(force = false): Promise<void> {
   if (fulfillmentQueueLoading) return;
-  if (fulfillmentQueue && !force) {
+  if (!fulfillmentQueue) {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(FULFILLMENT_QUEUE_CACHE_KEY) || "null") as {
+        savedAt?: number;
+        payload?: unknown;
+      } | null;
+      if (
+        saved && typeof saved.savedAt === "number" &&
+        Date.now() - saved.savedAt <= FULFILLMENT_QUEUE_CACHE_MAX_AGE_MS &&
+        isRecord(saved.payload) && Array.isArray(saved.payload.orders) &&
+        isRecord(saved.payload.permissions)
+      ) {
+        fulfillmentQueue = saved.payload as unknown as FulfillmentQueuePayload;
+        fulfillmentQueueRestoredFromCache = true;
+      }
+    } catch {
+      try { sessionStorage.removeItem(FULFILLMENT_QUEUE_CACHE_KEY); } catch { /* unavailable */ }
+    }
+  }
+  if (fulfillmentQueue && !force && !fulfillmentQueueRestoredFromCache) {
     renderFulfillmentQueue();
     return;
   }
@@ -6142,12 +6193,22 @@ async function loadFulfillmentQueue(force = false): Promise<void> {
       credentials: "same-origin",
       cache: "no-store",
       headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
     });
     const payload: unknown = await response.json();
     if (!isRecord(payload) || !Array.isArray(payload.orders) || !isRecord(payload.permissions)) {
       throw new Error("Invalid fulfillment queue response");
     }
     fulfillmentQueue = payload as unknown as FulfillmentQueuePayload;
+    fulfillmentQueueRestoredFromCache = false;
+    try {
+      sessionStorage.setItem(FULFILLMENT_QUEUE_CACHE_KEY, JSON.stringify({
+        savedAt: Date.now(),
+        payload: fulfillmentQueue,
+      }));
+    } catch {
+      // The live queue still works when browser storage is unavailable.
+    }
     if (!selectedFulfillmentOrderId) {
       const openSessionOrder = fulfillmentQueue.orders.find((order) => order.session?.state === "open");
       if (openSessionOrder) fulfillmentQueueFilter = openSessionOrder.queueStatus;
@@ -6158,15 +6219,18 @@ async function loadFulfillmentQueue(force = false): Promise<void> {
       }
     }
   } catch (error) {
-    fulfillmentQueue = {
-      configured: false,
-      connected: false,
-      generatedAt: new Date().toISOString(),
-      activeSessionId: null,
-      permissions: { read: true, operateQueue: false },
-      orders: [],
-      error: "Live order verification is temporarily unavailable. Refresh when the connection recovers.",
-    };
+    const message = "Live verification is taking longer than expected. Recent orders remain visible; refresh to confirm new changes.";
+    fulfillmentQueue = fulfillmentQueue?.orders.length
+      ? { ...fulfillmentQueue, connected: false, error: message }
+      : {
+          configured: false,
+          connected: false,
+          generatedAt: new Date().toISOString(),
+          activeSessionId: null,
+          permissions: { read: true, operateQueue: false },
+          orders: [],
+          error: message,
+        };
   } finally {
     fulfillmentQueueLoading = false;
     renderFulfillmentQueue();
@@ -12158,6 +12222,7 @@ window.addEventListener("keydown", primeOrderAlertAudioFromGesture);
 void loadWorkspaceSession().then(() => {
   void loadNotifications();
   void restoreOrderPushSubscription().catch(() => undefined);
+  window.setTimeout(() => { void loadFulfillmentQueue(); }, 1_200);
   const activeView = location.hash.slice(1);
   if (activeView === "team") void loadWorkspaceUsers();
   if (activeView === "seo") void loadSeo();
