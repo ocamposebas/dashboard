@@ -843,6 +843,15 @@ export function createMonitorServer(
         }
       }
       const skus = [...new Set([...(coa.skus || []), product.sku, variation?.sku || ""].map((sku) => sku.trim()).filter(Boolean))];
+      const existingSkus = new Set((coa.skus || []).map((sku) => sku.trim().toLocaleLowerCase("en")).filter(Boolean));
+      const mappingIsCurrent =
+        coa.status === "Available" &&
+        coa.currentShippingLot === true &&
+        coa.matchedProductId === product.id &&
+        coa.matchedVariationId === (variation?.id || 0) &&
+        skus.length === existingSkus.size &&
+        skus.every((sku) => existingSkus.has(sku.toLocaleLowerCase("en")));
+      if (mappingIsCurrent) continue;
       try {
         const updated = await customCoas.update({
           id: coa.recordId || coa.id,
@@ -5383,7 +5392,11 @@ export function createMonitorServer(
               );
             }
           }
-          const coa = await customCoas.update(coaWrite, currentUser.id);
+          let coa = await customCoas.update(coaWrite, currentUser.id);
+          if (coa.status === "Available" && coa.currentShippingLot) {
+            const automaticallyPublished = await automaticallyPublishExactCoas([coa], currentUser.id);
+            coa = automaticallyPublished.get(coa.recordId || coa.id) || coa;
+          }
           extensionsCache = undefined;
           fulfillmentCoasCache = undefined;
           await invalidateCommerceCache();

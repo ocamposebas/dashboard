@@ -95,6 +95,65 @@ test("RT30 is recognized as the Retatrutide 30mg catalog presentation", () => {
   assert.equal(exactAutomaticCoaProduct(rt30, [reta])?.id, 700);
 });
 
+test("current branded COAs map through exact names, aliases and catalog SKUs", () => {
+  const catalog = [
+    { ...product, id: 543, name: "KLOW", sku: "KLOW", type: "simple" },
+    { ...product, id: 528, name: "BPC-157 + TB-500 ( Wolverine)", sku: "BPC-157-AND-TB-500-WOLVERINE", type: "simple" },
+    { ...product, id: 1735, name: "GHK-Cu + KPV + BPC-157 Blend", sku: "GHK-CU-AND-KPV-AND-BPC-157-BLEND", type: "simple" },
+    { ...product, id: 956, name: "GHK-Cu + KPV Blend", sku: "GHK-CU-AND-KPV-BLEND", type: "simple" },
+    { ...product, id: 1783, name: "DeadPool", sku: "DEADPOOL", type: "simple" },
+    { ...product, id: 587, name: "Glutathione", sku: "GLUTATHIONE", type: "simple" },
+    { ...product, id: 1548, name: "Blue Korean Glutathione", sku: "BLUE-KOREAN-GLUTATHIONE", type: "simple" },
+  ] as CommerceProduct[];
+  const cases = [
+    ["Klow 80mg blend", 543],
+    ["Wolverine 20mg", 528],
+    ["GHK + KPV + BPC 70mg", 1735],
+    ["GHK-Cu + KPV 60mg", 956],
+    ["Cartalax + BPC-157 + TB-500", 1783],
+    ["Gluta 600mg", 587],
+    ["Blue Korean Gluta 1200mg", 1548],
+  ] as const;
+
+  for (const [detectedName, expectedProductId] of cases) {
+    const detected = {
+      ...coa,
+      productName: detectedName,
+      familyName: detectedName,
+      compound: detectedName,
+      skus: [],
+      aliases: [],
+      keywords: [],
+    } as unknown as CommerceCoa;
+    assert.equal(exactAutomaticCoaProduct(detected, catalog)?.id, expectedProductId, detectedName);
+  }
+});
+
+test("a precise detected name wins over a broader imported alias", () => {
+  const korean = { ...product, id: 1923, name: "Korean Glutathione ( Luthione)", sku: "KOREAN-GLUTATHIONE-LUTHIONE", type: "simple" };
+  const blue = { ...product, id: 1548, name: "Blue Korean Glutathione", sku: "BLUE-KOREAN-GLUTATHIONE", type: "simple" };
+  const detected = {
+    ...coa,
+    productName: "Blue Korean Gluta 1200mg",
+    familyName: "Korean Glutathione",
+    compound: "Glutathione",
+    skus: [],
+    aliases: ["Korean Glutathione"],
+  } as unknown as CommerceCoa;
+
+  assert.equal(exactAutomaticCoaProduct(detected, [korean, blue])?.id, 1548);
+});
+
+test("an Available current imported COA is eligible for exact self-healing", () => {
+  assert.equal(canAutomaticallyPublishCoa({
+    ...coa,
+    source: "wordpress_import",
+    status: "Available",
+    currentShippingLot: true,
+    intakeAnalysis: null,
+  }), true);
+});
+
 test("legacy repair replaces a demonstrably wrong product mapping with one exact catalog match", () => {
   const rt30 = {
     ...coa, id: "rt30", source: "wordpress_import", revision: 1, status: "Available",
