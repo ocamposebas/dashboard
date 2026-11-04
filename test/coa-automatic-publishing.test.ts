@@ -154,6 +154,19 @@ test("an Available current imported COA is eligible for exact self-healing", () 
   }), true);
 });
 
+test("re-uploading an imported certificate can promote its exact catalog match to the current lot", () => {
+  assert.equal(canAutomaticallyPublishCoa({
+    ...coa,
+    source: "wordpress_import",
+    status: "Available",
+    currentShippingLot: false,
+    intakeAnalysis: {
+      ...coa.intakeAnalysis,
+      suggestCurrent: true,
+    },
+  }), true);
+});
+
 test("legacy repair replaces a demonstrably wrong product mapping with one exact catalog match", () => {
   const rt30 = {
     ...coa, id: "rt30", source: "wordpress_import", revision: 1, status: "Available",
@@ -244,6 +257,29 @@ test("legacy catalog repair appends the exact live SKU without replacing history
 
   assert.deepEqual(repairs[0]?.skus, ["CARTALAX-AND-BPC-AND-TB500-BLEND", "DEADPOOL"]);
   assert.equal(repairs[0]?.currentShippingLot, true);
+});
+
+test("one untouched imported simple-product COA becomes its current storefront certificate", () => {
+  const klow = {
+    ...coa,
+    id: "klow-current",
+    source: "wordpress_import",
+    revision: 1,
+    status: "Available",
+    productName: "KLOW",
+    familyName: "KLOW",
+    compound: "KLOW",
+    matchedProductId: 543,
+    matchedVariationId: 0,
+    skus: [],
+    currentShippingLot: false,
+  } as unknown as CommerceCoa & { source: string; revision: number };
+  const catalog = { ...product, id: 543, name: "KLOW", sku: "KLOW", type: "simple" };
+
+  const repairs = exactLegacyCoaCatalogRepairs([klow], [catalog], new Map());
+
+  assert.equal(repairs[0]?.currentShippingLot, true);
+  assert.deepEqual(repairs[0]?.skus, ["KLOW"]);
 });
 
 test("legacy current-lot promotion stays closed for ambiguous or previously edited history", () => {

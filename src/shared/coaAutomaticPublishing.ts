@@ -132,10 +132,11 @@ export function canAutomaticallyPublishCoa(coa: CommerceCoa & {
     dateConfidence !== "missing" &&
     (dateConfidence !== "fallback" || dateSource === "reported" || dateSource === "certificate");
   const publicationRequested =
-    (coa.status === "Review" && coa.intakeAnalysis?.suggestCurrent === true) ||
+    coa.intakeAnalysis?.suggestCurrent === true ||
     (coa.status === "Available" && coa.currentShippingLot === true);
   const sourceIsPublishable =
     coa.source === "custom" ||
+    coa.intakeAnalysis?.suggestCurrent === true ||
     (coa.status === "Available" && coa.currentShippingLot === true);
   return Boolean(
     sourceIsPublishable &&
@@ -176,9 +177,10 @@ function uniqueCatalogSkus(values: string[]): string[] {
  * match and, for variable products, a unique exact strength match are used.
  *
  * The old WordPress model could designate one lot only at the parent level.
- * When a migrated variable presentation has exactly one untouched Available
- * certificate and no current lot, that exact presentation can safely inherit
- * its own current-lot flag. Ambiguous or edited history is never promoted.
+ * When an exact catalog presentation has exactly one untouched migrated
+ * Available certificate and no current lot, that presentation can safely
+ * inherit its own current-lot flag. Ambiguous or edited history is never
+ * promoted.
  */
 export function exactLegacyCoaCatalogRepairs(
   coas: Array<CommerceCoa & { recordId?: string; source?: string; revision?: number }>,
@@ -212,13 +214,12 @@ export function exactLegacyCoaCatalogRepairs(
     }];
   });
 
-  const variableGroups = new Map<string, typeof candidates>();
+  const exactPresentationGroups = new Map<string, typeof candidates>();
   for (const candidate of candidates) {
-    if (candidate.product.type !== "variable" || candidate.variationId <= 0) continue;
     const key = `${candidate.productId}:${candidate.variationId}`;
-    variableGroups.set(key, [...(variableGroups.get(key) || []), candidate]);
+    exactPresentationGroups.set(key, [...(exactPresentationGroups.get(key) || []), candidate]);
   }
-  for (const group of variableGroups.values()) {
+  for (const group of exactPresentationGroups.values()) {
     if (group.some((candidate) => candidate.currentShippingLot) || group.length !== 1) continue;
     const candidate = group[0]!;
     if (candidate.coa.source === "wordpress_import" && candidate.coa.revision === 1) {

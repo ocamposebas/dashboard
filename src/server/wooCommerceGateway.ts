@@ -304,6 +304,14 @@ export interface CommerceOrder {
   };
 }
 
+export interface CommerceOrderPage {
+  orders: CommerceOrder[];
+  page: number;
+  perPage: number;
+  total: number;
+  totalPages: number;
+}
+
 export interface CommerceOrderEvidence {
   id: string;
   label: string;
@@ -1949,6 +1957,45 @@ export class WooCommerceGateway {
     } });
     if (!Array.isArray(payload)) throw new Error("Commerce orders response was not an array");
     return payload.flatMap((value) => { try { return [mapOrder(value)]; } catch { return []; } });
+  }
+
+  async listOrdersPage(input: {
+    page?: number;
+    perPage?: number;
+    search?: string;
+    status?: string;
+    after?: string;
+    before?: string;
+    order?: "asc" | "desc";
+  } = {}): Promise<CommerceOrderPage> {
+    const page = Math.max(1, Math.trunc(input.page || 1));
+    const perPage = Math.max(1, Math.min(100, Math.trunc(input.perPage || 25)));
+    const fields = "id,customer_id,number,status,currency,total,total_tax,cart_tax,shipping_total,shipping_tax,discount_total,discount_tax,payment_method,payment_method_title,transaction_id,customer_note,date_created_gmt,date_modified_gmt,date_paid_gmt,date_completed_gmt,billing,shipping,line_items,fee_lines,coupon_lines,refunds,meta_data";
+    const parameters: Record<string, string> = {
+      per_page: String(perPage),
+      page: String(page),
+      orderby: "date",
+      order: input.order === "asc" ? "asc" : "desc",
+      status: input.status && input.status !== "all" ? input.status : "any",
+      _fields: fields,
+    };
+    const search = String(input.search || "").trim();
+    if (search) parameters.search = search.replace(/^#/, "");
+    if (input.after) {
+      parameters.after = input.after;
+      parameters.dates_are_gmt = "true";
+    }
+    if (input.before) {
+      parameters.before = input.before;
+      parameters.dates_are_gmt = "true";
+    }
+    const response = await this.requestRouteResponse("/wp-json/wc/v3/orders", { parameters });
+    const payload: unknown = await response.json();
+    if (!Array.isArray(payload)) throw new Error("Commerce orders response was not an array");
+    const orders = payload.flatMap((value) => { try { return [mapOrder(value)]; } catch { return []; } });
+    const total = Math.max(orders.length, Number(response.headers.get("x-wp-total")) || 0);
+    const totalPages = Math.max(total > 0 ? 1 : 0, Number(response.headers.get("x-wp-totalpages")) || 0);
+    return { orders, page, perPage, total, totalPages };
   }
 
   async listOrdersForPeriod(after: string, before: string): Promise<CommerceOrder[]> {

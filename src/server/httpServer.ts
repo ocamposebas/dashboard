@@ -45,6 +45,7 @@ import { resolveExternalCoaQr } from "./coaExternalQrResolver.js";
 import { resolveCoaQrScan } from "./coaScanResolver.js";
 import {
   CoaRepository,
+  type CustomCoa,
   type CoaTestingCost,
   type CoaUpdateInput,
   type OrderTestingCostAllocation,
@@ -891,6 +892,43 @@ export function createMonitorServer(
       }
     }
     return published;
+  }
+
+  function coaPublicationCandidate(coa: CustomCoa, suggestCurrent: boolean): CustomCoa {
+    if (!suggestCurrent) return coa;
+    if (coa.intakeAnalysis) {
+      return { ...coa, intakeAnalysis: { ...coa.intakeAnalysis, suggestCurrent: true } };
+    }
+    return {
+      ...coa,
+      intakeAnalysis: {
+        status: "limited",
+        fields: {
+          coaNumber: coa.coaNumber,
+          productName: coa.productName,
+          compound: coa.compound,
+          strength: coa.strength,
+          batch: coa.batch,
+          lot: coa.lot,
+          date: coa.date,
+          purity: coa.purity,
+          laboratory: coa.laboratory,
+          method: coa.method,
+          tested: coa.tested,
+        },
+        assays: [],
+        dateDetection: {
+          value: coa.date,
+          source: coa.date ? "certificate" : "unknown",
+          label: coa.date ? "Stored certificate date" : "Date missing",
+          confidence: coa.date ? "explicit" : "missing",
+        },
+        detectedFieldCount: [coa.coaNumber, coa.productName, coa.strength, coa.lot || coa.batch, coa.date].filter(Boolean).length,
+        pageCount: 0,
+        warnings: ["Existing certificate replayed for exact catalog publication"],
+        suggestCurrent: true,
+      },
+    };
   }
   let legacyCoaCatalogReconciled = false;
 
@@ -4747,6 +4785,44 @@ export function createMonitorServer(
         return;
       }
 
+      if (url.pathname === "/api/commerce/order-ledger" && request.method === "GET") {
+        if (!commerce || !config.wooCommerce) {
+          json(response, 200, { connected: false, orders: [], affiliateCommissions: [], page: 1, perPage: 25, total: 0, totalPages: 0 });
+          return;
+        }
+        try {
+          const page = Math.max(1, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1);
+          const perPage = Math.max(1, Math.min(100, Number.parseInt(url.searchParams.get("perPage") || "25", 10) || 25));
+          const status = (url.searchParams.get("status") || "all").trim();
+          const search = (url.searchParams.get("search") || "").trim();
+          const after = (url.searchParams.get("after") || "").trim();
+          const before = (url.searchParams.get("before") || "").trim();
+          const direction = url.searchParams.get("order") === "asc" ? "asc" : "desc";
+          const ledger = await commerce.listOrdersPage({
+            page,
+            perPage,
+            search,
+            status,
+            ...(after ? { after } : {}),
+            ...(before ? { before } : {}),
+            order: direction,
+          });
+          const orders = await Promise.all(ledger.orders.map(orderWithProfitability));
+          const affiliateCommissions = await affiliateCommissionsForOrders(orders);
+          json(response, 200, {
+            connected: true,
+            ...ledger,
+            orders,
+            affiliateCommissions,
+            generatedAt: new Date().toISOString(),
+          });
+        } catch (error: unknown) {
+          console.error("Order ledger page load failed", error);
+          json(response, 502, { error: "The complete order ledger could not be loaded" });
+        }
+        return;
+      }
+
       if (url.pathname === "/api/insurance-fund" && request.method === "GET") {
         if (!canOperate) {
           json(response, 403, { error: "Operations access is required" });
@@ -5204,9 +5280,10 @@ export function createMonitorServer(
           return;
         }
         try {
-          const stagedResults = await customCoas.stageLinks(links, Boolean(input.suggestCurrent), currentUser.id);
+          const suggestCurrent = input.suggestCurrent !== false;
+          const stagedResults = await customCoas.stageLinks(links, suggestCurrent, currentUser.id);
           const automaticallyPublished = await automaticallyPublishExactCoas(
-            stagedResults.map((item) => item.coa),
+            stagedResults.map((item) => coaPublicationCandidate(item.coa, suggestCurrent)),
             currentUser.id,
           );
           const results = stagedResults.map((item) => {
@@ -5237,13 +5314,15 @@ export function createMonitorServer(
         }
         try {
           const bytes = await readBodyBuffer(request, 12 * 1024 * 1024);
+          const suggestCurrent = firstHeaderValue(request.headers["x-coa-current-lot"]) !== "false";
           const stagedResult = await customCoas.stagePdf({
             fileName: firstHeaderValue(request.headers["x-coa-file-name"]) || "certificate.pdf",
             content: bytes,
-            suggestCurrent: firstHeaderValue(request.headers["x-coa-current-lot"]) === "true",
+            suggestCurrent,
             actorId: currentUser.id,
           });
-          const automaticallyPublished = await automaticallyPublishExactCoas([stagedResult.coa], currentUser.id);
+          const publicationCandidate = coaPublicationCandidate(stagedResult.coa, suggestCurrent);
+          const automaticallyPublished = await automaticallyPublishExactCoas([publicationCandidate], currentUser.id);
           const published = automaticallyPublished.get(stagedResult.coa.recordId || stagedResult.coa.id);
           const result = {
             ...stagedResult,

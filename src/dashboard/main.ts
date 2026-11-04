@@ -554,6 +554,17 @@ interface CommercePayload {
   refreshing?: boolean;
 }
 
+interface OrderLedgerPayload {
+  connected: boolean;
+  orders: CommerceOrder[];
+  affiliateCommissions: AffiliateCommissionSummary[];
+  page: number;
+  perPage: number;
+  total: number;
+  totalPages: number;
+  generatedAt?: string;
+}
+
 interface FulfillmentLocationsPayload {
   configured: boolean;
   locations: ProductLocation[];
@@ -1038,6 +1049,13 @@ let orderDateFilter: "today" | "7" | "30" | "all" | "custom" = "today";
 let orderSort = "date-desc";
 let orderDateFrom = "";
 let orderDateTo = "";
+let orderLedgerData: OrderLedgerPayload | undefined;
+let orderLedgerLoading = false;
+let orderLedgerError = "";
+let orderLedgerPage = 1;
+let orderLedgerPageSize = 25;
+let orderLedgerLoadSequence = 0;
+let orderLedgerSearchTimer: number | undefined;
 let ordersWorkspace: "ledger" | "payments" | "reconciliation" = "ledger";
 let knownOrderIds = new Set<number>();
 let orderFeedInitialized = false;
@@ -2974,13 +2992,93 @@ function visibleOrders(): CommerceOrder[] {
   });
 }
 
+function orderLedgerDateBounds(): { after?: string; before?: string } {
+  const now = new Date();
+  if (orderDateFilter === "all") return {};
+  if (orderDateFilter === "today") {
+    return { after: new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString() };
+  }
+  if (orderDateFilter === "7" || orderDateFilter === "30") {
+    return { after: new Date(now.getTime() - Number(orderDateFilter) * 86_400_000).toISOString() };
+  }
+  const afterDate = orderDateFrom ? new Date(orderDateFrom) : null;
+  const beforeDate = orderDateTo ? new Date(orderDateTo) : null;
+  return {
+    ...(afterDate && Number.isFinite(afterDate.getTime()) ? { after: afterDate.toISOString() } : {}),
+    ...(beforeDate && Number.isFinite(beforeDate.getTime()) ? { before: beforeDate.toISOString() } : {}),
+  };
+}
+
+async function loadOrderLedger(resetPage = false): Promise<void> {
+  if (resetPage) orderLedgerPage = 1;
+  const sequence = ++orderLedgerLoadSequence;
+  orderLedgerLoading = true;
+  orderLedgerError = "";
+  renderOrders();
+  const parameters = new URLSearchParams({
+    page: String(orderLedgerPage),
+    perPage: String(orderLedgerPageSize),
+    status: orderStatusFilter,
+    search: orderSearch.trim(),
+    order: orderSort === "date-asc" ? "asc" : "desc",
+  });
+  const bounds = orderLedgerDateBounds();
+  if (bounds.after) parameters.set("after", bounds.after);
+  if (bounds.before) parameters.set("before", bounds.before);
+  try {
+    const response = await fetch(`/api/commerce/order-ledger?${parameters.toString()}`, {
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    const payload: unknown = await response.json();
+    if (!response.ok || !isRecord(payload) || !Array.isArray(payload.orders)) {
+      throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The order ledger is unavailable");
+    }
+    if (sequence !== orderLedgerLoadSequence) return;
+    orderLedgerData = {
+      connected: payload.connected !== false,
+      orders: payload.orders as CommerceOrder[],
+      affiliateCommissions: Array.isArray(payload.affiliateCommissions) ? payload.affiliateCommissions as AffiliateCommissionSummary[] : [],
+      page: Math.max(1, Number(payload.page) || orderLedgerPage),
+      perPage: Math.max(1, Number(payload.perPage) || orderLedgerPageSize),
+      total: Math.max(0, Number(payload.total) || 0),
+      totalPages: Math.max(0, Number(payload.totalPages) || 0),
+      generatedAt: typeof payload.generatedAt === "string" ? payload.generatedAt : undefined,
+    };
+    orderLedgerPage = orderLedgerData.page;
+    if (orderLedgerData.totalPages > 0 && orderLedgerPage > orderLedgerData.totalPages) {
+      orderLedgerPage = orderLedgerData.totalPages;
+      void loadOrderLedger(false);
+      return;
+    }
+  } catch (error) {
+    if (sequence !== orderLedgerLoadSequence) return;
+    orderLedgerError = error instanceof Error ? error.message : "The order ledger is unavailable";
+  } finally {
+    if (sequence === orderLedgerLoadSequence) {
+      orderLedgerLoading = false;
+      renderOrders();
+    }
+  }
+}
+
+function queueOrderLedgerReload(resetPage = true, delay = 0): void {
+  if (orderLedgerSearchTimer !== undefined) window.clearTimeout(orderLedgerSearchTimer);
+  orderLedgerSearchTimer = window.setTimeout(() => {
+    orderLedgerSearchTimer = undefined;
+    void loadOrderLedger(resetPage);
+  }, delay);
+}
+
 function orderRow(order: CommerceOrder, compact = false): string {
   const profit = order.profitability.estimatedProfit;
   const profitCell = profit === null
     ? '<span class="cell-muted" title="One or more product costs are missing">Not calculated</span>'
     : `<span class="cell-profit${profit < 0 ? " cell-profit--negative" : ""}">${escapeHtml(formatCurrency(profit, order.currency))}</span>`;
   const itemCount = order.lineItems.reduce((sum, item) => sum + item.quantity, 0);
-  const commission = commerceData?.affiliateCommissions?.find((entry) => entry.orderId === order.id);
+  const commission = orderLedgerData?.affiliateCommissions.find((entry) => entry.orderId === order.id) ||
+    commerceData?.affiliateCommissions?.find((entry) => entry.orderId === order.id);
   const commissionStatus = commission
     ? ({ reserved: "Pending", pending: "On hold", approved: "Approved", paid: "Paid", reversed: "Reversed" } as const)[commission.status]
     : "";
@@ -3004,24 +3102,44 @@ function renderMonitorOrders(): void {
 }
 
 function renderOrders(): void {
-  const orders = visibleOrders();
+  const orders = [...(orderLedgerData?.orders || visibleOrders())].sort((left, right) => {
+    if (orderSort === "total-desc") return right.total - left.total;
+    if (orderSort === "total-asc") return left.total - right.total;
+    return 0;
+  });
   const allOrders = commerceData?.orders || [];
-  const currency = allOrders[0]?.currency || "USD";
+  const currency = orders[0]?.currency || allOrders[0]?.currency || "USD";
   const paid = orders.filter(paidOrder);
   const revenue = paid.reduce((sum, order) => sum + order.total, 0);
   const profit = paid.reduce(
     (sum, order) => sum + (order.profitability.estimatedProfit ?? 0),
     0,
   );
-  requiredElement<HTMLElement>("#orders-visible-count").textContent = formatNumber(orders.length);
+  requiredElement<HTMLElement>("#orders-visible-count").textContent = formatNumber(orderLedgerData?.total ?? orders.length);
   requiredElement<HTMLElement>("#orders-processing-count").textContent = formatNumber(
     allOrders.filter((order) => order.status === "processing").length,
   );
   requiredElement<HTMLElement>("#orders-visible-revenue").textContent = formatCurrency(revenue, currency);
   requiredElement<HTMLElement>("#orders-visible-profit").textContent = formatCurrency(profit, currency);
-  requiredElement<HTMLElement>("#orders-table-body").innerHTML = orders.length
-    ? orders.map((order) => orderRow(order)).join("")
-    : '<tr><td colspan="10"><div class="table-loading">No orders match the selected filters.</div></td></tr>';
+  requiredElement<HTMLElement>("#orders-table-body").innerHTML = orderLedgerLoading && !orderLedgerData
+    ? '<tr><td colspan="10"><div class="table-loading">Searching the complete order history…</div></td></tr>'
+    : orderLedgerError && !orders.length
+      ? `<tr><td colspan="10"><div class="table-loading">${escapeHtml(orderLedgerError)} <button class="table-inline-action" type="button" id="orders-ledger-retry">Try again</button></div></td></tr>`
+      : orders.length
+        ? orders.map((order) => orderRow(order)).join("")
+        : '<tr><td colspan="10"><div class="table-loading">No orders match the selected filters.</div></td></tr>';
+  const total = orderLedgerData?.total ?? orders.length;
+  const totalPages = orderLedgerData?.totalPages ?? (total ? 1 : 0);
+  const page = orderLedgerData?.page ?? orderLedgerPage;
+  const start = total ? (page - 1) * orderLedgerPageSize + 1 : 0;
+  const end = Math.min(total, start + orders.length - 1);
+  requiredElement<HTMLElement>("#orders-page-summary").textContent = orderLedgerLoading
+    ? "Updating orders…"
+    : total ? `${formatNumber(start)}–${formatNumber(end)} of ${formatNumber(total)} orders` : "No matching orders";
+  requiredElement<HTMLButtonElement>("#orders-page-prev").disabled = orderLedgerLoading || page <= 1;
+  requiredElement<HTMLButtonElement>("#orders-page-next").disabled = orderLedgerLoading || totalPages === 0 || page >= totalPages;
+  requiredElement<HTMLElement>("#orders-page-number").textContent = totalPages ? `Page ${formatNumber(page)} of ${formatNumber(totalPages)}` : "Page 0 of 0";
+  requiredElement<HTMLSelectElement>("#orders-page-size").value = String(orderLedgerPageSize);
   requiredElement<HTMLElement>("#orders-preview-body").innerHTML = allOrders.length
     ? allOrders.slice(0, 6).map((order) => orderRow(order, true)).join("")
     : '<tr><td colspan="6"><div class="table-loading">No orders are available yet.</div></td></tr>';
@@ -4540,6 +4658,7 @@ async function loadCommerce(): Promise<void> {
     };
   }
   renderCommerce();
+  void loadOrderLedger(false);
   if (latestSnapshot) renderMarketing(latestSnapshot);
 }
 
@@ -11535,7 +11654,14 @@ requiredElement<HTMLElement>("#media-grid").addEventListener("click", (event) =>
 });
 requiredElement<HTMLInputElement>("#orders-search").addEventListener("input", (event) => {
   orderSearch = (event.currentTarget as HTMLInputElement).value;
-  renderOrders();
+  if (orderSearch.trim()) {
+    orderDateFilter = "all";
+    for (const item of document.querySelectorAll<HTMLButtonElement>("[data-order-date]")) {
+      item.classList.toggle("is-active", item.dataset.orderDate === "all");
+    }
+    requiredElement<HTMLElement>("#order-custom-range").hidden = true;
+  }
+  queueOrderLedgerReload(true, 300);
 });
 for (const button of document.querySelectorAll<HTMLButtonElement>("[data-order-filter]")) {
   button.addEventListener("click", () => {
@@ -11543,7 +11669,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-order-f
     for (const item of document.querySelectorAll<HTMLButtonElement>("[data-order-filter]")) {
       item.classList.toggle("is-active", item === button);
     }
-    renderOrders();
+    queueOrderLedgerReload(true);
   });
 }
 for (const button of document.querySelectorAll<HTMLButtonElement>("[data-order-date]")) {
@@ -11555,20 +11681,38 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-order-d
       item.classList.toggle("is-active", item === button);
     }
     requiredElement<HTMLElement>("#order-custom-range").hidden = orderDateFilter !== "custom";
-    renderOrders();
+    queueOrderLedgerReload(true);
   });
 }
 requiredElement<HTMLSelectElement>("#orders-sort").addEventListener("change", (event) => {
   orderSort = (event.currentTarget as HTMLSelectElement).value;
-  renderOrders();
+  queueOrderLedgerReload(true);
 });
 requiredElement<HTMLInputElement>("#orders-date-from").addEventListener("change", (event) => {
   orderDateFrom = (event.currentTarget as HTMLInputElement).value;
-  renderOrders();
+  queueOrderLedgerReload(true);
 });
 requiredElement<HTMLInputElement>("#orders-date-to").addEventListener("change", (event) => {
   orderDateTo = (event.currentTarget as HTMLInputElement).value;
-  renderOrders();
+  queueOrderLedgerReload(true);
+});
+requiredElement<HTMLSelectElement>("#orders-page-size").addEventListener("change", (event) => {
+  orderLedgerPageSize = Math.max(1, Math.min(100, Number((event.currentTarget as HTMLSelectElement).value) || 25));
+  void loadOrderLedger(true);
+});
+requiredElement<HTMLButtonElement>("#orders-page-prev").addEventListener("click", () => {
+  if (orderLedgerLoading || orderLedgerPage <= 1) return;
+  orderLedgerPage -= 1;
+  void loadOrderLedger(false);
+});
+requiredElement<HTMLButtonElement>("#orders-page-next").addEventListener("click", () => {
+  const totalPages = orderLedgerData?.totalPages || 0;
+  if (orderLedgerLoading || !totalPages || orderLedgerPage >= totalPages) return;
+  orderLedgerPage += 1;
+  void loadOrderLedger(false);
+});
+requiredElement<HTMLElement>("#orders-table-body").addEventListener("click", (event) => {
+  if (event.target instanceof Element && event.target.closest("#orders-ledger-retry")) void loadOrderLedger(false);
 });
 requiredElement<HTMLButtonElement>("#order-alert-toggle").addEventListener("click", () => { void toggleOrderAlerts(); });
 requiredElement<HTMLButtonElement>("#order-alert-quick-toggle").addEventListener("click", () => { void toggleOrderAlerts(); });

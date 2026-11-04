@@ -305,6 +305,49 @@ test("loads a complete bounded sales period on demand", async () => {
   assert.equal(requests[0]?.searchParams.get("per_page"), "100");
 });
 
+test("loads one searchable order-ledger page with real WordPress totals", async () => {
+  let requested: URL | undefined;
+  const fetchImpl: typeof fetch = async (input) => {
+    requested = new URL(String(input));
+    return new Response(JSON.stringify([{
+      id: 3180,
+      number: "3180",
+      status: "processing",
+      currency: "USD",
+      total: "144.43",
+      payment_method_title: "Card",
+      date_created_gmt: "2026-11-03T12:00:00",
+      billing: { first_name: "Candyce", last_name: "Murphy" },
+      line_items: [{ product_id: 42, name: "KLOW", sku: "KLOW", quantity: 1, total: "50.00" }],
+    }]), {
+      status: 200,
+      headers: { "x-wp-total": "67", "x-wp-totalpages": "3" },
+    });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example",
+    consumerKey: "ck_test",
+    consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  const result = await gateway.listOrdersPage({
+    page: 2,
+    perPage: 25,
+    search: "#3180",
+    status: "processing",
+    after: "2026-11-01T05:00:00.000Z",
+  });
+
+  assert.equal(result.orders[0]?.number, "3180");
+  assert.equal(result.total, 67);
+  assert.equal(result.totalPages, 3);
+  assert.equal(requested?.searchParams.get("page"), "2");
+  assert.equal(requested?.searchParams.get("per_page"), "25");
+  assert.equal(requested?.searchParams.get("search"), "3180");
+  assert.equal(requested?.searchParams.get("status"), "processing");
+  assert.equal(requested?.searchParams.get("after"), "2026-11-01T05:00:00.000Z");
+});
+
 test("moves products to recoverable Trash instead of permanently deleting them", async () => {
   let request: { method: string; force: string | null } | undefined;
   const fetchImpl: typeof fetch = async (input, init) => {
