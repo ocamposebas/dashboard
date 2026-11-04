@@ -167,6 +167,16 @@ export function shouldIncludeFulfillmentOrder(
   return session?.state === "open";
 }
 
+export function shouldHydrateMissingFulfillmentOrder(
+  session: FulfillmentSession,
+  liveOrderIds: ReadonlySet<number>,
+): boolean {
+  // Only an actively open session may remain visible after its source order
+  // leaves Processing. Historical paused, packed and cancelled sessions stay
+  // durable in PostgreSQL without triggering one WooCommerce request each.
+  return session.state === "open" && !liveOrderIds.has(session.orderId);
+}
+
 export function compareFulfillmentQueueEntries(
   left: FulfillmentQueueEntry,
   right: FulfillmentQueueEntry,

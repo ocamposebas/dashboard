@@ -122,6 +122,7 @@ import {
   compareFulfillmentQueueEntries,
   fulfillmentSourceSnapshot,
   initialFulfillmentProgress,
+  shouldHydrateMissingFulfillmentOrder,
   shouldIncludeFulfillmentOrder,
 } from "./fulfillmentQueue.js";
 import type {
@@ -1785,7 +1786,7 @@ export function createMonitorServer(
     const known = new Set(recentOrders.map((order) => order.id));
     const missingSessionOrders = await Promise.all(
       sessions
-        .filter((session) => !known.has(session.orderId))
+        .filter((session) => shouldHydrateMissingFulfillmentOrder(session, known))
         .map((session) => commerce.getOrder(session.orderId).catch(() => null)),
     );
     return {

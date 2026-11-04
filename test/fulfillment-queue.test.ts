@@ -7,6 +7,7 @@ import {
   buildFulfillmentQueueEntry,
   compareFulfillmentQueueEntries,
   shouldIncludeFulfillmentOrder,
+  shouldHydrateMissingFulfillmentOrder,
 } from "../src/server/fulfillmentQueue.js";
 import type { CommerceCoa, CommerceOrder, CommerceProduct } from "../src/server/wooCommerceGateway.js";
 
@@ -184,6 +185,20 @@ test("the queue admits processing orders and only keeps active non-processing ex
     order({ status: "cancelled" }),
     { state: "paused" } as FulfillmentSession,
   ), false);
+});
+
+test("only an open missing session hydrates its source order", () => {
+  const known = new Set([1201]);
+  const session = (state: FulfillmentSession["state"], orderId = 1202) => ({
+    state,
+    orderId,
+  }) as FulfillmentSession;
+
+  assert.equal(shouldHydrateMissingFulfillmentOrder(session("open"), known), true);
+  assert.equal(shouldHydrateMissingFulfillmentOrder(session("open", 1201), known), false);
+  assert.equal(shouldHydrateMissingFulfillmentOrder(session("paused"), known), false);
+  assert.equal(shouldHydrateMissingFulfillmentOrder(session("packed"), known), false);
+  assert.equal(shouldHydrateMissingFulfillmentOrder(session("cancelled"), known), false);
 });
 
 test("a non-processing changed order shows one actionable status blocker", () => {
