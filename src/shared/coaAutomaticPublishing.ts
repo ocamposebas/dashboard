@@ -152,6 +152,37 @@ export function canAutomaticallyPublishCoa(coa: CommerceCoa & {
   );
 }
 
+type CurrentLotCandidate = Pick<CommerceCoa, "id" | "date"> & {
+  recordId?: string;
+  currentShippingLot?: boolean;
+};
+
+function certificateId(coa: CurrentLotCandidate): string {
+  return String(coa.recordId || coa.id || "").trim();
+}
+
+/**
+ * Selects the only certificate that may become the current shipping lot for
+ * one exact catalog presentation. A newer analysis date can advance the lot;
+ * an older upload is kept as history and can never replace it. When two
+ * certificates share a date, the already-current record wins so a replay or
+ * historical import cannot silently switch customer-facing documentation.
+ */
+export function newestCurrentCoaId(coas: CurrentLotCandidate[]): string | null {
+  const dated = coas.filter((coa) =>
+    Boolean(certificateId(coa)) && /^\d{4}-\d{2}-\d{2}$/.test(String(coa.date || "")),
+  );
+  if (!dated.length) return null;
+
+  const winner = dated.reduce((winner, candidate) => {
+    if (candidate.date > winner.date) return candidate;
+    if (candidate.date < winner.date) return winner;
+    if (candidate.currentShippingLot && !winner.currentShippingLot) return candidate;
+    return winner;
+  });
+  return certificateId(winner) || null;
+}
+
 export interface ExactLegacyCoaCatalogRepair {
   coa: CommerceCoa & { recordId?: string; source?: string; revision?: number };
   productId: number;

@@ -62,6 +62,7 @@ import {
   exactAutomaticCoaProduct,
   exactAutomaticCoaVariation,
   exactLegacyCoaCatalogRepairs,
+  newestCurrentCoaId,
 } from "../shared/coaAutomaticPublishing.js";
 import { productVariantSku } from "../shared/productSku.js";
 import type { MonthlyFinanceOrder } from "../shared/monthlyFinance.js";
@@ -814,6 +815,13 @@ export function createMonitorServer(
 
     const products = await commerce.listProducts();
     const variationsByProduct = new Map<number, CommerceVariation[]>();
+    const resolved: Array<{
+      coa: CustomCoa;
+      product: Awaited<ReturnType<typeof exactAutomaticCoaProduct>> & {};
+      variation: CommerceVariation | null;
+      skus: string[];
+      presentationKey: string;
+    }> = [];
     for (const coa of eligible) {
       const product = exactAutomaticCoaProduct(coa, products);
       if (!product) {
@@ -845,10 +853,39 @@ export function createMonitorServer(
         }
       }
       const skus = [...new Set([...(coa.skus || []), product.sku, variation?.sku || ""].map((sku) => sku.trim()).filter(Boolean))];
+      resolved.push({
+        coa,
+        product,
+        variation,
+        skus,
+        presentationKey: `${product.id}:${variation?.id || 0}`,
+      });
+    }
+
+    const storedCoas = await customCoas.list({ limit: 1_000 });
+    const winnerByPresentation = new Map<string, string>();
+    const presentationKeys = new Set(resolved.map((item) => item.presentationKey));
+    for (const presentationKey of presentationKeys) {
+      const [productId, variationId] = presentationKey.split(":").map(Number);
+      const currentRecords = storedCoas.filter((coa) =>
+        coa.currentShippingLot === true &&
+        coa.matchedProductId === productId &&
+        coa.matchedVariationId === variationId,
+      );
+      const requestedRecords = resolved
+        .filter((item) => item.presentationKey === presentationKey)
+        .map((item) => item.coa);
+      const winnerId = newestCurrentCoaId([...currentRecords, ...requestedRecords]);
+      if (winnerId) winnerByPresentation.set(presentationKey, winnerId);
+    }
+
+    for (const { coa, product, variation, skus, presentationKey } of resolved) {
+      const coaId = coa.recordId || coa.id;
+      const shouldBeCurrent = winnerByPresentation.get(presentationKey) === coaId;
       const existingSkus = new Set((coa.skus || []).map((sku) => sku.trim().toLocaleLowerCase("en")).filter(Boolean));
       const mappingIsCurrent =
         coa.status === "Available" &&
-        coa.currentShippingLot === true &&
+        coa.currentShippingLot === shouldBeCurrent &&
         coa.matchedProductId === product.id &&
         coa.matchedVariationId === (variation?.id || 0) &&
         skus.length === existingSkus.size &&
@@ -872,7 +909,7 @@ export function createMonitorServer(
           laboratory: coa.laboratory,
           method: coa.method,
           tested: coa.tested,
-          currentShippingLot: true,
+          currentShippingLot: shouldBeCurrent,
           fileUrl: coa.externalFileUrl || "",
           verifyUrl: coa.verifyUrl,
           fileAttachmentId: coa.fileAttachmentId,
@@ -886,7 +923,7 @@ export function createMonitorServer(
         published.set(coa.recordId || coa.id, updated);
       } catch (error: unknown) {
         console.error("Exact COA automatic publication failed", {
-          certificateId: coa.recordId || coa.id,
+          certificateId: coaId,
           error: error instanceof Error ? error.message : String(error),
         });
       }

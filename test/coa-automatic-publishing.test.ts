@@ -6,6 +6,7 @@ import {
   exactLegacyCoaCatalogRepairs,
   exactAutomaticCoaProduct,
   exactAutomaticCoaVariation,
+  newestCurrentCoaId,
 } from "../src/shared/coaAutomaticPublishing.js";
 import type {
   CommerceCoa,
@@ -165,6 +166,24 @@ test("re-uploading an imported certificate can promote its exact catalog match t
       suggestCurrent: true,
     },
   }), true);
+});
+
+test("only the newest exact certificate becomes current and older uploads remain history", () => {
+  assert.equal(newestCurrentCoaId([
+    { id: "current", date: "2026-11-01", currentShippingLot: true },
+    { id: "historical-upload", date: "2026-10-15", currentShippingLot: false },
+  ]), "current");
+  assert.equal(newestCurrentCoaId([
+    { id: "current", date: "2026-11-01", currentShippingLot: true },
+    { id: "new-upload", date: "2026-11-04", currentShippingLot: false },
+  ]), "new-upload");
+});
+
+test("an equal-date replay never displaces the certificate already marked current", () => {
+  assert.equal(newestCurrentCoaId([
+    { id: "replay", date: "2026-11-04", currentShippingLot: false },
+    { id: "current", date: "2026-11-04", currentShippingLot: true },
+  ]), "current");
 });
 
 test("legacy repair replaces a demonstrably wrong product mapping with one exact catalog match", () => {
