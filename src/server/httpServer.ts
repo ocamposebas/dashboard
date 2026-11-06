@@ -3144,7 +3144,11 @@ export function createMonitorServer(
             actorId: currentUser.id,
           });
           affiliateLegacySyncAt = 0;
-          json(response, currentCoupon ? 200 : 201, { saved: true, couponId });
+          json(response, currentCoupon ? 200 : 201, {
+            saved: true,
+            couponId,
+            adoptedExisting: saved.adoptedExisting,
+          });
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : "";
           const clientError = error instanceof AffiliateManagementError;

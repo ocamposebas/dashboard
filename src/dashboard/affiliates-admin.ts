@@ -148,13 +148,15 @@ async function saveAffiliateCoupon(): Promise<void> {
         commissionValue: Number(required<HTMLInputElement>("#affiliate-manage-commission").value),
       }),
     });
-    const payload = await response.json() as { error?: string };
+    const payload = await response.json() as { error?: string; adoptedExisting?: boolean };
     if (!response.ok) throw new Error(payload.error || "The coupon could not be saved");
     await loadAffiliateAdmin(true);
     const refreshed = directory?.affiliates.find((item) => item.id === affiliate.id);
     if (refreshed) {
       openAffiliateManagement(refreshed);
-      setManagementNotice("Coupon ready. It is active on the storefront and connected to commission tracking.");
+      setManagementNotice(payload.adoptedExisting
+        ? "Existing coupon reactivated. Its usage history was preserved and it is now connected to this affiliate."
+        : "Coupon ready. It is active on the storefront and connected to commission tracking.");
     }
   } catch (error: unknown) {
     setManagementNotice(error instanceof Error ? error.message : "The coupon could not be saved", true);

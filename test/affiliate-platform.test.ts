@@ -184,6 +184,7 @@ test("managed coupons are provisioned with the legacy bridge metadata and can be
   await gateway.setManagedAffiliateCouponsActive([4401, 4401], false);
 
   assert.equal(saved.wpCouponId, 4401);
+  assert.equal(saved.adoptedExisting, false);
   const create = requests.find((request) => request.method === "POST")!;
   assert.equal(create.path, "/wp-json/wc/v3/coupons");
   assert.equal(create.body?.code, "partner10");
@@ -195,6 +196,72 @@ test("managed coupons are provisioned with the legacy bridge metadata and can be
   assert.equal(metadata.get("_phaseone_affiliate_coupon_managed"), "yes");
   assert.equal(requests.filter((request) => request.method === "PUT").length, 1);
   assert.equal(requests.at(-1)?.body?.status, "draft");
+});
+
+test("an existing unowned WordPress coupon is safely adopted without losing its identity", async () => {
+  const requests: Array<{ method: string; path: string; body: Record<string, unknown> | null }> = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    const method = init?.method || "GET";
+    const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
+    requests.push({ method, path: url.pathname, body });
+    if (method === "GET") {
+      return new Response(JSON.stringify([{
+        id: 3392,
+        code: "sammyc",
+        status: "publish",
+        usage_count: 1,
+        meta_data: [],
+      }]), { status: 200 });
+    }
+    return new Response(JSON.stringify({ id: 3392, code: "sammyc", status: "publish" }), { status: 200 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://phaseonelabz.com",
+    consumerKey: "ck_test",
+    consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  const saved = await gateway.saveManagedAffiliateCoupon({
+    wpUserId: 1615,
+    code: "SAMMYC",
+    discountValue: 10,
+    commissionValue: 10,
+    referralUrl: "https://phaseonelabz.com/?coupon=SAMMYC",
+  });
+
+  assert.equal(saved.wpCouponId, 3392);
+  assert.equal(saved.adoptedExisting, true);
+  assert.equal(requests.some((request) => request.method === "POST"), false);
+  const update = requests.find((request) => request.method === "PUT")!;
+  assert.equal(update.path, "/wp-json/wc/v3/coupons/3392");
+  const metadata = new Map((update.body?.meta_data as Array<{ key: string; value: string }>).map((item) => [item.key, item.value]));
+  assert.equal(metadata.get("wcu_select_coupon_user_id"), "1615");
+  assert.equal(metadata.get("_phaseone_affiliate_coupon_managed"), "yes");
+});
+
+test("an existing coupon owned by another affiliate remains protected", async () => {
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://phaseonelabz.com",
+    consumerKey: "ck_test",
+    consumerSecret: "cs_test",
+  }, (async () => new Response(JSON.stringify([{
+    id: 3392,
+    code: "sammyc",
+    status: "publish",
+    meta_data: [
+      { key: "wcu_select_coupon_user_id", value: "777" },
+      { key: "_phaseone_affiliate_coupon_managed", value: "yes" },
+    ],
+  }]), { status: 200 })) as typeof fetch);
+
+  await assert.rejects(() => gateway.saveManagedAffiliateCoupon({
+    wpUserId: 1615,
+    code: "SAMMYC",
+    discountValue: 10,
+    commissionValue: 10,
+    referralUrl: "https://phaseonelabz.com/?coupon=SAMMYC",
+  }), /affiliate_coupon_code_conflict/);
 });
 
 test("affiliate assignment can securely resolve an exact storefront customer identity", async () => {

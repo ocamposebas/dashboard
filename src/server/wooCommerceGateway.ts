@@ -687,6 +687,7 @@ export interface ManagedAffiliateCouponResult {
   wpCouponId: number;
   code: string;
   status: "active" | "paused";
+  adoptedExisting: boolean;
 }
 
 export interface CommerceCustomerIdentity {
@@ -1697,6 +1698,7 @@ export class WooCommerceGateway {
 
   async saveManagedAffiliateCoupon(input: ManagedAffiliateCouponWrite): Promise<ManagedAffiliateCouponResult> {
     let wpCouponId = input.wpCouponId && input.wpCouponId > 0 ? Math.trunc(input.wpCouponId) : null;
+    let adoptedExisting = false;
     if (!wpCouponId) {
       const matches = await this.request("coupons", {
         parameters: { code: input.code.toLowerCase(), per_page: "100", page: "1" },
@@ -1714,8 +1716,11 @@ export class WooCommerceGateway {
             metadata.get("wcu_select_coupon_user_id") || metadata.get("wcu_select_coupon_user"),
           ));
           const managed = text(metadata.get("_phaseone_affiliate_coupon_managed")) === "yes";
-          if (!managed || ownerId !== input.wpUserId) throw new Error("affiliate_coupon_code_conflict");
+          if (ownerId > 0 && ownerId !== input.wpUserId) {
+            throw new Error("affiliate_coupon_code_conflict");
+          }
           wpCouponId = Math.trunc(number(coupon.id));
+          adoptedExisting = !managed || ownerId <= 0;
           break;
         }
       }
@@ -1757,6 +1762,7 @@ export class WooCommerceGateway {
       wpCouponId: savedId,
       code: text(saved.code) || input.code,
       status: text(saved.status) === "publish" ? "active" : "paused",
+      adoptedExisting,
     };
   }
 
