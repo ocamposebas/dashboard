@@ -7,6 +7,9 @@ import type {
   AffiliatePayoutStatus,
   AffiliatePayoutSummary,
   AffiliatePortalDashboard,
+  AffiliateRecentReferralClick,
+  AffiliateReferralMetricSummary,
+  AffiliateReferralPerformance,
   AffiliateSummary,
   LegacyAffiliateCoupon,
 } from "../shared/affiliates.js";
@@ -176,6 +179,30 @@ function iso(value: Date | string | null): string | null {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
   return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+function referralMetric(row: {
+  clicks?: string | number | null;
+  unique_visitors?: string | number | null;
+  conversions?: string | number | null;
+  revenue?: string | number | null;
+  commission?: string | number | null;
+}): AffiliateReferralMetricSummary {
+  const clicks = Number(row.clicks || 0);
+  const uniqueVisitors = Number(row.unique_visitors || 0);
+  const conversions = Number(row.conversions || 0);
+  const revenue = money(row.revenue);
+  const commission = money(row.commission);
+  return {
+    clicks,
+    uniqueVisitors,
+    conversions,
+    conversionRate: uniqueVisitors > 0 ? Math.round((conversions / uniqueVisitors) * 10_000) / 100 : 0,
+    revenue,
+    commission,
+    revenuePerClick: clicks > 0 ? Math.round((revenue / clicks) * 100) / 100 : 0,
+    averageOrderValue: conversions > 0 ? Math.round((revenue / conversions) * 100) / 100 : 0,
+  };
 }
 
 function tokenDigest(token: string): string {
@@ -754,10 +781,13 @@ export class AffiliateRepository {
     const directory = await this.adminDirectory();
     const affiliate = directory.affiliates.find((item) => item.id === affiliateId);
     if (!affiliate) return null;
-    const commissions = await this.database.query<{ id: string; wc_order_number: string; commission_amount: string; currency: string; status: string; created_at: Date }>(`
-      SELECT id, wc_order_number, commission_amount, currency, status, created_at
-      FROM affiliate_commissions WHERE affiliate_id = $1 ORDER BY created_at DESC LIMIT 20
-    `, [affiliateId]);
+    const [commissions, performance] = await Promise.all([
+      this.database.query<{ id: string; wc_order_number: string; commission_amount: string; currency: string; status: string; created_at: Date }>(`
+        SELECT id, wc_order_number, commission_amount, currency, status, created_at
+        FROM affiliate_commissions WHERE affiliate_id = $1 ORDER BY created_at DESC LIMIT 20
+      `, [affiliateId]),
+      this.referralPerformance(affiliateId),
+    ]);
     return {
       affiliate,
       settings: directory.settings,
@@ -765,6 +795,187 @@ export class AffiliateRepository {
       recentCommissions: commissions.rows.map((row) => ({
         id: row.id, orderNumber: row.wc_order_number, amount: money(row.commission_amount),
         currency: row.currency, status: row.status, createdAt: row.created_at.toISOString(),
+      })),
+      performance,
+    };
+  }
+
+  async recordReferralClick(input: {
+    couponCode: string;
+    visitorHash: string;
+    eventKey: string;
+    landingPath: string;
+    referrerHost: string;
+    deviceType: "desktop" | "mobile" | "tablet" | "unknown";
+    occurredAt: Date;
+  }): Promise<{ recorded: boolean; affiliateId: string; couponId: string } | null> {
+    const coupon = await this.database.query<{ id: string; affiliate_id: string }>(`
+      SELECT c.id, c.affiliate_id
+      FROM affiliate_coupons c
+      JOIN affiliate_profiles p ON p.id = c.affiliate_id
+      WHERE lower(c.code) = lower($1)
+        AND c.status = 'active'
+        AND p.status = 'active'
+      LIMIT 1
+    `, [input.couponCode]);
+    const match = coupon.rows[0];
+    if (!match) return null;
+
+    const inserted = await this.database.query<{ id: string }>(`
+      INSERT INTO affiliate_referral_clicks (
+        id, affiliate_id, coupon_id, visitor_hash, event_key,
+        landing_path, referrer_host, device_type, occurred_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      ON CONFLICT (event_key) DO NOTHING
+      RETURNING id
+    `, [
+      randomUUID(), match.affiliate_id, match.id, input.visitorHash, input.eventKey,
+      input.landingPath, input.referrerHost, input.deviceType, input.occurredAt,
+    ]);
+    return {
+      recorded: Boolean(inserted.rows[0]),
+      affiliateId: match.affiliate_id,
+      couponId: match.id,
+    };
+  }
+
+  async referralPerformance(affiliateId: string): Promise<AffiliateReferralPerformance> {
+    type SummaryRow = {
+      tracking_started_at: Date | null;
+      clicks: string;
+      unique_visitors: string;
+      conversions: string;
+      revenue: string;
+      commission: string;
+    };
+    const summarySql = (periodClause: string) => `
+      WITH bounds AS (
+        SELECT min(occurred_at) AS tracking_started_at
+        FROM affiliate_referral_clicks
+        WHERE affiliate_id = $1
+      ), clicks AS (
+        SELECT count(*) AS clicks, count(DISTINCT visitor_hash) AS unique_visitors
+        FROM affiliate_referral_clicks
+        WHERE affiliate_id = $1 ${periodClause}
+      ), conversions AS (
+        SELECT count(*) AS conversions,
+               COALESCE(sum(eligible_amount), 0) AS revenue,
+               COALESCE(sum(commission_amount), 0) AS commission
+        FROM affiliate_commissions, bounds
+        WHERE affiliate_id = $1
+          AND status IN ('reserved', 'pending', 'approved', 'paid')
+          AND bounds.tracking_started_at IS NOT NULL
+          AND created_at >= bounds.tracking_started_at
+          ${periodClause.replaceAll("occurred_at", "created_at")}
+      )
+      SELECT bounds.tracking_started_at, clicks.clicks, clicks.unique_visitors,
+             conversions.conversions, conversions.revenue, conversions.commission
+      FROM bounds, clicks, conversions
+    `;
+
+    const [lifetimeResult, last30Result, dailyResult, landingResult, referrerResult, recentResult] = await Promise.all([
+      this.database.query<SummaryRow>(summarySql(""), [affiliateId]),
+      this.database.query<SummaryRow>(summarySql("AND occurred_at >= date_trunc('day', now()) - interval '29 days'"), [affiliateId]),
+      this.database.query<{
+        day: string; clicks: string; unique_visitors: string; conversions: string; revenue: string; commission: string;
+      }>(`
+        WITH days AS (
+          SELECT generate_series(
+            date_trunc('day', now()) - interval '29 days',
+            date_trunc('day', now()),
+            interval '1 day'
+          ) AS day
+        ), click_daily AS (
+          SELECT date_trunc('day', occurred_at) AS day,
+                 count(*) AS clicks,
+                 count(DISTINCT visitor_hash) AS unique_visitors
+          FROM affiliate_referral_clicks
+          WHERE affiliate_id = $1
+            AND occurred_at >= date_trunc('day', now()) - interval '29 days'
+          GROUP BY 1
+        ), conversion_daily AS (
+          SELECT date_trunc('day', created_at) AS day,
+                 count(*) AS conversions,
+                 COALESCE(sum(eligible_amount), 0) AS revenue,
+                 COALESCE(sum(commission_amount), 0) AS commission
+          FROM affiliate_commissions
+          WHERE affiliate_id = $1
+            AND status IN ('reserved', 'pending', 'approved', 'paid')
+            AND created_at >= date_trunc('day', now()) - interval '29 days'
+            AND created_at >= COALESCE((
+              SELECT min(occurred_at) FROM affiliate_referral_clicks WHERE affiliate_id = $1
+            ), 'infinity'::timestamptz)
+          GROUP BY 1
+        )
+        SELECT to_char(days.day, 'YYYY-MM-DD') AS day,
+               COALESCE(click_daily.clicks, 0) AS clicks,
+               COALESCE(click_daily.unique_visitors, 0) AS unique_visitors,
+               COALESCE(conversion_daily.conversions, 0) AS conversions,
+               COALESCE(conversion_daily.revenue, 0) AS revenue,
+               COALESCE(conversion_daily.commission, 0) AS commission
+        FROM days
+        LEFT JOIN click_daily USING (day)
+        LEFT JOIN conversion_daily USING (day)
+        ORDER BY days.day
+      `, [affiliateId]),
+      this.database.query<{ label: string; clicks: string; unique_visitors: string }>(`
+        SELECT landing_path AS label, count(*) AS clicks,
+               count(DISTINCT visitor_hash) AS unique_visitors
+        FROM affiliate_referral_clicks
+        WHERE affiliate_id = $1
+          AND occurred_at >= date_trunc('day', now()) - interval '29 days'
+        GROUP BY landing_path
+        ORDER BY clicks DESC, landing_path ASC
+        LIMIT 6
+      `, [affiliateId]),
+      this.database.query<{ label: string; clicks: string; unique_visitors: string }>(`
+        SELECT CASE WHEN referrer_host = '' THEN 'Direct' ELSE referrer_host END AS label,
+               count(*) AS clicks, count(DISTINCT visitor_hash) AS unique_visitors
+        FROM affiliate_referral_clicks
+        WHERE affiliate_id = $1
+          AND occurred_at >= date_trunc('day', now()) - interval '29 days'
+        GROUP BY referrer_host
+        ORDER BY clicks DESC, label ASC
+        LIMIT 6
+      `, [affiliateId]),
+      this.database.query<{
+        occurred_at: Date; landing_path: string; referrer_host: string; device_type: AffiliateRecentReferralClick["deviceType"];
+      }>(`
+        SELECT occurred_at, landing_path, referrer_host, device_type
+        FROM affiliate_referral_clicks
+        WHERE affiliate_id = $1
+        ORDER BY occurred_at DESC
+        LIMIT 12
+      `, [affiliateId]),
+    ]);
+
+    const lifetimeRow = lifetimeResult.rows[0] || {
+      tracking_started_at: null, clicks: "0", unique_visitors: "0", conversions: "0", revenue: "0", commission: "0",
+    };
+    const last30Row = last30Result.rows[0] || lifetimeRow;
+    return {
+      trackingStartedAt: lifetimeRow.tracking_started_at?.toISOString() || null,
+      lifetime: referralMetric(lifetimeRow),
+      last30Days: referralMetric(last30Row),
+      daily: dailyResult.rows.map((row) => ({
+        date: row.day,
+        clicks: Number(row.clicks || 0),
+        uniqueVisitors: Number(row.unique_visitors || 0),
+        conversions: Number(row.conversions || 0),
+        revenue: money(row.revenue),
+        commission: money(row.commission),
+      })),
+      topLandingPages: landingResult.rows.map((row) => ({
+        label: row.label || "/", clicks: Number(row.clicks || 0), uniqueVisitors: Number(row.unique_visitors || 0),
+      })),
+      topReferrers: referrerResult.rows.map((row) => ({
+        label: row.label || "Direct", clicks: Number(row.clicks || 0), uniqueVisitors: Number(row.unique_visitors || 0),
+      })),
+      recentClicks: recentResult.rows.map((row) => ({
+        occurredAt: row.occurred_at.toISOString(),
+        landingPath: row.landing_path || "/",
+        source: row.referrer_host || "Direct",
+        deviceType: row.device_type,
       })),
     };
   }

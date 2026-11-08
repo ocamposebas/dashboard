@@ -174,4 +174,48 @@ export interface AffiliatePortalDashboard {
     status: string;
     createdAt: string;
   }>;
+  performance: AffiliateReferralPerformance;
+}
+
+export interface AffiliateReferralMetricSummary {
+  clicks: number;
+  uniqueVisitors: number;
+  conversions: number;
+  conversionRate: number;
+  revenue: number;
+  commission: number;
+  revenuePerClick: number;
+  averageOrderValue: number;
+}
+
+export interface AffiliateReferralDailyPoint {
+  date: string;
+  clicks: number;
+  uniqueVisitors: number;
+  conversions: number;
+  revenue: number;
+  commission: number;
+}
+
+export interface AffiliateReferralBreakdown {
+  label: string;
+  clicks: number;
+  uniqueVisitors: number;
+}
+
+export interface AffiliateRecentReferralClick {
+  occurredAt: string;
+  landingPath: string;
+  source: string;
+  deviceType: "desktop" | "mobile" | "tablet" | "unknown";
+}
+
+export interface AffiliateReferralPerformance {
+  trackingStartedAt: string | null;
+  lifetime: AffiliateReferralMetricSummary;
+  last30Days: AffiliateReferralMetricSummary;
+  daily: AffiliateReferralDailyPoint[];
+  topLandingPages: AffiliateReferralBreakdown[];
+  topReferrers: AffiliateReferralBreakdown[];
+  recentClicks: AffiliateRecentReferralClick[];
 }

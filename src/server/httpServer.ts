@@ -2185,6 +2185,81 @@ export function createMonitorServer(
         return;
       }
 
+      if (url.pathname === "/api/internal/affiliate/referral-click" && request.method === "POST") {
+        if (!affiliateServiceRequestAllowed(request, config)) {
+          json(response, 401, { error: "Affiliate service authentication failed" });
+          return;
+        }
+        if (!affiliates || !config.affiliateServiceSecret) {
+          json(response, 503, { error: "The affiliate platform is not configured" });
+          return;
+        }
+        let payload: Record<string, unknown>;
+        try { payload = JSON.parse(await readBody(request)) as Record<string, unknown>; }
+        catch { json(response, 400, { error: "Invalid request" }); return; }
+
+        const couponCode = typeof payload.coupon === "string"
+          ? payload.coupon.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 120)
+          : "";
+        const visitorId = typeof payload.visitorId === "string" ? payload.visitorId.trim().slice(0, 200) : "";
+        const eventId = typeof payload.eventId === "string" ? payload.eventId.trim().slice(0, 100) : "";
+        const userAgent = typeof payload.userAgent === "string"
+          ? payload.userAgent.slice(0, 500)
+          : firstHeaderValue(request.headers["user-agent"]);
+        if (!couponCode || (eventId && !/^[a-z0-9_-]{16,100}$/i.test(eventId))) {
+          json(response, 400, { error: "The affiliate click is invalid" });
+          return;
+        }
+
+        const now = new Date();
+        const suppliedDate = typeof payload.occurredAt === "string" ? new Date(payload.occurredAt) : now;
+        const occurredAt = Number.isFinite(suppliedDate.getTime()) &&
+          Math.abs(now.getTime() - suppliedDate.getTime()) <= 86_400_000
+          ? suppliedDate
+          : now;
+        const rawPageUrl = typeof payload.pageUrl === "string" ? payload.pageUrl.slice(0, 2_000) : "";
+        const rawPath = typeof payload.path === "string" ? payload.path.slice(0, 500) : "";
+        let landingPath = rawPath.startsWith("/") ? rawPath.split(/[?#]/, 1)[0] || "/" : "/";
+        if (rawPageUrl) {
+          try {
+            const page = new URL(rawPageUrl);
+            if (["phaseonelabz.com", "www.phaseonelabz.com", "localhost", "127.0.0.1"].includes(page.hostname.toLowerCase())) {
+              landingPath = page.pathname.slice(0, 500) || "/";
+            }
+          } catch { /* The sanitized path remains the safe fallback. */ }
+        }
+        let referrerHost = "";
+        if (typeof payload.referrer === "string" && payload.referrer.trim()) {
+          try {
+            referrerHost = new URL(payload.referrer.trim()).hostname.toLowerCase().replace(/^www\./, "").slice(0, 255);
+          } catch { /* Invalid referrers are treated as direct traffic. */ }
+        }
+        const deviceType = /ipad|tablet/i.test(userAgent)
+          ? "tablet"
+          : /mobile|iphone|android/i.test(userAgent)
+            ? "mobile"
+            : userAgent
+              ? "desktop"
+              : "unknown";
+        const visitorSeed = visitorId || `${requestIp(request, config.trustProxy)}|${userAgent}`;
+        const visitorHash = createHash("sha256")
+          .update(`${config.affiliateServiceSecret}|${visitorSeed}`)
+          .digest("hex");
+        const eventSeed = eventId || `${visitorHash}|${Math.floor(occurredAt.getTime() / 1_800_000)}`;
+        const eventKey = createHash("sha256")
+          .update(`${couponCode}|${eventSeed}`)
+          .digest("hex");
+        const saved = await affiliates.recordReferralClick({
+          couponCode, visitorHash, eventKey, landingPath, referrerHost, deviceType, occurredAt,
+        });
+        json(response, 200, {
+          accepted: true,
+          recorded: Boolean(saved?.recorded),
+          duplicate: Boolean(saved && !saved.recorded),
+        });
+        return;
+      }
+
       if (url.pathname === "/api/internal/affiliate/storefront-dashboard" && request.method === "POST") {
         if (!affiliateServiceRequestAllowed(request, config)) {
           json(response, 401, { error: "Affiliate service authentication failed" });
