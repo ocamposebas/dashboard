@@ -5,6 +5,8 @@ import "./fulfillment.css";
 import "./clean-ui.css";
 import "./finance.css";
 import "./tiktok-integration.css";
+import "./bulk-orders.css";
+import { initBulkOrders, loadBulkOrders } from "./bulk-orders";
 import { initAffiliateAdmin, loadAffiliateAdmin } from "./affiliates-admin";
 import type { AffiliateCommissionSummary } from "../shared/affiliates";
 import {
@@ -9186,6 +9188,7 @@ const viewNames: Record<string, string> = {
   overview: "Overview",
   finance: "Finance",
   orders: "Orders",
+  "bulk-orders": "Bulk Orders",
   insurance: "Insurance money collected",
   products: "Products",
   fulfillment: "Fulfillment",
@@ -9394,6 +9397,7 @@ function navigate(view: string): void {
   if (view === "customers") void loadCustomerDirectory();
   if (view === "finance") void loadFinance();
   if (view === "insurance") void loadInsuranceFund();
+  if (view === "bulk-orders") void loadBulkOrders();
   if (view === "affiliates") void loadAffiliateAdmin();
   if (view === "marketing") void loadMarketingEmailCenter();
   if (view === "loyalty") void loadLoyalty();
@@ -12410,6 +12414,7 @@ document.addEventListener("keydown", (event) => {
 const initialView = location.hash.slice(1);
 loadSavedSettings();
 initAffiliateAdmin();
+initBulkOrders();
 hydrateFastStatisticPreviews();
 renderOverviewFinancials();
 renderInsuranceFund();

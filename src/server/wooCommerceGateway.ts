@@ -2177,6 +2177,24 @@ export class WooCommerceGateway {
     };
   }
 
+  async getBulkOrdersMigrationExport(sharedSecret: string): Promise<Record<string, unknown>> {
+    const storefront = (process.env.BULK_STOREFRONT_URL?.trim() || "https://phaseonelabz.com").replace(/\/$/, "");
+    const response = await fetch(`${storefront}/api/bulk/migration-export`, {
+      method: "POST",
+      headers: { Accept: "application/json", "X-PhaseOne-Bulk-Service": sharedSecret, "User-Agent": "Phase One Operations Bulk Migration" },
+      signal: AbortSignal.timeout(30_000),
+    });
+    const raw = await response.text();
+    let payload: unknown;
+    try { payload = raw ? JSON.parse(raw) : {}; }
+    catch { throw new CommerceServiceError(response.status || 502, "bulk_migration_invalid", "Bulk migration returned invalid JSON"); }
+    if (!response.ok) {
+      const value = record(payload);
+      throw new CommerceServiceError(response.status, String(value.code || "bulk_migration_failed"), String(value.error || value.message || "Bulk migration failed"));
+    }
+    return record(payload);
+  }
+
   async saveCoa(input: CommerceCoaWrite): Promise<CommerceCoa> {
     const payload = await this.requestRoute(`/wp-json/phaseone-ops/v1/coas/${input.wpPostId}`, {
       method: "PUT",

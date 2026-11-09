@@ -28,6 +28,9 @@ import {
 import type { AppConfig } from "./config.js";
 import type { Database } from "./database.js";
 import { InsuranceFundRepository } from "./insuranceFundRepository.js";
+import { BulkOrderRepository } from "./bulkOrderRepository.js";
+import { BulkOrderService, BulkOrderServiceError } from "./bulkOrderService.js";
+import type { BulkCustomerIdentity, BulkProductRule } from "../shared/bulkOrders.js";
 import {
   MarketingEmailRepository,
   type MarketingContactInput,
@@ -279,6 +282,17 @@ function json(response: ServerResponse, statusCode: number, value: unknown): voi
   response.end(payload);
 }
 
+function bulkWire(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => bulkWire(item));
+  if (!value || typeof value !== "object" || value instanceof Date) return value;
+  const output: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    const wireKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+    output[wireKey] = bulkWire(item);
+  }
+  return output;
+}
+
 function loginHtml(nonce: string, errorKind: "invalid" | "limited" | null): string {
   const error = errorKind === "invalid"
     ? '<p class="error" role="alert">The username or password is incorrect.</p>'
@@ -410,6 +424,15 @@ function affiliateServiceRequestAllowed(request: IncomingMessage, config: AppCon
   return expectedDigest.equals(suppliedDigest);
 }
 
+function bulkOperationsRequestAllowed(request: IncomingMessage, config: AppConfig): boolean {
+  const expected = config.bulkOperationsSecret;
+  const supplied = firstHeaderValue(request.headers["x-phaseone-bulk-service"]);
+  if (!expected || !supplied) return false;
+  const expectedDigest = createHash("sha256").update(expected).digest();
+  const suppliedDigest = createHash("sha256").update(supplied).digest();
+  return expectedDigest.equals(suppliedDigest);
+}
+
 function normalizeOrigin(value: string): string | null {
   try {
     return new URL(value).origin;
@@ -515,6 +538,14 @@ export function createMonitorServer(
   const insuranceFund = dependencies.fulfillmentDatabase
     ? new InsuranceFundRepository(dependencies.fulfillmentDatabase)
     : undefined;
+  const bulkOrders = dependencies.fulfillmentDatabase && commerce
+    ? new BulkOrderService(
+        new BulkOrderRepository(dependencies.fulfillmentDatabase),
+        commerce,
+        config.sessionSecret,
+      )
+    : undefined;
+  const bulkAccessAttempts = new LoginAttemptThrottle();
   const marketingEmailRepository = dependencies.fulfillmentDatabase
     ? new MarketingEmailRepository(dependencies.fulfillmentDatabase)
     : undefined;
@@ -2182,6 +2213,99 @@ export function createMonitorServer(
         response.setHeader("ETag", `\"${document.sha256}\"`);
         if (request.method === "HEAD") response.end();
         else response.end(document.content);
+        return;
+      }
+
+      if (url.pathname.startsWith("/api/bulk-operations/")) {
+        if (!bulkOperationsRequestAllowed(request, config)) {
+          json(response, 401, { error: "Bulk service authentication failed" });
+          return;
+        }
+        if (!bulkOrders || !config.bulkOperationsSecret) {
+          json(response, 503, { error: "The custom Bulk Orders service is not configured" });
+          return;
+        }
+        let payload: Record<string, unknown> = {};
+        if (request.method !== "GET" && request.method !== "DELETE") {
+          try { payload = JSON.parse((await readBodyBuffer(request, 64 * 1024)).toString("utf8")) as Record<string, unknown>; }
+          catch { json(response, 400, { error: "Invalid JSON request" }); return; }
+        }
+        const identityValue = payload.identity && typeof payload.identity === "object" ? payload.identity as Record<string, unknown> : {};
+        const identity: BulkCustomerIdentity = {
+          customerId: Math.max(0, Math.floor(Number(identityValue.customerId || 0))),
+          email: String(identityValue.email || "").trim().toLowerCase().slice(0, 320),
+          displayName: String(identityValue.displayName || "").trim().slice(0, 190),
+          completedOrders: Math.max(0, Math.floor(Number(identityValue.completedOrders || 0))),
+        };
+        const sessionToken = firstHeaderValue(request.headers["x-phaseone-bulk-session"]);
+        const intentToken = firstHeaderValue(request.headers["x-phaseone-bulk-intent"]);
+        try {
+          if (url.pathname === "/api/bulk-operations/program" && request.method === "GET") {
+            json(response, 200, bulkWire({ success: true, program: await bulkOrders.program() })); return;
+          }
+          if (url.pathname === "/api/bulk-operations/customer-access" && request.method === "POST") {
+            if (!identity.customerId || !identity.email) { json(response, 401, { error: "A verified customer account is required" }); return; }
+            json(response, 200, bulkWire({ success: true, ...await bulkOrders.customerAccess(identity) })); return;
+          }
+          if (url.pathname === "/api/bulk-operations/access-request" && request.method === "POST") {
+            if (!identity.customerId || !identity.email) { json(response, 401, { error: "A verified customer account is required" }); return; }
+            const accessRequest = await bulkOrders.submitAccessRequest(identity, String(payload.note || ""));
+            await store.addNotification({ type: "system", severity: "info", title: `Bulk access requested by ${identity.displayName || identity.email}`, message: `${identity.completedOrders} completed order${identity.completedOrders === 1 ? "" : "s"} verified.`, actionView: "bulk-orders" });
+            json(response, 201, bulkWire({ success: true, request: accessRequest })); return;
+          }
+          if (url.pathname === "/api/bulk-operations/access" && request.method === "POST") {
+            const ip = requestIp(request, config.trustProxy);
+            const attempt = bulkAccessAttempts.beforeAttempt(ip, "bulk-code");
+            if (!attempt.allowed) { response.setHeader("Retry-After", String(attempt.retryAfterSeconds)); json(response, 429, { error: "Too many access attempts. Try again shortly." }); return; }
+            try {
+              const access = await bulkOrders.access(String(payload.code || ""), identity, ip, firstHeaderValue(request.headers["user-agent"]));
+              bulkAccessAttempts.clear(ip, "bulk-code");
+              json(response, 200, bulkWire({ success: true, token: access.token, maxAge: access.maxAge, expiresAt: access.expiresAt, accessSource: access.source }));
+            } catch (error: unknown) {
+              bulkAccessAttempts.recordFailure(ip, "bulk-code");
+              throw error;
+            }
+            return;
+          }
+          if (url.pathname === "/api/bulk-operations/session" && request.method === "POST") {
+            const session = await bulkOrders.ensureSession(sessionToken, identity, requestIp(request, config.trustProxy), firstHeaderValue(request.headers["user-agent"]));
+            json(response, 200, bulkWire({ success: true, authorized: true, accessMode: "private", token: session.token, maxAge: session.maxAge, expiresAt: session.expiresAt, accessSource: session.source })); return;
+          }
+          if (url.pathname === "/api/bulk-operations/session" && request.method === "DELETE") {
+            await bulkOrders.logout(sessionToken); json(response, 200, { success: true }); return;
+          }
+          if (url.pathname === "/api/bulk-operations/catalog" && ["GET", "POST"].includes(request.method || "")) {
+            const context = await bulkOrders.context(sessionToken, identity.customerId);
+            json(response, 200, bulkWire({ success: true, accessMode: "private", accessSource: context.session.source, ...(await bulkOrders.catalog()) })); return;
+          }
+          if (url.pathname === "/api/bulk-operations/quote" && request.method === "POST") {
+            await bulkOrders.context(sessionToken, identity.customerId); json(response, 200, bulkWire({ success: true, ...await bulkOrders.quote(payload.items) })); return;
+          }
+          if (url.pathname === "/api/bulk-operations/checkout-intent" && request.method === "POST") {
+            const intent = await bulkOrders.createIntent(sessionToken, identity, payload.items);
+            json(response, 201, bulkWire({ success: true, token: intent.token, intentId: intent.intentId, expiresAt: intent.expiresAt, maxAge: intent.maxAge, quote: intent.quote })); return;
+          }
+          if (url.pathname === "/api/bulk-operations/checkout-intent/resolve" && request.method === "POST") {
+            const resolved = await bulkOrders.resolveIntent(sessionToken, intentToken, identity);
+            json(response, 200, bulkWire({ success: true, intentId: Number(resolved.intent.id), customerId: Number(resolved.intent.customer_id), expiresAt: new Date(resolved.intent.expires_at).toISOString(), quote: resolved.quote })); return;
+          }
+          if (url.pathname === "/api/bulk-operations/checkout/claim" && request.method === "POST") {
+            if (!identity.customerId || !identity.email) { json(response, 401, { error: "A verified customer account is required" }); return; }
+            json(response, 200, bulkWire({ success: true, context: await bulkOrders.claimCheckout(sessionToken, intentToken, identity) })); return;
+          }
+          if (url.pathname === "/api/bulk-operations/checkout/complete" && request.method === "POST") {
+            const complete = await bulkOrders.completeCheckout(Math.floor(Number(payload.intentId)), Math.floor(Number(payload.orderId)));
+            json(response, complete ? 200 : 409, complete ? { success: true } : { error: "The Bulk checkout could not be finalized" }); return;
+          }
+          if (url.pathname === "/api/bulk-operations/checkout/release" && request.method === "POST") {
+            await bulkOrders.releaseCheckout(Math.floor(Number(payload.intentId))); json(response, 200, { success: true }); return;
+          }
+          json(response, 404, { error: "Bulk service endpoint not found" });
+        } catch (error: unknown) {
+          const status = error instanceof BulkOrderServiceError ? error.status : 500;
+          if (!(error instanceof BulkOrderServiceError)) console.error("Bulk operations request failed", error);
+          json(response, status, { error: error instanceof Error ? error.message : "Bulk Orders is temporarily unavailable", code: error instanceof BulkOrderServiceError ? error.code : "bulk_internal_error" });
+        }
         return;
       }
 
@@ -4476,6 +4600,83 @@ export function createMonitorServer(
           }
         } catch (error: unknown) {
           fulfillmentError(response, error, "The test label could not be opened");
+        }
+        return;
+      }
+
+      if (url.pathname.startsWith("/api/bulk-orders")) {
+        if (!bulkOrders) { json(response, 503, { error: "The custom Bulk Orders service is not configured" }); return; }
+        if (!canOperate) { json(response, 403, { error: "Operations access is required" }); return; }
+        let payload: Record<string, unknown> = {};
+        if (request.method !== "GET" && request.method !== "DELETE") {
+          if (!isLoginOriginAllowed(request, config)) { json(response, 403, { error: "Origin not allowed" }); return; }
+          try { payload = JSON.parse((await readBodyBuffer(request, 256 * 1024)).toString("utf8")) as Record<string, unknown>; }
+          catch { json(response, 400, { error: "Invalid JSON request" }); return; }
+        }
+        const actor = `${currentUser.displayName} (${currentUser.username})`;
+        try {
+          if (url.pathname === "/api/bulk-orders" && request.method === "GET") {
+            json(response, 200, { workspace: await bulkOrders.adminWorkspace(), canManage: canAdminister }); return;
+          }
+          if (url.pathname === "/api/bulk-orders/catalog" && request.method === "GET") {
+            json(response, 200, { products: await bulkOrders.adminCatalog() }); return;
+          }
+          if (!canAdminister) { json(response, 403, { error: "Administrator access is required to change Bulk Orders" }); return; }
+          if (url.pathname === "/api/bulk-orders/settings" && request.method === "POST") {
+            const settings = await bulkOrders.saveSettings(payload, actor, payload.expectedRevision === undefined ? undefined : Math.floor(Number(payload.expectedRevision)));
+            json(response, 200, { saved: true, settings }); return;
+          }
+          if (url.pathname === "/api/bulk-orders/rules" && request.method === "POST") {
+            const rule = await bulkOrders.saveRule(payload as Partial<BulkProductRule>, actor);
+            json(response, 200, { saved: true, rule }); return;
+          }
+          const deleteRuleMatch = url.pathname.match(/^\/api\/bulk-orders\/rules\/(\d+)$/);
+          if (deleteRuleMatch && request.method === "DELETE") {
+            const deleted = await bulkOrders.deleteRule(Number(deleteRuleMatch[1]), actor);
+            json(response, deleted ? 200 : 404, deleted ? { deleted: true } : { error: "Bulk product rule not found" }); return;
+          }
+          if (url.pathname === "/api/bulk-orders/codes" && request.method === "POST") {
+            const result = await bulkOrders.createAccessCode({ expiresAt: payload.expiresAt ? String(payload.expiresAt) : null, usageLimit: payload.usageLimit ? Number(payload.usageLimit) : null, notes: String(payload.notes || "") }, actor);
+            json(response, 201, { created: true, code: result.code, record: result.record }); return;
+          }
+          const codeMatch = url.pathname.match(/^\/api\/bulk-orders\/codes\/(\d+)$/);
+          if (codeMatch && request.method === "POST") {
+            const status = payload.status === "paused" ? "paused" : payload.status === "revoked" ? "revoked" : "active";
+            const record = await bulkOrders.setAccessCodeStatus(Number(codeMatch[1]), status, actor);
+            json(response, record ? 200 : 404, record ? { saved: true, record } : { error: "Access code not found" }); return;
+          }
+          const requestMatch = url.pathname.match(/^\/api\/bulk-orders\/requests\/(\d+)$/);
+          if (requestMatch && request.method === "POST") {
+            const operation = payload.operation === "approve" ? "approve" : payload.operation === "reject" ? "reject" : payload.operation === "archive" ? "archive" : null;
+            if (!operation) { json(response, 400, { error: "Choose a valid request action" }); return; }
+            const accessRequest = await bulkOrders.reviewRequest(Number(requestMatch[1]), operation, String(payload.note || ""), actor);
+            json(response, 200, { saved: true, request: accessRequest }); return;
+          }
+          if (url.pathname === "/api/bulk-orders/tiers" && request.method === "POST") {
+            const identityValue = payload.identity && typeof payload.identity === "object" ? payload.identity as Record<string, unknown> : {};
+            const identity: BulkCustomerIdentity = { customerId: Math.floor(Number(identityValue.customerId)), email: String(identityValue.email || "").trim().toLowerCase(), displayName: String(identityValue.displayName || "").trim(), completedOrders: Math.max(0, Math.floor(Number(identityValue.completedOrders || 0))) };
+            const tier = await bulkOrders.grantTier(identity, String(payload.note || ""), actor);
+            json(response, 200, { saved: true, tier }); return;
+          }
+          const tierMatch = url.pathname.match(/^\/api\/bulk-orders\/tiers\/(\d+)\/revoke$/);
+          if (tierMatch && request.method === "POST") {
+            const tier = await bulkOrders.revokeTier(Number(tierMatch[1]), actor);
+            json(response, tier ? 200 : 404, tier ? { saved: true, tier } : { error: "Customer tier not found" }); return;
+          }
+          if (url.pathname === "/api/bulk-orders/migrate-wordpress" && request.method === "POST") {
+            if (!commerce) { json(response, 503, { error: "WordPress is not connected for the one-time import" }); return; }
+            if (!config.bulkOperationsSecret) { json(response, 503, { error: "The Bulk migration secret is not configured" }); return; }
+            const migration = await commerce.getBulkOrdersMigrationExport(config.bulkOperationsSecret);
+            const summary = await bulkOrders.importWordPress(migration, actor);
+            await store.addNotification({ type: "system", severity: "success", title: "Bulk Orders moved to the operations database", message: `${String(summary.importedRules || 0)} pricing rules and ${String(summary.importedTiers || 0)} customer tiers were imported.`, actionView: "bulk-orders" });
+            json(response, 200, { imported: true, summary }); return;
+          }
+          json(response, 404, { error: "Bulk Orders endpoint not found" });
+        } catch (error: unknown) {
+          const conflict = error instanceof Error && error.message === "revision_conflict";
+          const status = error instanceof BulkOrderServiceError ? error.status : conflict ? 409 : 500;
+          if (status === 500) console.error("Bulk Orders administration failed", error);
+          json(response, status, { error: conflict ? "Bulk settings changed in another session. Reload before saving." : error instanceof Error ? error.message : "Bulk Orders could not be updated" });
         }
         return;
       }

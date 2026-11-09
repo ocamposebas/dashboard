@@ -55,6 +55,7 @@ export interface AppConfig {
   fulfillmentDatabase?: DatabaseOptions;
   barcodeSigningSecret?: string;
   affiliateServiceSecret?: string;
+  bulkOperationsSecret?: string;
   evidenceStorage?: {
     path: string;
     encryptionSecret: string;
@@ -144,6 +145,15 @@ export function loadAffiliateServiceSecret(): string | undefined {
   if (!secret) return undefined;
   if (secret.length < 32) {
     throw new Error("AFFILIATE_SERVICE_SECRET must contain at least 32 characters");
+  }
+  return secret;
+}
+
+export function loadBulkOperationsSecret(): string | undefined {
+  const secret = process.env.BULK_OPERATIONS_SECRET?.trim() || process.env.AFFILIATE_SERVICE_SECRET?.trim() || "";
+  if (!secret) return undefined;
+  if (secret.length < 32) {
+    throw new Error("BULK_OPERATIONS_SECRET must contain at least 32 characters");
   }
   return secret;
 }
@@ -308,6 +318,7 @@ export function loadConfig(): AppConfig {
   const fulfillmentDatabase = loadFulfillmentDatabaseConfig();
   const barcodeSigningSecret = loadBarcodeSigningSecret();
   const affiliateServiceSecret = loadAffiliateServiceSecret();
+  const bulkOperationsSecret = loadBulkOperationsSecret();
   const evidenceStorage = loadEvidenceStorageConfig();
   const shipStation = loadShipStationConfig();
   if (evidenceStorage?.notificationMode === "outbox" && !wooCommerce) {
@@ -344,6 +355,7 @@ export function loadConfig(): AppConfig {
     ...(fulfillmentDatabase ? { fulfillmentDatabase } : {}),
     ...(barcodeSigningSecret ? { barcodeSigningSecret } : {}),
     ...(affiliateServiceSecret ? { affiliateServiceSecret } : {}),
+    ...(bulkOperationsSecret ? { bulkOperationsSecret } : {}),
     ...(evidenceStorage ? { evidenceStorage } : {}),
     shipStation,
   };

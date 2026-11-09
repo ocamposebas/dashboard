@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS bulk_wordpress_imports;
+DROP TABLE IF EXISTS bulk_order_events;
+DROP TABLE IF EXISTS bulk_checkout_intents;
+DROP TABLE IF EXISTS bulk_sessions;
+DROP TABLE IF EXISTS bulk_access_codes;
+DROP TABLE IF EXISTS bulk_access_requests;
+DROP TABLE IF EXISTS bulk_customer_tiers;
+DROP TABLE IF EXISTS bulk_product_rules;
+DROP TABLE IF EXISTS bulk_order_settings;
