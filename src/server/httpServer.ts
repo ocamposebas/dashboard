@@ -2300,6 +2300,13 @@ export function createMonitorServer(
           if (url.pathname === "/api/bulk-operations/checkout/release" && request.method === "POST") {
             await bulkOrders.releaseCheckout(Math.floor(Number(payload.intentId))); json(response, 200, { success: true }); return;
           }
+          if (url.pathname === "/api/bulk-operations/migrate-wordpress" && request.method === "POST") {
+            if (!commerce) { json(response, 503, { error: "WordPress is not connected for the one-time import" }); return; }
+            const migration = await commerce.getBulkOrdersMigrationExport(config.bulkOperationsSecret);
+            const summary = await bulkOrders.importWordPress(migration, "system:wordpress-bulk-migration");
+            await store.addNotification({ type: "system", severity: "success", title: "Bulk Orders moved to the operations database", message: `${String(summary.importedRules || 0)} pricing rules and ${String(summary.importedTiers || 0)} customer tiers were imported.`, actionView: "bulk-orders" });
+            json(response, 200, { imported: true, summary }); return;
+          }
           json(response, 404, { error: "Bulk service endpoint not found" });
         } catch (error: unknown) {
           const status = error instanceof BulkOrderServiceError ? error.status : 500;
