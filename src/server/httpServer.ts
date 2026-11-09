@@ -6604,23 +6604,43 @@ export function createMonitorServer(
         const packagingCost = Number(input.packagingCost);
         const feeRate = Number(input.feeRate);
         const affiliateRate = input.affiliateRate === undefined ? 0 : Number(input.affiliateRate);
+        const rawVariationCosts = Array.isArray(input.variationCosts) ? input.variationCosts : [];
+        const variationCosts = rawVariationCosts.slice(0, 100).flatMap((value) => {
+          if (!value || typeof value !== "object") return [];
+          const record = value as Record<string, unknown>;
+          const variationId = Number(record.productId);
+          const variationUnitCost = Number(record.unitCost);
+          if (!Number.isSafeInteger(variationId) || variationId <= 0 || !Number.isFinite(variationUnitCost)) return [];
+          return [{ productId: variationId, unitCost: variationUnitCost }];
+        });
         const validMoney = (value: number) =>
           Number.isFinite(value) && value >= 0 && value <= 1_000_000_000;
         if (
           !Number.isSafeInteger(productId) || productId <= 0 ||
           !validMoney(unitCost) || !validMoney(packagingCost) ||
           !Number.isFinite(feeRate) || feeRate < 0 || feeRate > 100 ||
-          !Number.isFinite(affiliateRate) || affiliateRate < 0 || affiliateRate > 100
+          !Number.isFinite(affiliateRate) || affiliateRate < 0 || affiliateRate > 100 ||
+          rawVariationCosts.length > 100 || variationCosts.length !== rawVariationCosts.length ||
+          variationCosts.some((item) => !validMoney(item.unitCost))
         ) {
           json(response, 400, { error: "The profitability values are invalid" });
           return;
         }
         await store.setProductCost(productId, { unitCost, packagingCost, feeRate, affiliateRate });
+        for (const variation of variationCosts) {
+          await store.setProductCost(variation.productId, {
+            unitCost: variation.unitCost,
+            packagingCost,
+            feeRate,
+            affiliateRate,
+          });
+        }
         await invalidateCommerceCache();
         json(response, 200, {
           saved: true,
           productId,
           cost: { unitCost, packagingCost, feeRate, affiliateRate },
+          variationsSaved: variationCosts.length,
         });
         return;
       }

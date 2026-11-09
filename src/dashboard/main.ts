@@ -1179,6 +1179,7 @@ let activeBarcodeLabel: BarcodeLabel | null = null;
 let labelPrintStep: "product" | "details" | "preview" = "product";
 let mediaSearch = "";
 let editingProductId: number | null = null;
+let productEditorMode: "catalog" | "costs" = "catalog";
 let activeProductTestingCost = 0;
 let activeProductTestingLot = "";
 let activeOrder: CommerceOrder | null = null;
@@ -3036,7 +3037,7 @@ async function loadOrderLedger(resetPage = false): Promise<void> {
       throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The order ledger is unavailable");
     }
     if (sequence !== orderLedgerLoadSequence) return;
-    orderLedgerData = {
+    const nextOrderLedger: OrderLedgerPayload = {
       connected: payload.connected !== false,
       orders: payload.orders as CommerceOrder[],
       affiliateCommissions: Array.isArray(payload.affiliateCommissions) ? payload.affiliateCommissions as AffiliateCommissionSummary[] : [],
@@ -3044,11 +3045,12 @@ async function loadOrderLedger(resetPage = false): Promise<void> {
       perPage: Math.max(1, Number(payload.perPage) || orderLedgerPageSize),
       total: Math.max(0, Number(payload.total) || 0),
       totalPages: Math.max(0, Number(payload.totalPages) || 0),
-      generatedAt: typeof payload.generatedAt === "string" ? payload.generatedAt : undefined,
+      ...(typeof payload.generatedAt === "string" ? { generatedAt: payload.generatedAt } : {}),
     };
-    orderLedgerPage = orderLedgerData.page;
-    if (orderLedgerData.totalPages > 0 && orderLedgerPage > orderLedgerData.totalPages) {
-      orderLedgerPage = orderLedgerData.totalPages;
+    orderLedgerData = nextOrderLedger;
+    orderLedgerPage = nextOrderLedger.page;
+    if (nextOrderLedger.totalPages > 0 && orderLedgerPage > nextOrderLedger.totalPages) {
+      orderLedgerPage = nextOrderLedger.totalPages;
       void loadOrderLedger(false);
       return;
     }
@@ -4120,9 +4122,9 @@ function productRow(product: CommerceProduct): string {
     : `${formatNumber(product.stockQuantity)} units`;
   const lowStock = product.stockQuantity !== null && product.stockQuantity < 5;
   const cost = product.type === "variable"
-    ? '<span class="cell-muted">By variant</span>'
+    ? '<button class="cost-action" type="button" data-edit-cost>By variant</button>'
     : product.cost
-      ? `<span class="cell-cost-stack"><b>${escapeHtml(formatCurrency(product.cost.unitCost))}</b>${product.testingCostPerUnit ? `<small>+ ${escapeHtml(formatCurrency(product.testingCostPerUnit))} test · Lot ${escapeHtml(product.testingLot || "current")}</small>` : ""}</span>`
+      ? `<button class="cost-action cell-cost-stack" type="button" data-edit-cost><b>${escapeHtml(formatCurrency(product.cost.unitCost))}</b>${product.testingCostPerUnit ? `<small>+ ${escapeHtml(formatCurrency(product.testingCostPerUnit))} test · Lot ${escapeHtml(product.testingLot || "current")}</small>` : ""}</button>`
       : '<button class="cost-action" type="button" data-edit-cost>Set cost</button>';
   const profit = product.type === "variable"
     ? '<span class="cell-muted">Open product</span>'
@@ -10446,7 +10448,9 @@ function populateProductWorkspace(product: CommerceProduct, variations: Commerce
   activeProductTestingLot = product.testingLot || "";
   requiredElement<HTMLElement>("#product-drawer-title").textContent = product.name;
   requiredElement<HTMLElement>("#product-record-badge").textContent = `#${product.id}`;
-  requiredElement<HTMLElement>("#product-drawer-subtitle").textContent = "Manage merchandising, inventory, economics and channel visibility.";
+  requiredElement<HTMLElement>("#product-drawer-subtitle").textContent = productEditorMode === "costs"
+    ? "Update internal costs without changing the live catalog, inventory, variations or SKU."
+    : "Manage merchandising, inventory, economics and channel visibility.";
   productNameInput.value = product?.name || "";
   productSkuInput.value = product?.sku || "";
   productStockInput.value = String(product?.stockQuantity ?? 0);
@@ -10481,12 +10485,15 @@ function populateProductWorkspace(product: CommerceProduct, variations: Commerce
     variantTable.hidden = variations.length === 0;
   }
   setProductSkuStatus("Existing SKU protected. It will remain unchanged when you save.", "available");
+  applyProductEditorMode();
   calculateProductProfit();
 }
 
 async function loadProductWorkspace(product: CommerceProduct): Promise<void> {
   productDetailLoading.hidden = false;
   productForm.classList.add("is-loading-detail");
+  const submitButton = productForm.querySelector<HTMLButtonElement>('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
   try {
     const response = await fetch(`/api/commerce/product?productId=${encodeURIComponent(String(product.id))}`, {
       credentials: "same-origin",
@@ -10503,18 +10510,44 @@ async function loadProductWorkspace(product: CommerceProduct): Promise<void> {
   } finally {
     productDetailLoading.hidden = true;
     productForm.classList.remove("is-loading-detail");
+    if (submitButton) submitButton.disabled = false;
   }
 }
 
-function openProductDrawer(product?: CommerceProduct): void {
+function applyProductEditorMode(): void {
+  const costsOnly = productEditorMode === "costs";
+  productDrawer.classList.toggle("is-cost-mode", costsOnly);
+  productNameInput.readOnly = costsOnly;
+  productSkuInput.readOnly = true;
+  productStockInput.readOnly = costsOnly;
+  productCategoryInput.disabled = costsOnly;
+  productStatusInput.disabled = costsOnly;
+  productPriceInput.readOnly = costsOnly;
+  productImagesInput.disabled = costsOnly;
+  productVariantsToggle.disabled = costsOnly;
+  variantAttributeInput.disabled = costsOnly;
+  variantOptionsInput.disabled = costsOnly;
+  requiredElement<HTMLButtonElement>("#choose-product-media").disabled = costsOnly;
+  requiredElement<HTMLButtonElement>("#generate-variants").disabled = costsOnly;
+  for (const button of variantRows.querySelectorAll<HTMLButtonElement>("[data-choose-variant-image]")) button.disabled = costsOnly;
+  for (const input of variantRows.querySelectorAll<HTMLInputElement>("[data-variant-price],[data-variant-stock]")) input.readOnly = costsOnly;
+  trashProductButton.hidden = costsOnly || !editingProductId;
+  const submitButton = productForm.querySelector<HTMLButtonElement>('button[type="submit"]');
+  if (submitButton) submitButton.textContent = costsOnly ? "Save costs only" : editingProductId ? "Save changes" : "Create product";
+}
+
+function openProductDrawer(product?: CommerceProduct, mode: "catalog" | "costs" = "catalog"): void {
+  productEditorMode = product ? mode : "catalog";
   editingProductId = product?.id ?? null;
   activeProductTestingCost = product?.testingCostPerUnit || 0;
   activeProductTestingLot = product?.testingLot || "";
-  productDrawer.classList.remove("is-cost-mode");
+  productDrawer.classList.toggle("is-cost-mode", productEditorMode === "costs");
   requiredElement<HTMLElement>("#product-drawer-title").textContent = product ? product.name : "Add product";
   requiredElement<HTMLElement>("#product-record-badge").textContent = product ? `#${product.id}` : "NEW";
   requiredElement<HTMLElement>("#product-drawer-subtitle").textContent = product
-    ? "Opening the complete product workspace…"
+    ? productEditorMode === "costs"
+      ? "Opening the protected unit-cost workspace…"
+      : "Opening the complete product workspace…"
     : "Create a complete, profitable and sales-ready catalog item.";
   productNameInput.value = product?.name || "";
   productSkuInput.value = product?.sku || "";
@@ -10526,7 +10559,7 @@ function openProductDrawer(product?: CommerceProduct): void {
   productPackagingInput.value = String(product?.cost?.packagingCost ?? 0);
   productFeeInput.value = String(product?.cost?.feeRate ?? 3.5);
   productAffiliateRateInput.value = String(product?.cost?.affiliateRate ?? 0);
-  trashProductButton.hidden = !product || Boolean(product.localDraft);
+  trashProductButton.hidden = productEditorMode === "costs" || !product || Boolean(product.localDraft);
   requiredElement<HTMLElement>(".product-lot-onboarding").hidden = Boolean(product);
   trashProductButton.classList.remove("is-confirming");
   trashProductButton.textContent = "Move to Trash";
@@ -10535,12 +10568,11 @@ function openProductDrawer(product?: CommerceProduct): void {
   productSkuInput.readOnly = true;
   productCategoryInput.disabled = false;
   productStatusInput.disabled = false;
-  const submitButton = productForm.querySelector<HTMLButtonElement>('button[type="submit"]');
-  if (submitButton) submitButton.textContent = product ? "Save changes" : "Create product";
   selectedProductMedia = [...(product?.images || [])];
   productImageFiles = [];
   renderProductImages();
   resetVariantBuilder();
+  applyProductEditorMode();
   calculateProductProfit();
   if (product) setProductSkuStatus("Existing SKU protected. It will remain unchanged when you save.", "available");
   else scheduleAutomaticSkuSuggestion(true);
@@ -10562,6 +10594,7 @@ function closeProductDrawer(): void {
   productImageUrls = [];
   selectedProductMedia = [];
   editingProductId = null;
+  productEditorMode = "catalog";
 }
 
 function renderMediaPicker(): void {
@@ -11527,53 +11560,73 @@ variantRows.addEventListener("input", (event) => {
 
 productForm.addEventListener("submit", (event) => {
   event.preventDefault();
+  const costsOnly = productEditorMode === "costs" && editingProductId !== null;
   const submitButton = productForm.querySelector<HTMLButtonElement>('button[type="submit"]');
   if (submitButton) submitButton.disabled = true;
-  if (!productNameInput.value.trim()) {
+  if (!costsOnly && !productNameInput.value.trim()) {
     showToast("Product name required", "Add a clear customer-facing product name.", false);
     productNameInput.focus();
     if (submitButton) submitButton.disabled = false;
     return;
   }
-  if (!productCategoryInput.value) {
+  if (!costsOnly && !productCategoryInput.value) {
     showToast("Category required", "Choose the catalog category for this product.", false);
     productCategoryInput.focus();
     if (submitButton) submitButton.disabled = false;
     return;
   }
-  const operation = fetch("/api/commerce/product", {
+  const variants = collectVariants();
+  const requestBody = costsOnly
+    ? {
+        productId: editingProductId,
+        unitCost: Number(productCostInput.value) || 0,
+        packagingCost: Number(productPackagingInput.value) || 0,
+        feeRate: Number(productFeeInput.value) || 0,
+        affiliateRate: Number(productAffiliateRateInput.value) || 0,
+        variationCosts: variants.flatMap((variant) => variant.id
+          ? [{ productId: variant.id, unitCost: variant.unitCost }]
+          : []),
+      }
+    : {
+        productId: editingProductId,
+        name: productNameInput.value.trim(),
+        sku: productSkuInput.value.trim(),
+        skuMode: editingProductId ? "preserve" : "auto",
+        stockQuantity: Number(productStockInput.value) || 0,
+        categoryId: Number(productCategoryInput.value) || 0,
+        visibility: productStatusInput.value,
+        regularPrice: Number(productPriceInput.value) || 0,
+        unitCost: Number(productCostInput.value) || 0,
+        packagingCost: Number(productPackagingInput.value) || 0,
+        feeRate: Number(productFeeInput.value) || 0,
+        affiliateRate: Number(productAffiliateRateInput.value) || 0,
+        images: selectedProductMedia.map((item) => item.id > 0 ? { id: item.id } : { src: item.src }),
+        attributeName: productVariantsToggle.checked ? variantAttributeInput.value.trim() : "",
+        variants: productVariantsToggle.checked ? variants : [],
+      };
+  const operation = fetch(costsOnly ? "/api/product-cost" : "/api/commerce/product", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({
-      productId: editingProductId,
-      name: productNameInput.value.trim(),
-      sku: productSkuInput.value.trim(),
-      skuMode: editingProductId ? "preserve" : "auto",
-      stockQuantity: Number(productStockInput.value) || 0,
-      categoryId: Number(productCategoryInput.value) || 0,
-      visibility: productStatusInput.value,
-      regularPrice: Number(productPriceInput.value) || 0,
-      unitCost: Number(productCostInput.value) || 0,
-      packagingCost: Number(productPackagingInput.value) || 0,
-      feeRate: Number(productFeeInput.value) || 0,
-      affiliateRate: Number(productAffiliateRateInput.value) || 0,
-      images: selectedProductMedia.map((item) => item.id > 0 ? { id: item.id } : { src: item.src }),
-      attributeName: productVariantsToggle.checked ? variantAttributeInput.value.trim() : "",
-      variants: productVariantsToggle.checked ? collectVariants() : [],
-    }),
+    body: JSON.stringify(requestBody),
   }).then(async (response) => {
     const payload: unknown = await response.json();
     if (!response.ok) throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The product could not be saved");
-    await loadCommerce();
-    inventoryOperations = undefined;
-    skuStockDetails.clear();
-    skuStockExpanded.clear();
-    if (productsWorkspace === "inventory") await loadInventoryOperations(true);
+    if (costsOnly) {
+      await loadCommerce().catch((error) => console.error("Catalog refresh after cost save failed", error));
+    } else {
+      await loadCommerce();
+      inventoryOperations = undefined;
+      skuStockDetails.clear();
+      skuStockExpanded.clear();
+      if (productsWorkspace === "inventory") await loadInventoryOperations(true);
+    }
     const warning = isRecord(payload) && typeof payload.warning === "string" ? payload.warning : "";
     showToast(
-      editingProductId ? "Product updated" : "Product created",
-      warning || (editingProductId
+      costsOnly ? "Costs updated" : editingProductId ? "Product updated" : "Product created",
+      warning || (costsOnly
+        ? "Unit economics were saved independently. The product SKU and live catalog were not touched."
+        : editingProductId
         ? "SKU, category, visibility, inventory, pricing and variants are now synchronized."
         : "The product is ready. Assign its shipping lot from Inventory once its COA is mapped and approved."),
       !warning,
@@ -11621,7 +11674,8 @@ requiredElement<HTMLElement>("#products-table-body").addEventListener("click", (
   const row = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-product-id]") : null;
   if (!row) return;
   const product = commerceData?.products.find((item) => item.id === Number(row.dataset.productId));
-  if (product) openProductDrawer(product);
+  const costsOnly = event.target instanceof Element && Boolean(event.target.closest("[data-edit-cost]"));
+  if (product) openProductDrawer(product, costsOnly ? "costs" : "catalog");
 });
 requiredElement<HTMLElement>("#products-table-body").addEventListener("keydown", (event) => {
   if (!(event instanceof KeyboardEvent) || !["Enter", " "].includes(event.key)) return;

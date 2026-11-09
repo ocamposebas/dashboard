@@ -247,6 +247,45 @@ test("derives variable parent availability from its saved child stock", async ()
   assert.equal(saved.stockStatus, "instock");
 });
 
+test("never sends an existing simple product SKU during cost or catalog edits", async () => {
+  let requestBody: Record<string, unknown> | undefined;
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      id: 920,
+      name: "KPV",
+      sku: "KPV",
+      type: "simple",
+      status: "publish",
+      catalog_visibility: "visible",
+      price: "50.00",
+      regular_price: "50.00",
+      stock_quantity: 10,
+      stock_status: "instock",
+      categories: [{ id: 16, name: "Research Peptides" }],
+      images: [],
+      variations: [],
+      attributes: [],
+    }), { status: 200 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example", consumerKey: "ck_test", consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  await gateway.saveProduct(920, {
+    name: "KPV",
+    sku: "KPV",
+    regularPrice: 50,
+    stockQuantity: 10,
+    categoryId: 16,
+    visibility: "public",
+    images: [],
+    variants: [],
+  });
+
+  assert.equal(requestBody?.sku, undefined);
+});
+
 test("assigns a SKU to a new variation but never revalidates an existing variation SKU", async () => {
   const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
   const productResponse = {
