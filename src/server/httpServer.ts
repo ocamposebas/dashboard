@@ -2302,7 +2302,10 @@ export function createMonitorServer(
           }
           if (url.pathname === "/api/bulk-operations/migrate-wordpress" && request.method === "POST") {
             if (!commerce) { json(response, 503, { error: "WordPress is not connected for the one-time import" }); return; }
-            const migration = await commerce.getBulkOrdersMigrationExport(config.bulkOperationsSecret);
+            const suppliedMigration = payload.migration && typeof payload.migration === "object" && !Array.isArray(payload.migration)
+              ? payload.migration as Record<string, unknown>
+              : null;
+            const migration = suppliedMigration || await commerce.getBulkOrdersMigrationExport(config.bulkOperationsSecret);
             const summary = await bulkOrders.importWordPress(migration, "system:wordpress-bulk-migration");
             await store.addNotification({ type: "system", severity: "success", title: "Bulk Orders moved to the operations database", message: `${String(summary.importedRules || 0)} pricing rules and ${String(summary.importedTiers || 0)} customer tiers were imported.`, actionView: "bulk-orders" });
             json(response, 200, { imported: true, summary }); return;
