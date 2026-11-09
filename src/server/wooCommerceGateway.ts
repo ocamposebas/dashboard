@@ -1885,9 +1885,14 @@ export class WooCommerceGateway {
   async saveProduct(productId: number | null, input: CommerceProductWrite): Promise<CommerceProduct> {
     const variants = input.variants || [];
     const body: Record<string, unknown> = {
-      name: input.name, sku: input.sku, regular_price: input.regularPrice.toFixed(2), images: input.images,
+      name: input.name, regular_price: input.regularPrice.toFixed(2), images: input.images,
       categories: input.categoryId > 0 ? [{ id: input.categoryId }] : [],
       ...visibilityPayload(input.visibility),
+      // SKU fields are immutable in the operations UI. Re-sending a legacy
+      // SKU during an unrelated cost or inventory edit makes WooCommerce run
+      // duplicate validation again and can reject the product against one of
+      // its own historical/variation records. Only assign SKUs on creation.
+      ...(productId ? {} : { sku: input.sku }),
     };
     if (variants.length) {
       body.type = "variable";
@@ -1903,9 +1908,10 @@ export class WooCommerceGateway {
     }));
     for (const variant of variants) {
       const variationBody: Record<string, unknown> = {
-        sku: variant.sku, regular_price: variant.price.toFixed(2), manage_stock: true,
+        regular_price: variant.price.toFixed(2), manage_stock: true,
         stock_quantity: Math.max(0, Math.floor(variant.stock)),
         attributes: [{ name: input.attributeName || "Option", option: variant.option }],
+        ...(variant.id ? {} : { sku: variant.sku }),
         ...(variant.imageId ? { image: { id: variant.imageId } } : {}),
       };
       await this.request(`products/${saved.id}/variations${variant.id ? `/${variant.id}` : ""}`, {

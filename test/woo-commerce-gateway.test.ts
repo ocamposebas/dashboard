@@ -237,11 +237,71 @@ test("derives variable parent availability from its saved child stock", async ()
   });
 
   assert.equal(requests.length, 4);
+  assert.equal(requests[0]?.body.sku, undefined);
   assert.equal(requests[0]?.body.manage_stock, false);
   assert.equal(requests[0]?.body.stock_status, "instock");
   assert.equal(requests[0]?.body.stock_quantity, undefined);
+  assert.equal(requests[1]?.body.sku, undefined);
+  assert.equal(requests[2]?.body.sku, undefined);
   assert.deepEqual(requests.at(-1)?.body, { manage_stock: false, stock_status: "instock" });
   assert.equal(saved.stockStatus, "instock");
+});
+
+test("assigns a SKU to a new variation but never revalidates an existing variation SKU", async () => {
+  const requests: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const productResponse = {
+    id: 810,
+    name: "KPV",
+    sku: "KPV",
+    type: "variable",
+    status: "publish",
+    catalog_visibility: "visible",
+    price: "50.00",
+    regular_price: "50.00",
+    stock_quantity: null,
+    stock_status: "instock",
+    categories: [{ id: 16, name: "Research Peptides" }],
+    images: [],
+    variations: [811, 812],
+    attributes: [{ name: "MG", options: ["10MG", "30MG"] }],
+  };
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    const body = JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
+    requests.push({ path: url.pathname, body });
+    if (url.pathname.includes("/variations")) {
+      return new Response(JSON.stringify({
+        id: url.pathname.endsWith("/811") ? 811 : 812,
+        ...body,
+        price: body.regular_price,
+        stock_status: "instock",
+        images: [],
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify(productResponse), { status: 200 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example", consumerKey: "ck_test", consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  await gateway.saveProduct(810, {
+    name: "KPV",
+    sku: "KPV",
+    regularPrice: 50,
+    stockQuantity: 0,
+    categoryId: 16,
+    visibility: "public",
+    images: [],
+    attributeName: "MG",
+    variants: [
+      { id: 811, option: "10MG", sku: "KPV-10MG", price: 50, stock: 5 },
+      { option: "30MG", sku: "KPV-30MG", price: 65, stock: 5 },
+    ],
+  });
+
+  assert.equal(requests[0]?.body.sku, undefined);
+  assert.equal(requests[1]?.body.sku, undefined);
+  assert.equal(requests[2]?.body.sku, "KPV-30MG");
 });
 
 test("preserves WooCommerce duplicate-SKU details as a safe catalog error", async () => {
