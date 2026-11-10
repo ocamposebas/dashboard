@@ -708,6 +708,9 @@ interface SiteControls {
       href: string;
       placement: "primary" | "shop";
       enabled: boolean;
+      categoryId?: number;
+      categoryName?: string;
+      categorySlug?: string;
     }>;
   };
 }
@@ -7892,20 +7895,40 @@ function navigationItemsFromEditor(): NavigationEditorItem[] {
     href: row.querySelector<HTMLInputElement>("[data-navigation-href]")?.value.trim() || "",
     placement: row.querySelector<HTMLSelectElement>("[data-navigation-placement]")?.value === "primary" ? "primary" : "shop",
     enabled: row.querySelector<HTMLInputElement>("[data-navigation-enabled]")?.checked !== false,
+    ...(Number(row.dataset.navigationCategoryId) > 0
+      ? {
+          categoryId: Number(row.dataset.navigationCategoryId),
+          categoryName: row.dataset.navigationCategoryName || "",
+          categorySlug: row.dataset.navigationCategorySlug || "",
+        }
+      : {}),
   }));
+}
+
+function navigationCategorySlug(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("en")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 180);
 }
 
 function renderNavigationEditor(items: NavigationEditorItem[]): void {
   const host = requiredElement<HTMLElement>("#navigation-editor-list");
   const empty = requiredElement<HTMLElement>("#navigation-editor-empty");
   const count = requiredElement<HTMLElement>("#navigation-item-count");
-  host.innerHTML = items.map((item, index) => `<article class="navigation-editor-row" data-navigation-row data-navigation-id="${escapeHtml(item.id)}">
+  host.innerHTML = items.map((item, index) => {
+    const automaticHref = !item.categoryId && (!item.href || item.href === "/research-peptides/");
+    return `<article class="navigation-editor-row" data-navigation-row data-navigation-id="${escapeHtml(item.id)}" data-navigation-auto-href="${automaticHref ? "true" : "false"}" data-navigation-category-id="${item.categoryId || ""}" data-navigation-category-name="${escapeHtml(item.categoryName || "")}" data-navigation-category-slug="${escapeHtml(item.categorySlug || "")}">
     <label class="navigation-enabled" title="Show this item"><input type="checkbox" data-navigation-enabled aria-label="Show ${escapeHtml(item.label || `menu item ${index + 1}`)}"${item.enabled ? " checked" : ""} /></label>
-    <label><span>Menu label</span><input type="text" maxlength="48" data-navigation-label value="${escapeHtml(item.label)}" placeholder="New category" /></label>
-    <label><span>Destination</span><input type="text" maxlength="300" data-navigation-href value="${escapeHtml(item.href)}" placeholder="/research-peptides/category/" /></label>
+    <label><span>Category name</span><input type="text" maxlength="48" data-navigation-label value="${escapeHtml(item.label)}" placeholder="New category" /></label>
+    <label><span>Store page</span><input type="text" maxlength="300" data-navigation-href value="${escapeHtml(item.href)}" placeholder="Created from the category name" /><small>${item.categoryId ? `Catalog connected · ID ${item.categoryId}` : "The catalog category is created when published."}</small></label>
     <label><span>Location</span><select data-navigation-placement><option value="shop"${item.placement === "shop" ? " selected" : ""}>Shop submenu</option><option value="primary"${item.placement === "primary" ? " selected" : ""}>Main navigation</option></select></label>
     <div class="navigation-row-actions"><button type="button" data-navigation-move="up" aria-label="Move ${escapeHtml(item.label || "item")} up"${index === 0 ? " disabled" : ""}>↑</button><button type="button" data-navigation-move="down" aria-label="Move ${escapeHtml(item.label || "item")} down"${index === items.length - 1 ? " disabled" : ""}>↓</button><button type="button" data-navigation-remove aria-label="Remove ${escapeHtml(item.label || "item")}">×</button></div>
-  </article>`).join("");
+  </article>`;
+  }).join("");
   empty.hidden = items.length > 0;
   count.textContent = `${items.length} item${items.length === 1 ? "" : "s"}`;
 }
@@ -7915,7 +7938,7 @@ function addNavigationEditorItem(): void {
   items.push({
     id: `menu-${Date.now().toString(36)}`,
     label: "",
-    href: "/research-peptides/",
+    href: "",
     placement: "shop",
     enabled: true,
   });
@@ -8265,6 +8288,7 @@ async function saveSiteControls(): Promise<void> {
     } else {
       await loadExtensions();
     }
+    await loadCommerce();
     showToast(
       promotionEnabled && selectedPromoType === "product"
         ? "Promotion is live"
@@ -10928,6 +10952,22 @@ requiredElement<HTMLElement>("[data-view-panel='site-controls']").addEventListen
   }
 });
 requiredElement<HTMLButtonElement>("#navigation-add-item").addEventListener("click", addNavigationEditorItem);
+requiredElement<HTMLElement>("#navigation-editor-list").addEventListener("input", (event) => {
+  const input = event.target instanceof HTMLInputElement ? event.target : null;
+  const row = input?.closest<HTMLElement>("[data-navigation-row]");
+  if (!input || !row) return;
+  if (input.hasAttribute("data-navigation-href")) {
+    row.dataset.navigationAutoHref = "false";
+    row.dataset.navigationCategoryId = "";
+    row.dataset.navigationCategoryName = "";
+    row.dataset.navigationCategorySlug = "";
+    return;
+  }
+  if (!input.hasAttribute("data-navigation-label") || row.dataset.navigationAutoHref !== "true") return;
+  const slug = navigationCategorySlug(input.value);
+  const href = row.querySelector<HTMLInputElement>("[data-navigation-href]");
+  if (href) href.value = slug ? `/research-peptides/${slug}/` : "";
+});
 requiredElement<HTMLElement>("#navigation-editor-list").addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button") : null;
   if (!target) return;

@@ -1838,6 +1838,85 @@ export class WooCommerceGateway {
     });
   }
 
+  async ensureProductCategory(input: {
+    id?: number | undefined;
+    name: string;
+    slug: string;
+  }): Promise<CommerceProductCategory> {
+    const [category] = await this.ensureProductCategories([input]);
+    if (!category) throw new Error("The catalog category could not be resolved");
+    return category;
+  }
+
+  async ensureProductCategories(inputs: Array<{
+    id?: number | undefined;
+    name: string;
+    slug: string;
+  }>): Promise<CommerceProductCategory[]> {
+    let categories = await this.listProductCategories();
+    const resolved: CommerceProductCategory[] = [];
+
+    for (const input of inputs) {
+      const name = input.name.trim();
+      const slug = input.slug.trim().toLowerCase();
+      if (!name || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+        throw new Error("A valid catalog category name and destination are required");
+      }
+      const normalizedName = name.toLocaleLowerCase("en");
+      const findExisting = () => categories.find((category) => input.id && category.id === input.id)
+        || categories.find((category) => category.slug.toLocaleLowerCase("en") === slug)
+        || categories.find((category) => category.name.toLocaleLowerCase("en") === normalizedName);
+      let existing = findExisting();
+      if (existing && input.id === existing.id && (
+        existing.name !== name || existing.slug.toLocaleLowerCase("en") !== slug
+      )) {
+        const updated = record(await this.request(`products/categories/${existing.id}`, {
+          method: "PUT",
+          body: { name, slug },
+        }));
+        existing = {
+          id: existing.id,
+          name: decodedText(updated.name) || name,
+          slug: text(updated.slug) || slug,
+          count: Math.max(0, Math.trunc(number(updated.count) || existing.count)),
+          parentId: Math.max(0, Math.trunc(number(updated.parent) || existing.parentId)),
+        };
+        categories = categories.map((category) => category.id === existing!.id ? existing! : category);
+      }
+      if (existing) {
+        resolved.push(existing);
+        continue;
+      }
+
+      try {
+        const category = record(await this.request("products/categories", {
+          method: "POST",
+          body: { name, slug },
+        }));
+        const id = Math.trunc(number(category.id));
+        if (id <= 0) throw new Error("WooCommerce did not return the created catalog category");
+        const created = {
+          id,
+          name: decodedText(category.name) || name,
+          slug: text(category.slug) || slug,
+          count: Math.max(0, Math.trunc(number(category.count))),
+          parentId: Math.max(0, Math.trunc(number(category.parent))),
+        };
+        categories = [...categories, created];
+        resolved.push(created);
+      } catch (error: unknown) {
+        // A second worker may have created the same category between the lookup
+        // and the write. Resolve that harmless race to the canonical record.
+        categories = await this.listProductCategories();
+        const concurrent = findExisting();
+        if (!concurrent) throw error;
+        resolved.push(concurrent);
+      }
+    }
+
+    return resolved;
+  }
+
   async findProductsBySku(sku: string): Promise<CommerceProduct[]> {
     const normalized = sku.trim();
     if (!normalized) return [];

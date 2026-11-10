@@ -162,6 +162,7 @@ import { LoginAttemptThrottle } from "./loginAttemptThrottle.js";
 import {
   buildIndependentSiteControls,
   defaultIndependentSiteControls,
+  navigationCatalogSlug,
   publicSiteControls,
   type IndependentSiteControls,
   type IndependentSiteControlsWrite,
@@ -1072,6 +1073,9 @@ export function createMonitorServer(
   let reconciledProductCampaign: { revision: number; controls: IndependentSiteControls } | undefined;
   let productCampaignReconciliation: Promise<IndependentSiteControls> | undefined;
   let productCampaignRetryAt = 0;
+  let reconciledNavigationCategories: { revision: number; controls: IndependentSiteControls } | undefined;
+  let navigationCategoryReconciliation: Promise<IndependentSiteControls> | undefined;
+  let navigationCategoryRetryAt = 0;
 
   function salesReportPeriodKey(after: Date, before: Date): string {
     // v2 adds exact line-level profitability. Keeping it in the cache key avoids
@@ -1159,6 +1163,76 @@ export function createMonitorServer(
     return stored
       ? stored as IndependentSiteControls
       : defaultIndependentSiteControls();
+  }
+
+  async function synchronizeNavigationCategories(items: SiteNavigationItem[]): Promise<SiteNavigationItem[]> {
+    if (!commerce) return items;
+    const catalogItems = items.flatMap((item, index) => {
+      const slug = navigationCatalogSlug(item);
+      return slug ? [{ item, index, slug }] : [];
+    });
+    if (!catalogItems.length) return items;
+
+    const categories = await commerce.ensureProductCategories(catalogItems.map(({ item, slug }) => ({
+      ...(item.categoryId && item.categorySlug === slug ? { id: item.categoryId } : {}),
+      name: item.label,
+      slug,
+    })));
+    const synchronized = items.map((item) => ({ ...item }));
+    catalogItems.forEach(({ index }, categoryIndex) => {
+      const category = categories[categoryIndex];
+      if (!category) return;
+      synchronized[index] = {
+        ...synchronized[index]!,
+        href: `/research-peptides/${category.slug}/`,
+        categoryId: category.id,
+        categoryName: category.name,
+        categorySlug: category.slug,
+      };
+    });
+    return synchronized;
+  }
+
+  async function reconcilePublishedNavigationCategories(controls: IndependentSiteControls): Promise<IndependentSiteControls> {
+    if (!commerce) return controls;
+    if (reconciledNavigationCategories?.revision === controls.revision) return reconciledNavigationCategories.controls;
+    if (navigationCategoryReconciliation) return navigationCategoryReconciliation;
+    if (Date.now() < navigationCategoryRetryAt) return controls;
+
+    navigationCategoryReconciliation = (async () => {
+      const items = await synchronizeNavigationCategories(controls.navigation.items);
+      const changed = JSON.stringify(items) !== JSON.stringify(controls.navigation.items);
+      if (!changed) {
+        reconciledNavigationCategories = { revision: controls.revision, controls };
+        return controls;
+      }
+      const next = {
+        version: controls.version,
+        source: controls.source,
+        updatedBy: "Automatic catalog category synchronization",
+        promo: controls.promo,
+        maintenance: controls.maintenance,
+        navigation: { items },
+      };
+      const stored = (siteControlRepository
+        ? await siteControlRepository.save(next, controls.revision)
+        : await store.saveIndependentSiteControls(next)) as IndependentSiteControls;
+      await store.cacheIndependentSiteControls(stored).catch((error: unknown) => {
+        console.warn("Could not refresh the synchronized Site Controls cache", error);
+      });
+      await invalidateCommerceCache();
+      extensionsCache = undefined;
+      reconciledNavigationCategories = { revision: stored.revision, controls: stored };
+      return stored;
+    })().catch((error: unknown) => {
+      navigationCategoryRetryAt = Date.now() + 30_000;
+      console.error("Navigation catalog category synchronization failed", error);
+      return controls;
+    }).finally(() => {
+      navigationCategoryReconciliation = undefined;
+    });
+
+    return navigationCategoryReconciliation;
   }
 
   async function reconcilePublishedProductCampaign(controls: IndependentSiteControls): Promise<IndependentSiteControls> {
@@ -2121,7 +2195,7 @@ export function createMonitorServer(
           response.setHeader("Access-Control-Allow-Origin", normalizedOrigin);
           response.setHeader("Access-Control-Allow-Methods", "GET");
         }
-        const storedControls = await independentSiteControls();
+        const storedControls = await reconcilePublishedNavigationCategories(await independentSiteControls());
         const deliveryControls = reconciledProductCampaign?.revision === storedControls.revision
           ? reconciledProductCampaign.controls
           : storedControls;
@@ -4694,7 +4768,7 @@ export function createMonitorServer(
 
       if (url.pathname === "/api/site-controls" && request.method === "GET") {
         json(response, 200, {
-          siteControls: await independentSiteControls(),
+          siteControls: await reconcilePublishedNavigationCategories(await independentSiteControls()),
           source: "operations-control-plane",
           canManage: canOperate,
           storage: siteControlRepository ? "postgresql" : "redis-fallback",
@@ -5886,12 +5960,24 @@ export function createMonitorServer(
           }
           seenNavigationIds.add(id);
           seenNavigationHrefs.add(href.toLowerCase());
+          const requestedCategorySlug = navigationCatalogSlug({ href });
+          const storedCategorySlug = cleanText(item.categorySlug, 190).toLowerCase();
+          const categoryId = integer(item.categoryId, 0, Number.MAX_SAFE_INTEGER);
           navigationItems.push({
             id,
             label,
             href,
             placement: placement as SiteNavigationItem["placement"],
             enabled: item.enabled !== false,
+            ...(requestedCategorySlug && storedCategorySlug === requestedCategorySlug && categoryId > 0
+              ? {
+                  categoryId,
+                  categoryName: cleanText(item.categoryName, 190) || label,
+                  categorySlug: requestedCategorySlug,
+                }
+              : requestedCategorySlug
+                ? { categorySlug: requestedCategorySlug }
+                : {}),
           });
         }
         const siteControlsWrite: IndependentSiteControlsWrite = {
@@ -5942,6 +6028,12 @@ export function createMonitorServer(
           }
           let authoritativeProduct: CommerceProduct | null = null;
           let product: SiteControlProductSnapshot | null = null;
+          if (navigationProvided) {
+            if (!commerce || !config.wooCommerce) {
+              throw new Error("The live catalog must be connected before publishing catalog categories.");
+            }
+            siteControlsWrite.navigation.items = await synchronizeNavigationCategories(siteControlsWrite.navigation.items);
+          }
           if (siteControlsWrite.promo.type === "product" && siteControlsWrite.promo.productId > 0) {
             if (!commerce || !config.wooCommerce) {
               throw new Error("The live catalog must be connected before publishing a product campaign.");
@@ -6039,6 +6131,8 @@ export function createMonitorServer(
           const siteControls = stored;
           reconciledProductCampaign = undefined;
           productCampaignRetryAt = 0;
+          reconciledNavigationCategories = { revision: siteControls.revision, controls: siteControls };
+          navigationCategoryRetryAt = 0;
           await invalidateCommerceCache();
           await store.cacheIndependentSiteControls(siteControls).catch((error: unknown) => {
             console.warn("Could not refresh the Redis Site Controls cache", error);

@@ -17,6 +17,9 @@ export interface SiteNavigationItem {
   href: string;
   placement: "primary" | "shop";
   enabled: boolean;
+  categoryId?: number | undefined;
+  categoryName?: string | undefined;
+  categorySlug?: string | undefined;
 }
 
 export interface IndependentSiteControls {
@@ -122,6 +125,7 @@ const DEFAULT_NAVIGATION: SiteNavigationItem[] = [
     href: "/research-peptides/encapsulated-raws/",
     placement: "shop",
     enabled: true,
+    categorySlug: "encapsulated-raws",
   },
   {
     id: "research-atomizers",
@@ -129,8 +133,14 @@ const DEFAULT_NAVIGATION: SiteNavigationItem[] = [
     href: "/research-peptides/research-atomizers/",
     placement: "shop",
     enabled: true,
+    categorySlug: "research-atomizers",
   },
 ];
+
+export function navigationCatalogSlug(item: Pick<SiteNavigationItem, "href">): string | null {
+  const match = item.href.trim().match(/^\/research-peptides\/([a-z0-9]+(?:-[a-z0-9]+)*)\/?(?:[?#].*)?$/i);
+  return match?.[1]?.toLowerCase() || null;
+}
 
 export function defaultIndependentSiteControls(): IndependentSiteControls {
   return {

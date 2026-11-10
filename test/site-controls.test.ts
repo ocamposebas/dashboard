@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildIndependentSiteControls,
   defaultIndependentSiteControls,
+  navigationCatalogSlug,
   publicSiteControls,
   type IndependentSiteControlsWrite,
 } from "../src/server/siteControls.js";
@@ -58,6 +59,15 @@ test("independent Site Controls default to an open storefront", () => {
   assert.equal(value.revision, 0);
   assert.equal(value.version, "3.0");
   assert.equal(value.navigation.items.length, 2);
+});
+
+test("catalog navigation recognizes exact managed category pages", () => {
+  assert.equal(
+    navigationCatalogSlug({ href: "/research-peptides/research-atomizers/" }),
+    "research-atomizers",
+  );
+  assert.equal(navigationCatalogSlug({ href: "/research-peptides/" }), null);
+  assert.equal(navigationCatalogSlug({ href: "/account/" }), null);
 });
 
 test("a control-plane write does not require a WordPress response", () => {
