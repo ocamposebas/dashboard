@@ -160,6 +160,7 @@ interface CommerceVariation {
 interface CommerceProduct {
   id: number;
   name: string;
+  description: string;
   slug?: string;
   permalink?: string;
   sku: string;
@@ -1452,6 +1453,14 @@ function escapeHtml(value: string): string {
     '"': "&quot;",
     "'": "&#039;",
   })[character] || character);
+}
+
+function htmlToPlainText(value: string): string {
+  const element = document.createElement("div");
+  element.innerHTML = value;
+  for (const lineBreak of element.querySelectorAll("br")) lineBreak.replaceWith("\n");
+  for (const block of element.querySelectorAll("p,div,li,h1,h2,h3,h4,h5,h6")) block.append("\n");
+  return (element.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function rankLabels(values: string[]): Array<{ label: string; count: number }> {
@@ -4190,6 +4199,7 @@ function localDraftProducts(): CommerceProduct[] {
       return [{
         id: Number(draft.id) || -(index + 1),
         name: draft.name.trim(),
+        description: "",
         sku: typeof draft.sku === "string" ? draft.sku : "",
         type: "simple",
         status: draft.status === "ready" ? "ready" : "draft",
@@ -9404,6 +9414,7 @@ const productDrawer = requiredElement<HTMLElement>("#product-drawer");
 const drawerBackdrop = requiredElement<HTMLButtonElement>("#drawer-backdrop");
 const productForm = requiredElement<HTMLFormElement>("#product-form");
 const productNameInput = requiredElement<HTMLInputElement>("#product-name-input");
+const productDescriptionInput = requiredElement<HTMLTextAreaElement>("#product-description-input");
 const productSkuInput = requiredElement<HTMLInputElement>("#product-sku-input");
 const productSkuStatus = requiredElement<HTMLElement>("#product-sku-status");
 const productStockInput = requiredElement<HTMLInputElement>("#product-stock-input");
@@ -10317,14 +10328,14 @@ function renderProductImages(): void {
     `<figure class="product-image-item product-image-item--library"><img src="${escapeHtml(item.thumbnailUrl || item.src)}" data-fallback-src="${escapeHtml(item.src)}" alt="${escapeHtml(item.alt || item.name)}" loading="lazy" decoding="async" /><button type="button" data-remove-library-image="${index}" aria-label="Remove ${escapeHtml(item.name)}">×</button><small>LIBRARY</small></figure>`,
   );
   const local = productImageFiles.map((file, index) =>
-    `<figure class="product-image-item product-image-item--local"><img src="${productImageUrls[index]}" alt="${escapeHtml(file.name)}" /><button type="button" data-remove-product-image="${index}" aria-label="Remove ${escapeHtml(file.name)}">×</button><small>STAGED</small></figure>`,
+    `<figure class="product-image-item product-image-item--local"><img src="${productImageUrls[index]}" alt="${escapeHtml(file.name)}" /><button type="button" data-remove-product-image="${index}" aria-label="Remove ${escapeHtml(file.name)}">×</button><small>NEW</small></figure>`,
   );
   productImagePreview.innerHTML = [...saved, ...local].join("") || '<div class="product-media-empty"><span>▧</span><p>No images selected. Choose an asset from the media library.</p></div>';
 }
 
 function addProductImages(files: Iterable<File>): void {
   const supported = [...files].filter((file) =>
-    ["image/png", "image/jpeg", "image/webp"].includes(file.type),
+    ["image/png", "image/jpeg", "image/webp"].includes(file.type) && file.size > 0 && file.size <= 8 * 1024 * 1024,
   );
   const existing = new Set(productImageFiles.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
   const additions = supported.filter((file) => !existing.has(`${file.name}:${file.size}:${file.lastModified}`));
@@ -10332,7 +10343,7 @@ function addProductImages(files: Iterable<File>): void {
   productImageFiles = combined.slice(0, Math.max(0, 12 - selectedProductMedia.length));
   renderProductImages();
   if (supported.length < [...files].length) {
-    showToast("Some files were skipped", "Use PNG, JPG or WebP product images.", false);
+    showToast("Some files were skipped", "Use PNG, JPG or WebP images no larger than 8 MB each.", false);
   } else if (combined.length + selectedProductMedia.length > 12) {
     showToast("Image limit reached", "You can add up to twelve images per product.", false);
   }
@@ -10546,6 +10557,7 @@ function populateProductWorkspace(product: CommerceProduct, variations: Commerce
     ? "Update internal costs without changing the live catalog, inventory, variations or SKU."
     : "Manage merchandising, inventory, economics and channel visibility.";
   productNameInput.value = product?.name || "";
+  productDescriptionInput.value = product?.description ? htmlToPlainText(product.description) : "";
   productSkuInput.value = product?.sku || "";
   productStockInput.value = String(product?.stockQuantity ?? 0);
   renderProductCategoryOptions(product?.categoryId || 0, product?.category || "");
@@ -10612,6 +10624,7 @@ function applyProductEditorMode(): void {
   const costsOnly = productEditorMode === "costs";
   productDrawer.classList.toggle("is-cost-mode", costsOnly);
   productNameInput.readOnly = costsOnly;
+  productDescriptionInput.readOnly = costsOnly;
   productSkuInput.readOnly = true;
   productStockInput.readOnly = costsOnly;
   productCategoryInput.disabled = costsOnly;
@@ -10644,6 +10657,7 @@ function openProductDrawer(product?: CommerceProduct, mode: "catalog" | "costs" 
       : "Opening the complete product workspace…"
     : "Create a complete, profitable and sales-ready catalog item.";
   productNameInput.value = product?.name || "";
+  productDescriptionInput.value = product?.description ? htmlToPlainText(product.description) : "";
   productSkuInput.value = product?.sku || "";
   productStockInput.value = String(product?.stockQuantity ?? 0);
   renderProductCategoryOptions(product?.categoryId || 0, product?.category || "");
@@ -10658,7 +10672,7 @@ function openProductDrawer(product?: CommerceProduct, mode: "catalog" | "costs" 
   trashProductButton.classList.remove("is-confirming");
   trashProductButton.textContent = "Move to Trash";
   delete trashProductButton.dataset.confirming;
-  for (const input of [productNameInput, productStockInput, productPriceInput]) input.readOnly = false;
+  for (const input of [productNameInput, productDescriptionInput, productStockInput, productPriceInput]) input.readOnly = false;
   productSkuInput.readOnly = true;
   productCategoryInput.disabled = false;
   productStatusInput.disabled = false;
@@ -10673,8 +10687,7 @@ function openProductDrawer(product?: CommerceProduct, mode: "catalog" | "costs" 
   productDrawer.hidden = false;
   drawerBackdrop.hidden = false;
   document.body.classList.add("drawer-open");
-  if (product?.type === "variable" || product?.variationIds.length) void loadProductWorkspace(product);
-  else if (product) populateProductWorkspace(product);
+  if (product) void loadProductWorkspace(product);
   else productNameInput.focus();
 }
 
@@ -11690,58 +11703,89 @@ variantRows.addEventListener("input", (event) => {
   if (target?.matches("[data-variant-price],[data-variant-cost]")) calculateVariantProfits();
 });
 
-productForm.addEventListener("submit", (event) => {
+async function stageProductImage(file: File): Promise<{ src: string }> {
+  const response = await fetch("/api/commerce/product-media-stage", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": file.type,
+      "X-PhaseOne-File-Name": encodeURIComponent(file.name),
+    },
+    body: file,
+  });
+  const payload: unknown = await response.json();
+  if (!response.ok || !isRecord(payload) || typeof payload.src !== "string") {
+    throw new Error(isRecord(payload) && typeof payload.error === "string"
+      ? payload.error
+      : `${file.name} could not be uploaded`);
+  }
+  return { src: payload.src };
+}
+
+productForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const costsOnly = productEditorMode === "costs" && editingProductId !== null;
   const submitButton = productForm.querySelector<HTMLButtonElement>('button[type="submit"]');
-  if (submitButton) submitButton.disabled = true;
   if (!costsOnly && !productNameInput.value.trim()) {
     showToast("Product name required", "Add a clear customer-facing product name.", false);
     productNameInput.focus();
-    if (submitButton) submitButton.disabled = false;
     return;
   }
   if (!costsOnly && !productCategoryInput.value) {
     showToast("Category required", "Choose the catalog category for this product.", false);
     productCategoryInput.focus();
-    if (submitButton) submitButton.disabled = false;
     return;
   }
+  const originalSubmitLabel = submitButton?.textContent || "Save product";
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = productImageFiles.length ? "Uploading images…" : "Saving product…";
+  }
   const variants = collectVariants();
-  const requestBody = costsOnly
-    ? {
-        productId: editingProductId,
-        unitCost: Number(productCostInput.value) || 0,
-        packagingCost: Number(productPackagingInput.value) || 0,
-        feeRate: Number(productFeeInput.value) || 0,
-        affiliateRate: Number(productAffiliateRateInput.value) || 0,
-        variationCosts: variants.flatMap((variant) => variant.id
-          ? [{ productId: variant.id, unitCost: variant.unitCost }]
-          : []),
-      }
-    : {
-        productId: editingProductId,
-        name: productNameInput.value.trim(),
-        sku: productSkuInput.value.trim(),
-        skuMode: editingProductId ? "preserve" : "auto",
-        stockQuantity: Number(productStockInput.value) || 0,
-        categoryId: Number(productCategoryInput.value) || 0,
-        visibility: productStatusInput.value,
-        regularPrice: Number(productPriceInput.value) || 0,
-        unitCost: Number(productCostInput.value) || 0,
-        packagingCost: Number(productPackagingInput.value) || 0,
-        feeRate: Number(productFeeInput.value) || 0,
-        affiliateRate: Number(productAffiliateRateInput.value) || 0,
-        images: selectedProductMedia.map((item) => item.id > 0 ? { id: item.id } : { src: item.src }),
-        attributeName: productVariantsToggle.checked ? variantAttributeInput.value.trim() : "",
-        variants: productVariantsToggle.checked ? variants : [],
-      };
-  const operation = fetch(costsOnly ? "/api/product-cost" : "/api/commerce/product", {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(requestBody),
-  }).then(async (response) => {
+  try {
+    const uploadedImages = costsOnly || !productImageFiles.length
+      ? []
+      : await Promise.all(productImageFiles.map(stageProductImage));
+    if (submitButton) submitButton.textContent = "Saving product…";
+    const requestBody = costsOnly
+      ? {
+          productId: editingProductId,
+          unitCost: Number(productCostInput.value) || 0,
+          packagingCost: Number(productPackagingInput.value) || 0,
+          feeRate: Number(productFeeInput.value) || 0,
+          affiliateRate: Number(productAffiliateRateInput.value) || 0,
+          variationCosts: variants.flatMap((variant) => variant.id
+            ? [{ productId: variant.id, unitCost: variant.unitCost }]
+            : []),
+        }
+      : {
+          productId: editingProductId,
+          name: productNameInput.value.trim(),
+          description: productDescriptionInput.value.trim(),
+          sku: productSkuInput.value.trim(),
+          skuMode: editingProductId ? "preserve" : "auto",
+          stockQuantity: Number(productStockInput.value) || 0,
+          categoryId: Number(productCategoryInput.value) || 0,
+          visibility: productStatusInput.value,
+          regularPrice: Number(productPriceInput.value) || 0,
+          unitCost: Number(productCostInput.value) || 0,
+          packagingCost: Number(productPackagingInput.value) || 0,
+          feeRate: Number(productFeeInput.value) || 0,
+          affiliateRate: Number(productAffiliateRateInput.value) || 0,
+          images: [
+            ...selectedProductMedia.map((item) => item.id > 0 ? { id: item.id } : { src: item.src }),
+            ...uploadedImages,
+          ],
+          attributeName: productVariantsToggle.checked ? variantAttributeInput.value.trim() : "",
+          variants: productVariantsToggle.checked ? variants : [],
+        };
+    const response = await fetch(costsOnly ? "/api/product-cost" : "/api/commerce/product", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(requestBody),
+    });
     const payload: unknown = await response.json();
     if (!response.ok) throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The product could not be saved");
     if (costsOnly) {
@@ -11759,15 +11803,19 @@ productForm.addEventListener("submit", (event) => {
       warning || (costsOnly
         ? "Unit economics were saved independently. The product SKU and live catalog were not touched."
         : editingProductId
-        ? "SKU, category, visibility, inventory, pricing and variants are now synchronized."
-        : "The product is ready. Assign its shipping lot from Inventory once its COA is mapped and approved."),
+        ? "Description, gallery, category, inventory, pricing and variants are now synchronized."
+        : "The product and its gallery are ready. Assign its shipping lot from Inventory when needed."),
       !warning,
     );
-  });
-
-  void operation.then(() => closeProductDrawer())
-    .catch((error) => showToast("Unable to save", error instanceof Error ? error.message : "Check the connection and try again.", false))
-    .finally(() => { if (submitButton) submitButton.disabled = false; });
+    closeProductDrawer();
+  } catch (error) {
+    showToast("Unable to save", error instanceof Error ? error.message : "Check the connection and try again.", false);
+  } finally {
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = originalSubmitLabel;
+    }
+  }
 });
 
 trashProductButton.addEventListener("click", () => {

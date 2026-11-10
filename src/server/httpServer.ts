@@ -204,6 +204,30 @@ const dashboardDirectory = fileURLToPath(
 const MAX_LOGIN_BODY_BYTES = 8_192;
 const MAX_EVIDENCE_BODY_BYTES = 20 * 1024 * 1024;
 const MAX_MARKETING_IMPORT_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_PRODUCT_SAVE_BODY_BYTES = 512 * 1024;
+const MAX_PRODUCT_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_STAGED_PRODUCT_IMAGE_BYTES = 64 * 1024 * 1024;
+const PRODUCT_IMAGE_STAGE_TTL_MS = 15 * 60 * 1000;
+
+interface StagedProductImage {
+  bytes: Buffer;
+  mime: "image/jpeg" | "image/png" | "image/webp";
+  filename: string;
+  expiresAt: number;
+}
+
+function productImageMime(bytes: Buffer): StagedProductImage["mime"] | null {
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return "image/png";
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 12 && bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
+  return null;
+}
+
+function productImageFilename(value: string, mime: StagedProductImage["mime"]): string {
+  const extension = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
+  const base = value.replace(/\.[^.]+$/, "").normalize("NFKD").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "product-image";
+  return `${base}.${extension}`;
+}
 
 const CONTENT_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -373,13 +397,13 @@ function loginHtml(nonce: string, errorKind: "invalid" | "limited" | null): stri
 </html>`;
 }
 
-async function readBody(request: IncomingMessage): Promise<string> {
+async function readBody(request: IncomingMessage, limit = MAX_LOGIN_BODY_BYTES): Promise<string> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > MAX_LOGIN_BODY_BYTES) throw new Error("Request body too large");
+    if (size > limit) throw new Error("Request body too large");
     chunks.push(buffer);
   }
   return Buffer.concat(chunks).toString("utf8");
@@ -501,6 +525,15 @@ export function createMonitorServer(
     ...config.trackerOrigins,
     ...(commerceImageOrigin ? [commerceImageOrigin] : []),
   ];
+  const stagedProductImages = new Map<string, StagedProductImage>();
+  const pruneStagedProductImages = () => {
+    const now = Date.now();
+    for (const [token, image] of stagedProductImages) {
+      if (image.expiresAt <= now) stagedProductImages.delete(token);
+    }
+  };
+  const stagedProductImageBytes = () => [...stagedProductImages.values()]
+    .reduce((total, image) => total + image.bytes.byteLength, 0);
   const searchConsole = config.googleSearchConsole
     ? new SearchConsoleGateway(config.googleSearchConsole, store, config.sessionSecret)
     : undefined;
@@ -2142,6 +2175,24 @@ export function createMonitorServer(
         response.statusCode = redisHealthy ? 200 : 503;
         response.setHeader("Content-Type", "application/json; charset=utf-8");
         response.end(JSON.stringify({ status: redisHealthy ? "ok" : "degraded" }));
+        return;
+      }
+
+      const stagedProductImageMatch = url.pathname.match(/^\/api\/public\/product-media\/([a-f0-9]{64})\/[^/]+$/);
+      if (stagedProductImageMatch && request.method === "GET") {
+        pruneStagedProductImages();
+        const image = stagedProductImages.get(stagedProductImageMatch[1] || "");
+        if (!image) {
+          json(response, 404, { error: "This product image is no longer available" });
+          return;
+        }
+        response.statusCode = 200;
+        response.setHeader("Content-Type", image.mime);
+        response.setHeader("Content-Length", String(image.bytes.byteLength));
+        response.setHeader("Content-Disposition", `inline; filename="${image.filename}"`);
+        response.setHeader("Cache-Control", "private, no-store, max-age=0");
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.end(image.bytes);
         return;
       }
 
@@ -6267,6 +6318,57 @@ export function createMonitorServer(
         return;
       }
 
+      if (url.pathname === "/api/commerce/product-media-stage" && request.method === "POST") {
+        if (!isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Origin not allowed" });
+          return;
+        }
+        if (!canOperate || !commerce || !config.wooCommerce || config.wooCommerce.accessMode !== "read_write") {
+          json(response, 403, { error: "Catalog write access is required to upload product images" });
+          return;
+        }
+        try {
+          const bytes = await readBodyBuffer(request, MAX_PRODUCT_IMAGE_BYTES);
+          const mime = productImageMime(bytes);
+          if (!mime) {
+            json(response, 400, { error: "Use a valid PNG, JPG or WebP product image" });
+            return;
+          }
+          pruneStagedProductImages();
+          if (stagedProductImages.size >= 100 || stagedProductImageBytes() + bytes.byteLength > MAX_STAGED_PRODUCT_IMAGE_BYTES) {
+            json(response, 503, { error: "The image staging area is busy. Save the product or try again in a moment." });
+            return;
+          }
+          let suppliedName = "product-image";
+          try {
+            suppliedName = decodeURIComponent(firstHeaderValue(request.headers["x-phaseone-file-name"])) || suppliedName;
+          } catch {
+            suppliedName = "product-image";
+          }
+          const filename = productImageFilename(suppliedName, mime);
+          const token = randomBytes(32).toString("hex");
+          stagedProductImages.set(token, {
+            bytes,
+            mime,
+            filename,
+            expiresAt: Date.now() + PRODUCT_IMAGE_STAGE_TTL_MS,
+          });
+          const origin = requestOrigin(request, config) || config.dashboardOrigin;
+          json(response, 201, {
+            staged: true,
+            src: `${origin}/api/public/product-media/${token}/${encodeURIComponent(filename)}`,
+            filename,
+          });
+        } catch (error: unknown) {
+          json(response, error instanceof Error && error.message === "Request body too large" ? 413 : 500, {
+            error: error instanceof Error && error.message === "Request body too large"
+              ? "Product images must be 8 MB or smaller"
+              : "The product image could not be prepared",
+          });
+        }
+        return;
+      }
+
       if (url.pathname === "/api/commerce/product" && request.method === "POST") {
         if (!isLoginOriginAllowed(request, config)) {
           json(response, 403, { error: "Origin not allowed" });
@@ -6281,7 +6383,7 @@ export function createMonitorServer(
           return;
         }
         let payload: unknown;
-        try { payload = JSON.parse(await readBody(request)); } catch {
+        try { payload = JSON.parse(await readBody(request, MAX_PRODUCT_SAVE_BODY_BYTES)); } catch {
           json(response, 400, { error: "Invalid JSON request" });
           return;
         }
@@ -6289,6 +6391,7 @@ export function createMonitorServer(
         const productId = input.productId === null || input.productId === undefined ? null : Number(input.productId);
         const visibility = typeof input.visibility === "string" ? input.visibility : "draft";
         const name = typeof input.name === "string" ? input.name.trim() : "";
+        const description = typeof input.description === "string" ? input.description.trim().slice(0, 6000) : "";
         const regularPrice = Number(input.regularPrice);
         const stockQuantity = Number(input.stockQuantity);
         const categoryId = Number(input.categoryId || 0);
@@ -6359,6 +6462,7 @@ export function createMonitorServer(
           }
           const write: CommerceProductWrite = {
             name,
+            description,
             sku,
             regularPrice,
             stockQuantity,

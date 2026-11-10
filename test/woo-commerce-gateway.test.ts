@@ -12,6 +12,7 @@ test("maps WooCommerce products and orders without exposing credentials", async 
       ? [{
           id: 22,
           name: "Hoodie",
+          description: "<p>Complete catalog description.</p>",
           sku: "PH-22",
           status: "publish",
           price: "89.00",
@@ -50,6 +51,7 @@ test("maps WooCommerce products and orders without exposing credentials", async 
   ]);
 
   assert.equal(products[0]?.price, 89);
+  assert.equal(products[0]?.description, "<p>Complete catalog description.</p>");
   assert.equal(products[0]?.stockQuantity, 4);
   assert.equal(products[0]?.thumbnailUrl, "https://shop.example/hoodie-450.jpg");
   assert.equal(orders[0]?.customer, "Ana L.");
@@ -176,18 +178,22 @@ test("saves the selected catalog category with the generated product SKU", async
 
   const saved = await gateway.saveProduct(null, {
     name: "KPV 30 MG",
+    description: "A complete customer-facing product description.",
     sku: "KPV-30-MG",
     regularPrice: 55,
     stockQuantity: 12,
     categoryId: 16,
     visibility: "public",
-    images: [],
+    images: [{ src: "https://dashboard.example/api/public/product-media/token/kpv.jpg" }],
     variants: [],
   });
 
   assert.equal(saved.categoryId, 16);
   assert.deepEqual(requestBody?.categories, [{ id: 16 }]);
   assert.equal(requestBody?.sku, "KPV-30-MG");
+  assert.equal(requestBody?.description, "A complete customer-facing product description.");
+  assert.equal(requestBody?.short_description, "A complete customer-facing product description.");
+  assert.deepEqual(requestBody?.images, [{ src: "https://dashboard.example/api/public/product-media/token/kpv.jpg" }]);
 });
 
 test("derives variable parent availability from its saved child stock", async () => {

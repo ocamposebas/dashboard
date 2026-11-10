@@ -23,6 +23,7 @@ export interface CommerceProductAttribute {
 export interface CommerceProduct {
   id: number;
   name: string;
+  description: string;
   slug?: string;
   permalink?: string;
   sku: string;
@@ -60,6 +61,7 @@ export interface CommerceVariation {
 
 export interface CommerceProductWrite {
   name: string;
+  description?: string;
   sku: string;
   regularPrice: number;
   stockQuantity: number;
@@ -799,7 +801,7 @@ function mapProduct(value: unknown, thumbnails = new Map<number, string>()): Com
   const status = text(product.status) || "draft";
   const catalogVisibility = text(product.catalog_visibility) || "visible";
   return {
-    id, name: decodedText(product.name) || `Product #${id}`, sku: text(product.sku), type: text(product.type) || "simple",
+    id, name: decodedText(product.name) || `Product #${id}`, description: text(product.description), sku: text(product.sku), type: text(product.type) || "simple",
     slug: text(product.slug), permalink: text(product.permalink),
     status, catalogVisibility, visibility: visibilityFor(status, catalogVisibility), price: number(product.price),
     regularPrice: number(product.regular_price), salePrice: text(product.sale_price) ? number(product.sale_price) : null,
@@ -1965,6 +1967,10 @@ export class WooCommerceGateway {
     const variants = input.variants || [];
     const body: Record<string, unknown> = {
       name: input.name, regular_price: input.regularPrice.toFixed(2), images: input.images,
+      ...(input.description === undefined ? {} : {
+        description: input.description,
+        short_description: input.description,
+      }),
       categories: input.categoryId > 0 ? [{ id: input.categoryId }] : [],
       ...visibilityPayload(input.visibility),
       // SKU fields are immutable in the operations UI. Re-sending a legacy
