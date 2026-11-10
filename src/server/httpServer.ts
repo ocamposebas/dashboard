@@ -6235,12 +6235,12 @@ export function createMonitorServer(
             json(response, 200, { ...detailCache.payload, cacheAgeSeconds: Math.floor((Date.now() - detailCache.updatedAt) / 1_000) });
             return;
           }
-          const cachedProducts = commerceCache?.payload.products;
-          const cachedProduct = Array.isArray(cachedProducts)
-            ? cachedProducts.find((item) => item && typeof item === "object" && Number((item as Record<string, unknown>).id) === productId) as Record<string, unknown> | undefined
-            : undefined;
-          const product = cachedProduct || await commerce.getProduct(productId);
-          const productType = (product as Record<string, unknown>).type;
+          // The catalog list intentionally omits heavyweight fields such as the
+          // full description. Product editing must always start from the
+          // canonical WooCommerce record or reopening the drawer can make a
+          // successfully saved description appear empty.
+          const product = await commerce.getProduct(productId);
+          const productType = product.type;
           const variations = productType === "variable"
             ? await commerce.listProductVariations(productId)
             : [];
