@@ -9,6 +9,7 @@ interface SiteControlRow extends QueryResultRow {
   revision: string | number;
   promo: Record<string, unknown>;
   maintenance: Record<string, unknown>;
+  navigation: Record<string, unknown>;
   updated_by: string;
   updated_at: Date | string;
 }
@@ -56,7 +57,9 @@ function fromRow(row: SiteControlRow): IndependentSiteControls {
     !row.promo ||
     typeof row.promo !== "object" ||
     !row.maintenance ||
-    typeof row.maintenance !== "object"
+    typeof row.maintenance !== "object" ||
+    !row.navigation ||
+    typeof row.navigation !== "object"
   ) {
     throw new SiteControlRepositoryError("Stored Site Controls record is invalid", "invalid_record");
   }
@@ -66,6 +69,7 @@ function fromRow(row: SiteControlRow): IndependentSiteControls {
     revision,
     promo: row.promo as IndependentSiteControls["promo"],
     maintenance: row.maintenance as IndependentSiteControls["maintenance"],
+    navigation: row.navigation as IndependentSiteControls["navigation"],
     updatedBy: row.updated_by,
     updatedAt: iso(row.updated_at),
   };
@@ -73,7 +77,7 @@ function fromRow(row: SiteControlRow): IndependentSiteControls {
 
 async function readState(executor: SqlExecutor, lock = false): Promise<SiteControlRow | null> {
   const result = await executor.query<SiteControlRow>(
-    `SELECT version, source, revision, promo, maintenance, updated_by, updated_at
+    `SELECT version, source, revision, promo, maintenance, navigation, updated_by, updated_at
        FROM site_control_state
       WHERE singleton = 1${lock ? " FOR UPDATE" : ""}`,
   );
@@ -98,15 +102,16 @@ export class SiteControlRepository {
         : new Date().toISOString();
       const inserted = await client.query<SiteControlRow>(
         `INSERT INTO site_control_state (
-           singleton, version, source, revision, promo, maintenance, updated_by, updated_at
-         ) VALUES (1, $1, 'operations-control-plane', $2, $3::jsonb, $4::jsonb, $5, $6)
+           singleton, version, source, revision, promo, maintenance, navigation, updated_by, updated_at
+         ) VALUES (1, $1, 'operations-control-plane', $2, $3::jsonb, $4::jsonb, $5::jsonb, $6, $7)
          ON CONFLICT (singleton) DO NOTHING
-         RETURNING version, source, revision, promo, maintenance, updated_by, updated_at`,
+         RETURNING version, source, revision, promo, maintenance, navigation, updated_by, updated_at`,
         [
           value.version,
           revision,
           JSON.stringify(value.promo),
           JSON.stringify(value.maintenance),
+          JSON.stringify(value.navigation),
           value.updatedBy,
           updatedAt,
         ],
@@ -139,22 +144,24 @@ export class SiteControlRepository {
       const updatedAt = new Date().toISOString();
       const result = await client.query<SiteControlRow>(
         `INSERT INTO site_control_state (
-           singleton, version, source, revision, promo, maintenance, updated_by, updated_at
-         ) VALUES (1, $1, 'operations-control-plane', $2, $3::jsonb, $4::jsonb, $5, $6)
+           singleton, version, source, revision, promo, maintenance, navigation, updated_by, updated_at
+         ) VALUES (1, $1, 'operations-control-plane', $2, $3::jsonb, $4::jsonb, $5::jsonb, $6, $7)
          ON CONFLICT (singleton) DO UPDATE SET
            version = EXCLUDED.version,
            source = EXCLUDED.source,
            revision = EXCLUDED.revision,
            promo = EXCLUDED.promo,
            maintenance = EXCLUDED.maintenance,
+           navigation = EXCLUDED.navigation,
            updated_by = EXCLUDED.updated_by,
            updated_at = EXCLUDED.updated_at
-         RETURNING version, source, revision, promo, maintenance, updated_by, updated_at`,
+         RETURNING version, source, revision, promo, maintenance, navigation, updated_by, updated_at`,
         [
           input.version,
           nextRevision,
           JSON.stringify(input.promo),
           JSON.stringify(input.maintenance),
+          JSON.stringify(input.navigation),
           input.updatedBy,
           updatedAt,
         ],

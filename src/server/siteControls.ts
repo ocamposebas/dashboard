@@ -11,6 +11,14 @@ export interface SiteControlProductSnapshot {
   previousSaleEndsAt?: string | null | undefined;
 }
 
+export interface SiteNavigationItem {
+  id: string;
+  label: string;
+  href: string;
+  placement: "primary" | "shop";
+  enabled: boolean;
+}
+
 export interface IndependentSiteControls {
   version: string;
   source: "operations-control-plane";
@@ -51,6 +59,9 @@ export interface IndependentSiteControls {
     supportEmail: string;
     updatedAt: string | null;
   };
+  navigation: {
+    items: SiteNavigationItem[];
+  };
 }
 
 export interface IndependentSiteControlsWrite {
@@ -77,6 +88,9 @@ export interface IndependentSiteControlsWrite {
     message: string;
     supportEmail: string;
   };
+  navigation: {
+    items: SiteNavigationItem[];
+  };
 }
 
 const DEFAULT_PROMO = {
@@ -101,6 +115,23 @@ const DEFAULT_MAINTENANCE = {
   updatedAt: null,
 };
 
+const DEFAULT_NAVIGATION: SiteNavigationItem[] = [
+  {
+    id: "encapsulated-raws",
+    label: "Encapsulated RAW's",
+    href: "/research-peptides/encapsulated-raws/",
+    placement: "shop",
+    enabled: true,
+  },
+  {
+    id: "research-atomizers",
+    label: "Research Atomizer's",
+    href: "/research-peptides/research-atomizers/",
+    placement: "shop",
+    enabled: true,
+  },
+];
+
 export function defaultIndependentSiteControls(): IndependentSiteControls {
   return {
     version: "3.0",
@@ -110,6 +141,7 @@ export function defaultIndependentSiteControls(): IndependentSiteControls {
     updatedBy: "system-default",
     promo: { ...DEFAULT_PROMO },
     maintenance: { ...DEFAULT_MAINTENANCE },
+    navigation: { items: DEFAULT_NAVIGATION.map((item) => ({ ...item })) },
   };
 }
 
@@ -194,6 +226,9 @@ export function buildIndependentSiteControls(
       supportEmail: write.maintenance.supportEmail,
       updatedAt: now.toISOString(),
     },
+    navigation: {
+      items: write.navigation.items.map((item) => ({ ...item })),
+    },
   };
 }
 
@@ -219,5 +254,6 @@ export function publicSiteControls(value: IndependentSiteControls): Record<strin
     updatedAt: value.updatedAt,
     promo: { ...value.promo, product: publicProduct },
     maintenance: value.maintenance,
+    navigation: value.navigation,
   };
 }

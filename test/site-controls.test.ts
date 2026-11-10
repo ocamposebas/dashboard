@@ -37,6 +37,17 @@ function writeInput(): IndependentSiteControlsWrite {
       message: "We will return shortly.",
       supportEmail: "support@phaseonelabz.com",
     },
+    navigation: {
+      items: [
+        {
+          id: "encapsulated-raws",
+          label: "Encapsulated RAW's",
+          href: "/research-peptides/encapsulated-raws/",
+          placement: "shop",
+          enabled: true,
+        },
+      ],
+    },
   };
 }
 
@@ -46,6 +57,7 @@ test("independent Site Controls default to an open storefront", () => {
   assert.equal(value.maintenance.enabled, false);
   assert.equal(value.revision, 0);
   assert.equal(value.version, "3.0");
+  assert.equal(value.navigation.items.length, 2);
 });
 
 test("a control-plane write does not require a WordPress response", () => {
@@ -61,6 +73,7 @@ test("a control-plane write does not require a WordPress response", () => {
   assert.equal(value.maintenance.updatedAt, now.toISOString());
   assert.equal(value.updatedBy, "Operations Admin");
   assert.equal(value.source, "operations-control-plane");
+  assert.equal(value.navigation.items[0]?.href, "/research-peptides/encapsulated-raws/");
 });
 
 test("a product campaign replaces an old CTA with the exact selected product URL", () => {
@@ -139,6 +152,8 @@ test("public Site Controls excludes the internal editor identity", () => {
   assert.equal(publicProduct.url, "/product/test-compound/");
   assert.equal(publicProduct.slug, "test-compound");
   assert.equal("previousSalePrice" in publicProduct, false);
+  const publicNavigation = payload.navigation as { items: Array<Record<string, unknown>> };
+  assert.equal(publicNavigation.items[1]?.href, "/research-peptides/research-atomizers/");
 });
 
 test("independent Site Controls reject stale editor revisions", () => {

@@ -701,6 +701,15 @@ interface SiteControls {
     supportEmail: string;
     updatedAt: string | null;
   };
+  navigation: {
+    items: Array<{
+      id: string;
+      label: string;
+      href: string;
+      placement: "primary" | "shop";
+      enabled: boolean;
+    }>;
+  };
 }
 
 interface ExtensionsPayload {
@@ -7874,6 +7883,47 @@ function markSiteControlsDirty(): void {
   updateSiteControlsQuickSummary();
 }
 
+type NavigationEditorItem = SiteControls["navigation"]["items"][number];
+
+function navigationItemsFromEditor(): NavigationEditorItem[] {
+  return [...document.querySelectorAll<HTMLElement>("#navigation-editor-list [data-navigation-row]")].map((row, index) => ({
+    id: row.dataset.navigationId || `menu-${index + 1}`,
+    label: row.querySelector<HTMLInputElement>("[data-navigation-label]")?.value.trim() || "",
+    href: row.querySelector<HTMLInputElement>("[data-navigation-href]")?.value.trim() || "",
+    placement: row.querySelector<HTMLSelectElement>("[data-navigation-placement]")?.value === "primary" ? "primary" : "shop",
+    enabled: row.querySelector<HTMLInputElement>("[data-navigation-enabled]")?.checked !== false,
+  }));
+}
+
+function renderNavigationEditor(items: NavigationEditorItem[]): void {
+  const host = requiredElement<HTMLElement>("#navigation-editor-list");
+  const empty = requiredElement<HTMLElement>("#navigation-editor-empty");
+  const count = requiredElement<HTMLElement>("#navigation-item-count");
+  host.innerHTML = items.map((item, index) => `<article class="navigation-editor-row" data-navigation-row data-navigation-id="${escapeHtml(item.id)}">
+    <label class="navigation-enabled" title="Show this item"><input type="checkbox" data-navigation-enabled aria-label="Show ${escapeHtml(item.label || `menu item ${index + 1}`)}"${item.enabled ? " checked" : ""} /></label>
+    <label><span>Menu label</span><input type="text" maxlength="48" data-navigation-label value="${escapeHtml(item.label)}" placeholder="New category" /></label>
+    <label><span>Destination</span><input type="text" maxlength="300" data-navigation-href value="${escapeHtml(item.href)}" placeholder="/research-peptides/category/" /></label>
+    <label><span>Location</span><select data-navigation-placement><option value="shop"${item.placement === "shop" ? " selected" : ""}>Shop submenu</option><option value="primary"${item.placement === "primary" ? " selected" : ""}>Main navigation</option></select></label>
+    <div class="navigation-row-actions"><button type="button" data-navigation-move="up" aria-label="Move ${escapeHtml(item.label || "item")} up"${index === 0 ? " disabled" : ""}>↑</button><button type="button" data-navigation-move="down" aria-label="Move ${escapeHtml(item.label || "item")} down"${index === items.length - 1 ? " disabled" : ""}>↓</button><button type="button" data-navigation-remove aria-label="Remove ${escapeHtml(item.label || "item")}">×</button></div>
+  </article>`).join("");
+  empty.hidden = items.length > 0;
+  count.textContent = `${items.length} item${items.length === 1 ? "" : "s"}`;
+}
+
+function addNavigationEditorItem(): void {
+  const items = navigationItemsFromEditor();
+  items.push({
+    id: `menu-${Date.now().toString(36)}`,
+    label: "",
+    href: "/research-peptides/",
+    placement: "shop",
+    enabled: true,
+  });
+  renderNavigationEditor(items);
+  markSiteControlsDirty();
+  document.querySelector<HTMLInputElement>("#navigation-editor-list [data-navigation-row]:last-child [data-navigation-label]")?.focus();
+}
+
 function renderSiteControls(options: { force?: boolean } = {}): void {
   const controls = extensionsData?.siteControls;
   const save = requiredElement<HTMLButtonElement>("#site-controls-save");
@@ -7923,6 +7973,7 @@ function renderSiteControls(options: { force?: boolean } = {}): void {
   requiredElement<HTMLInputElement>("#maintenance-title").value = controls.maintenance.title;
   requiredElement<HTMLTextAreaElement>("#maintenance-message").value = controls.maintenance.message;
   requiredElement<HTMLInputElement>("#maintenance-email").value = controls.maintenance.supportEmail;
+  renderNavigationEditor(Array.isArray(controls.navigation?.items) ? controls.navigation.items : []);
   requiredElement<HTMLDetailsElement>("#maintenance-settings").open = controls.maintenance.enabled;
   updateMaintenancePreview();
   updatePromoCountdown();
@@ -8142,6 +8193,18 @@ async function saveSiteControls(): Promise<void> {
     requiredElement<HTMLInputElement>("#promo-storewide-title").focus();
     return;
   }
+  const navigationItems = navigationItemsFromEditor();
+  const incompleteNavigationItem = navigationItems.find((item) => !item.label || !item.href.startsWith("/") || item.href.startsWith("//"));
+  if (incompleteNavigationItem) {
+    showToast("Check the store menu", "Every menu item needs a label and an internal destination beginning with /.", false);
+    document.querySelector<HTMLInputElement>("#navigation-editor-list [data-navigation-row] [data-navigation-label]")?.focus();
+    return;
+  }
+  const navigationDestinations = navigationItems.map((item) => item.href.toLowerCase());
+  if (new Set(navigationDestinations).size !== navigationDestinations.length) {
+    showToast("Duplicate menu destination", "Each menu item must point to a different page.", false);
+    return;
+  }
   const save = requiredElement<HTMLButtonElement>("#site-controls-save");
   save.disabled = true;
   save.textContent = "Securing change…";
@@ -8177,6 +8240,9 @@ async function saveSiteControls(): Promise<void> {
       title: requiredElement<HTMLInputElement>("#maintenance-title").value.trim(),
       message: requiredElement<HTMLTextAreaElement>("#maintenance-message").value.trim(),
       supportEmail: requiredElement<HTMLInputElement>("#maintenance-email").value.trim(),
+    },
+    navigation: {
+      items: navigationItems,
     },
   };
   try {
@@ -10860,6 +10926,28 @@ requiredElement<HTMLElement>("[data-view-panel='site-controls']").addEventListen
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) {
     markSiteControlsDirty();
   }
+});
+requiredElement<HTMLButtonElement>("#navigation-add-item").addEventListener("click", addNavigationEditorItem);
+requiredElement<HTMLElement>("#navigation-editor-list").addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button") : null;
+  if (!target) return;
+  const row = target.closest<HTMLElement>("[data-navigation-row]");
+  if (!row) return;
+  const rows = [...document.querySelectorAll<HTMLElement>("#navigation-editor-list [data-navigation-row]")];
+  const index = rows.indexOf(row);
+  const items = navigationItemsFromEditor();
+  if (target.hasAttribute("data-navigation-remove")) {
+    items.splice(index, 1);
+  } else {
+    const direction = target.dataset.navigationMove;
+    const nextIndex = direction === "up" ? index - 1 : direction === "down" ? index + 1 : index;
+    if (nextIndex < 0 || nextIndex >= items.length || nextIndex === index) return;
+    const [item] = items.splice(index, 1);
+    if (!item) return;
+    items.splice(nextIndex, 0, item);
+  }
+  renderNavigationEditor(items);
+  markSiteControlsDirty();
 });
 requiredElement<HTMLInputElement>("#promo-enabled").addEventListener("change", (event) => {
   requiredElement<HTMLElement>("#promo-state").textContent = (event.currentTarget as HTMLInputElement).checked ? "READY" : "OFF";

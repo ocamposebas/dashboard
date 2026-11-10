@@ -103,6 +103,25 @@ html[data-theme="dark"] {
 [data-view-panel="site-controls"] .site-control-card > header > div > small { display: block; margin-top: 3px; color: var(--muted); font-size: 8px; font-weight: 500; }
 [data-view-panel="site-controls"] .site-control-body { padding: 15px; }
 
+.site-control-card--navigation > header .button { margin-left: auto; align-self: center; white-space: nowrap; }
+.navigation-editor-intro { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 11px; }
+.navigation-editor-intro strong { display: block; color: var(--ink); font-size: 11px; }
+.navigation-editor-intro p { margin: 3px 0 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
+.navigation-editor-intro > span { flex: 0 0 auto; padding: 5px 8px; border-radius: 999px; background: var(--surface-soft); color: var(--ink-soft); font-size: 8px; font-weight: 800; }
+.navigation-editor-list { display: grid; gap: 8px; }
+.navigation-editor-row { display: grid; grid-template-columns: 34px minmax(150px, 1fr) minmax(220px, 1.45fr) minmax(145px, .7fr) auto; align-items: end; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); }
+.navigation-editor-row > label:not(.navigation-enabled) { display: grid; gap: 5px; min-width: 0; }
+.navigation-editor-row > label > span { color: var(--muted); font-size: 7px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+.navigation-editor-row input[type="text"],
+.navigation-editor-row select { width: 100%; min-height: 36px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--field); color: var(--ink); font: inherit; font-size: 9px; }
+.navigation-enabled { min-height: 36px; display: grid; place-items: center; align-self: end; border: 1px solid var(--line); border-radius: 6px; background: var(--field); cursor: pointer; }
+.navigation-enabled input { width: 15px; height: 15px; accent-color: var(--accent); }
+.navigation-row-actions { display: flex; align-items: center; gap: 4px; min-height: 36px; }
+.navigation-row-actions button { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 6px; background: var(--field); color: var(--ink-soft); cursor: pointer; }
+.navigation-row-actions button:hover { border-color: var(--line-strong); color: var(--ink); }
+.navigation-row-actions button[data-navigation-remove] { color: #a33e3e; }
+.navigation-editor-empty { margin: 0; padding: 20px; border: 1px dashed var(--line-strong); border-radius: 9px; color: var(--muted); text-align: center; font-size: 9px; }
+
 .site-control-step {
   display: grid;
   gap: 10px;
@@ -292,6 +311,9 @@ html[data-theme="dark"] {
   [data-view-panel="site-controls"] .control-option-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .campaign-time-presets { grid-template-columns: 1fr 1fr; }
   .campaign-custom-time { grid-template-columns: repeat(3, 1fr); }
+  .navigation-editor-row { grid-template-columns: 32px minmax(0, 1fr) auto; align-items: end; }
+  .navigation-editor-row > label:nth-of-type(2), .navigation-editor-row > label:nth-of-type(3), .navigation-editor-row > label:nth-of-type(4) { grid-column: 2 / -1; }
+  .navigation-row-actions { grid-column: 2 / -1; justify-content: flex-end; }
 }
 
 @media (max-width: 480px) {
@@ -305,6 +327,8 @@ html[data-theme="dark"] {
   [data-view-panel="site-controls"] .site-control-command > div:first-child { width: 100%; }
   [data-view-panel="site-controls"] .site-control-card > header { align-items: flex-start; flex-wrap: wrap; }
   [data-view-panel="site-controls"] .site-control-switch { width: 100%; justify-content: flex-end; }
+  .site-control-card--navigation > header .button { width: 100%; margin-left: 0; }
+  .navigation-editor-intro { align-items: flex-start; }
   [data-view-panel="site-controls"] .control-option-grid button { min-height: 58px; display: block; padding: 8px; text-align: center; }
   [data-view-panel="site-controls"] .control-option-grid button > span { margin: 0 auto 5px; }
   [data-view-panel="site-controls"] .control-option-grid button small { display: none; }

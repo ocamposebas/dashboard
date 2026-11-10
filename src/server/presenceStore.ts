@@ -106,6 +106,7 @@ export interface IndependentSiteControlsRecord {
   updatedBy: string;
   promo: Record<string, unknown>;
   maintenance: Record<string, unknown>;
+  navigation: Record<string, unknown>;
 }
 
 function parseStoredSession(value: string | null): AnalyticsSession | null {
@@ -1066,7 +1067,8 @@ export class PresenceStore {
         typeof value.updatedAt !== "string" ||
         typeof value.updatedBy !== "string" ||
         !value.promo || typeof value.promo !== "object" ||
-        !value.maintenance || typeof value.maintenance !== "object"
+        !value.maintenance || typeof value.maintenance !== "object" ||
+        !value.navigation || typeof value.navigation !== "object"
       ) {
         return null;
       }

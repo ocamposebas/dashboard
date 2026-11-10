@@ -165,6 +165,7 @@ import {
   publicSiteControls,
   type IndependentSiteControls,
   type IndependentSiteControlsWrite,
+  type SiteNavigationItem,
   type SiteControlProductSnapshot,
 } from "./siteControls.js";
 import {
@@ -5834,6 +5835,8 @@ export function createMonitorServer(
         const root = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
         const promo = root.promo && typeof root.promo === "object" ? root.promo as Record<string, unknown> : {};
         const maintenance = root.maintenance && typeof root.maintenance === "object" ? root.maintenance as Record<string, unknown> : {};
+        const navigationProvided = Boolean(root.navigation && typeof root.navigation === "object");
+        const navigation = navigationProvided ? root.navigation as Record<string, unknown> : {};
         const productInput = promo.product && typeof promo.product === "object" ? promo.product as Record<string, unknown> : {};
         const cleanText = (value: unknown, maximum: number) => typeof value === "string" ? value.trim().slice(0, maximum) : "";
         const integer = (value: unknown, minimum: number, maximum: number) => Math.min(maximum, Math.max(minimum, Math.floor(Number(value) || 0)));
@@ -5856,6 +5859,40 @@ export function createMonitorServer(
         if (!maintenanceTitle || !maintenanceMessage || (supportEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail))) {
           json(response, 400, { error: "Enter valid maintenance copy and a valid support email" });
           return;
+        }
+        const navigationItems: SiteNavigationItem[] = [];
+        const seenNavigationIds = new Set<string>();
+        const seenNavigationHrefs = new Set<string>();
+        const rawNavigationItems = Array.isArray(navigation.items) ? navigation.items.slice(0, 20) : [];
+        for (let index = 0; index < rawNavigationItems.length; index += 1) {
+          const rawItem = rawNavigationItems[index];
+          if (!rawItem || typeof rawItem !== "object") {
+            json(response, 400, { error: "Every navigation item must be complete" });
+            return;
+          }
+          const item = rawItem as Record<string, unknown>;
+          const label = cleanText(item.label, 48);
+          const href = cleanText(item.href, 300);
+          const placement = cleanText(item.placement, 16);
+          const fallbackId = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `menu-${index + 1}`;
+          const id = (cleanText(item.id, 60).toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "") || fallbackId).slice(0, 60);
+          if (!label || !href || !href.startsWith("/") || href.startsWith("//") || href.includes("\\") || !["primary", "shop"].includes(placement)) {
+            json(response, 400, { error: "Enter a label, an internal destination and a valid menu location for every navigation item" });
+            return;
+          }
+          if (seenNavigationIds.has(id) || seenNavigationHrefs.has(href.toLowerCase())) {
+            json(response, 400, { error: "Navigation items must use unique names and destinations" });
+            return;
+          }
+          seenNavigationIds.add(id);
+          seenNavigationHrefs.add(href.toLowerCase());
+          navigationItems.push({
+            id,
+            label,
+            href,
+            placement: placement as SiteNavigationItem["placement"],
+            enabled: item.enabled !== false,
+          });
         }
         const siteControlsWrite: IndependentSiteControlsWrite = {
           promo: {
@@ -5880,6 +5917,9 @@ export function createMonitorServer(
             title: maintenanceTitle,
             message: maintenanceMessage,
             supportEmail,
+          },
+          navigation: {
+            items: navigationProvided ? navigationItems : defaultIndependentSiteControls().navigation.items,
           },
         };
         if (siteControlsWrite.promo.enabled && siteControlsWrite.promo.type === "product" && (!siteControlsWrite.promo.productId || siteControlsWrite.promo.salePrice <= 0)) {
