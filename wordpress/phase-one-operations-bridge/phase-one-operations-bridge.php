@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Phase One Operations Bridge
  * Description: Secure bridge between Phase One Operations Suite, storefront controls, customer rewards and existing COA Manager records.
- * Version: 2.1.1
+ * Version: 2.1.3
  * Author: Phase One Labz
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -163,7 +163,7 @@ final class Phase_One_Operations_Bridge {
     public static function status() {
         return rest_ensure_response([
             'connected' => true,
-            'version' => '2.1.1',
+            'version' => '2.1.2',
             'capabilities' => array_values(array_filter([
                 'edit_coa',
                 'read_customer_rewards',
@@ -233,6 +233,7 @@ final class Phase_One_Operations_Bridge {
         $headers = [
             'Content-Type: text/html; charset=UTF-8',
             'List-Unsubscribe: <' . $unsubscribe_url . '>',
+            'Reply-To: Phase One Labz <support@phaseonelabz.com>',
         ];
         $address_parts = array_filter([
             get_option('woocommerce_store_address', ''),
@@ -677,16 +678,19 @@ final class Phase_One_Operations_Bridge {
             $customer_name = trim((string) $order->get_formatted_billing_full_name());
             $confirmed_at = sanitize_text_field((string) $request->get_param('confirmed_at'));
             $body = sprintf(
-                '<p>Hello %s,</p><p>Your order <strong>#%s</strong> has been packed.</p><p>For your records, we attached %s from the verified packaging process.</p>%s<p>Please keep this email with your order records.</p>',
+                '<p style="margin:0 0 16px;">Hello %s,</p><p style="margin:0 0 16px;">Your order <strong>#%s</strong> has been packed and verified.</p><table role="presentation" width="100%%" cellspacing="0" cellpadding="0" border="0" style="width:100%%;margin:22px 0;border:1px solid #dbe6ee;border-radius:12px;background:#f5f9fc;"><tr><td style="padding:18px;"><p style="margin:0 0 7px;color:#0a6ea8;font-size:11px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;">Packaging record</p><p style="margin:0;color:#33475b;line-height:1.6;">We attached %s from the verified packaging process.%s</p></td></tr></table><p style="margin:0;">Please keep this email with your order records. If you need help, reply to this message.</p>',
                 esc_html($customer_name ?: 'there'),
                 esc_html($order->get_order_number()),
                 count($temp_files) === 1 ? 'one evidence photo' : 'two evidence photos',
-                $confirmed_at ? '<p><strong>Packaging confirmed:</strong> ' . esc_html($confirmed_at) . '</p>' : ''
+                $confirmed_at ? '<br><strong>Packaging confirmed:</strong> ' . esc_html($confirmed_at) : ''
             );
             $mailer = WC()->mailer();
             $message = method_exists($mailer, 'wrap_message')
                 ? $mailer->wrap_message('Your Phase One Labz packaging evidence', $body)
                 : $body;
+            if (is_object($mailer) && method_exists($mailer, 'style_inline')) {
+                $message = $mailer->style_inline($message);
+            }
             $content_type_filter = static function () {
                 return 'text/html';
             };
@@ -696,7 +700,7 @@ final class Phase_One_Operations_Bridge {
                     $recipient,
                     sprintf('Your Phase One Labz packaging evidence - Order #%s', $order->get_order_number()),
                     $message,
-                    [],
+                    ['Reply-To: Phase One Labz <support@phaseonelabz.com>'],
                     $temp_files
                 );
             } finally {
@@ -757,6 +761,101 @@ final class Phase_One_Operations_Bridge {
         return self::proxy_request('GET', '/phaseone/v1/order-coas/orders/' . absint($request['id']), $request);
     }
 
+    private static function assign_verified_fulfillment_coa($order_id, $item_id, $input, $coa_id, $quantity, $event_id) {
+        if (!function_exists('wc_get_order')) {
+            return new WP_Error('phaseone_woocommerce_unavailable', 'WooCommerce is unavailable.', ['status' => 503]);
+        }
+        $order = wc_get_order($order_id);
+        $item = $order ? $order->get_item($item_id) : false;
+        if (!$order || !($item instanceof WC_Order_Item_Product)) {
+            return new WP_Error('phaseone_order_item_not_found', 'The order item was not found.', ['status' => 404]);
+        }
+
+        $actual_product_id = absint($item->get_product_id());
+        $actual_variation_id = absint($item->get_variation_id());
+        $product = $item->get_product();
+        $actual_sku = $product ? sanitize_text_field((string) $product->get_sku()) : '';
+        $expected_product_id = absint($input['product_id'] ?? 0);
+        $expected_variation_id = absint($input['variation_id'] ?? 0);
+        $expected_sku = sanitize_text_field((string) ($input['sku'] ?? ''));
+        if (($expected_product_id && $expected_product_id !== $actual_product_id) ||
+            ($expected_variation_id !== $actual_variation_id) ||
+            ($expected_sku !== '' && $actual_sku !== '' && strcasecmp($expected_sku, $actual_sku) !== 0)) {
+            return new WP_Error('phaseone_verified_scan_mismatch', 'The verified scan does not match this exact order item.', ['status' => 409]);
+        }
+
+        $lot = sanitize_text_field((string) ($input['lot'] ?? ''));
+        $status = sanitize_text_field((string) ($input['status'] ?? ''));
+        if ($lot === '' || strcasecmp($status, 'Available') !== 0) {
+            return new WP_Error('phaseone_verified_scan_invalid', 'Only an Available scanned COA with a lot can be assigned.', ['status' => 400]);
+        }
+
+        $meta_key = '_phaseone_fulfillment_coas';
+        $stored = $item->get_meta($meta_key, true);
+        $stored = is_array($stored) ? $stored : [];
+        $assignments = [];
+        $assigned_quantity = 0;
+        $assignment_id = 'fulfillment_' . substr($event_id !== '' ? $event_id : hash('sha256', implode('|', [$order_id, $item_id, $coa_id, $lot])), 0, 24);
+        foreach ($stored as $assignment) {
+            if (!is_array($assignment)) {
+                continue;
+            }
+            if (($assignment['source'] ?? '') === 'purchase_snapshot') {
+                continue;
+            }
+            if (($assignment['assignment_id'] ?? '') === $assignment_id) {
+                return self::proxy_request('GET', '/phaseone/v1/order-coas/orders/' . $order_id);
+            }
+            $assigned_quantity += max(0, absint($assignment['quantity'] ?? 0));
+            $assignments[] = $assignment;
+        }
+        $ordered_quantity = max(0, absint($item->get_quantity()));
+        if ($quantity > $ordered_quantity || ($assigned_quantity + $quantity) > $ordered_quantity) {
+            return new WP_Error('phaseone_verified_scan_quantity', 'The verified COA quantity exceeds the ordered quantity.', ['status' => 409]);
+        }
+
+        $coa_number = sanitize_text_field((string) ($input['coa_number'] ?? $coa_id));
+        $snapshot = [
+            'snapshot_version' => 1,
+            'captured_at' => gmdate('c'),
+            'id' => $coa_id,
+            'post_id' => 0,
+            'coa_number' => $coa_number,
+            'product_name' => sanitize_text_field((string) ($input['product_name'] ?? $item->get_name())),
+            'product_ids' => [$actual_product_id],
+            'parent_product_ids' => [$actual_product_id],
+            'variation_ids' => $actual_variation_id ? [$actual_variation_id] : [],
+            'skus' => $actual_sku !== '' ? [$actual_sku] : [],
+            'strength' => sanitize_text_field((string) ($input['strength'] ?? '')),
+            'lot' => $lot,
+            'testing_date' => sanitize_text_field((string) ($input['testing_date'] ?? '')),
+            'laboratory' => sanitize_text_field((string) ($input['laboratory'] ?? '')),
+            'test_method' => sanitize_text_field((string) ($input['test_method'] ?? '')),
+            'purity' => sanitize_text_field((string) ($input['purity'] ?? '')),
+            'status' => 'Available',
+            'current_shipping_lot' => true,
+            'file_attachment_id' => 0,
+            'view_url' => esc_url_raw((string) ($input['verify_url'] ?? $input['file_url'] ?? '')),
+            'file_kind' => 'external',
+        ];
+        $assignments[] = [
+            'assignment_id' => $assignment_id,
+            'coa_id' => $coa_id,
+            'coa_post_id' => 0,
+            'lot' => $lot,
+            'quantity' => $quantity,
+            'assigned_at' => gmdate('c'),
+            'assigned_by' => get_current_user_id(),
+            'source' => 'fulfillment_verified_scan',
+            'coa_snapshot' => $snapshot,
+        ];
+        $item->update_meta_data($meta_key, array_values($assignments));
+        $item->save();
+        $order->add_order_note(sprintf('Verified fulfillment COA %s · lot %s assigned to %s (%d unit%s).', $coa_number, $lot, $item->get_name(), $quantity, $quantity === 1 ? '' : 's'));
+        $order->save();
+        return self::proxy_request('GET', '/phaseone/v1/order-coas/orders/' . $order_id);
+    }
+
     public static function assign_order_coa(WP_REST_Request $request) {
         $input = $request->get_json_params();
         if (!is_array($input) || empty($input['coa_id']) || empty($input['quantity'])) {
@@ -796,12 +895,15 @@ final class Phase_One_Operations_Bridge {
                 return new WP_Error('phaseone_coa_event_processing', 'This COA assignment is already being processed.', ['status' => 409]);
             }
         }
-        $result = self::proxy_request(
-            'POST',
-            '/phaseone/v1/order-coas/orders/' . $order_id . '/items/' . $item_id . '/assign',
-            null,
-            ['coa_id' => $coa_id, 'quantity' => $quantity, 'confirmed' => true]
-        );
+        $verified_scan = true === filter_var($input['verified_scan'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $result = $verified_scan
+            ? self::assign_verified_fulfillment_coa($order_id, $item_id, $input, $coa_id, $quantity, $event_id)
+            : self::proxy_request(
+                'POST',
+                '/phaseone/v1/order-coas/orders/' . $order_id . '/items/' . $item_id . '/assign',
+                null,
+                ['coa_id' => $coa_id, 'quantity' => $quantity, 'confirmed' => true]
+            );
         if (is_wp_error($result)) {
             if ($lock_key !== '') {
                 delete_option($lock_key);

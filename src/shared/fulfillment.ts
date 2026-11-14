@@ -219,6 +219,18 @@ export interface FulfillmentCoaAllocation {
   lot: string;
   batch: string;
   quantity: number;
+  productId?: number;
+  variationId?: number;
+  sku?: string;
+  productName?: string;
+  strength?: string;
+  testingDate?: string;
+  laboratory?: string;
+  testMethod?: string;
+  purity?: string;
+  status?: string;
+  fileUrl?: string;
+  verifyUrl?: string;
 }
 
 export interface FulfillmentPackingSnapshot {

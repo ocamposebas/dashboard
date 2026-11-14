@@ -14,6 +14,8 @@ import type { CommerceAddress } from "../src/server/wooCommerceGateway.js";
 import {
   matchesPhaseOneShippingPolicy,
   PHASE_ONE_SHIPPING_POLICY,
+  PHASE_ONE_USPS_POLICY,
+  shippingPolicyForDestination,
 } from "../src/shared/shipping.js";
 
 function address(overrides: Partial<CommerceAddress> = {}): CommerceAddress {
@@ -67,6 +69,18 @@ test("shipping validates standard package limits and complete order addresses", 
   assert.ok(externalKey.length <= 50);
 });
 
+test("carrier payload removes a duplicated city, state and postal suffix without changing the source order", () => {
+  const source = address({
+    address1: "2740 daybreak dr. Orlando Florida 32825",
+    city: "Orlando",
+    state: "FL",
+    postcode: "32825",
+  });
+  const destination = shippingDestination(source);
+  assert.equal(destination.address1, "2740 daybreak dr");
+  assert.equal(source.address1, "2740 daybreak dr. Orlando Florida 32825");
+});
+
 test("the warehouse shipping policy accepts only FedEx 2Day One Rate Pak", () => {
   assert.equal(matchesPhaseOneShippingPolicy({
     carrierCode: "fedex",
@@ -83,6 +97,17 @@ test("the warehouse shipping policy accepts only FedEx 2Day One Rate Pak", () =>
     serviceCode: "fedex_2day",
     packageCode: "fedex_small_box_onerate",
   }), false);
+});
+
+test("Puerto Rico and PO Boxes automatically use USPS Priority Mail", () => {
+  assert.equal(shippingPolicyForDestination({ state: "PR", address1: "100 Calle A" }), PHASE_ONE_USPS_POLICY);
+  assert.equal(shippingPolicyForDestination({ state: "CO", address1: "P.O. Box 415" }), PHASE_ONE_USPS_POLICY);
+  assert.equal(shippingPolicyForDestination({ state: "FL", address1: "100 Test Street" }), PHASE_ONE_SHIPPING_POLICY);
+  assert.equal(matchesPhaseOneShippingPolicy({
+    carrierCode: "stamps_com",
+    serviceCode: "usps_priority_mail",
+    packageCode: "package",
+  }, PHASE_ONE_USPS_POLICY), true);
 });
 
 test("shipping blocks invalid package values and incomplete source addresses", () => {

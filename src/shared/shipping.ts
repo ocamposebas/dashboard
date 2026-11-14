@@ -1,25 +1,61 @@
 export type ShippingDataMode = "live" | "mock";
 export type ShippingLabelPurchaseMode = "mock_only" | "live_disabled" | "live_enabled";
 
-// Phase One intentionally offers one warehouse shipping path. Keeping the
-// carrier, package and service together prevents the UI and API from drifting
-// into a different (and potentially more expensive) ShipStation rate.
-export const PHASE_ONE_SHIPPING_POLICY = {
+// Phase One keeps each approved warehouse path locked as one carrier, package
+// and service. The destination selector chooses the safe exception for Puerto
+// Rico and PO Boxes without letting the browser invent another rate.
+export interface PhaseOneShippingPolicy {
+  carrierCode: string;
+  carrierCodes: readonly string[];
+  carrierName: string;
+  packageCode: string;
+  packageName: string;
+  serviceCode: string;
+  serviceName: string;
+  carrierPackage: boolean;
+}
+
+export const PHASE_ONE_SHIPPING_POLICY: PhaseOneShippingPolicy = {
+  carrierCodes: ["fedex"],
   carrierCode: "fedex",
   packageCode: "fedex_pak_onerate",
   packageName: "FedEx One Rate Pak",
   serviceCode: "fedex_2day",
   serviceName: "FedEx 2Day One Rate Pak",
-} as const;
+  carrierName: "FedEx",
+  carrierPackage: true,
+};
+
+export const PHASE_ONE_USPS_POLICY: PhaseOneShippingPolicy = {
+  carrierCode: "stamps_com",
+  carrierCodes: ["stamps_com", "usps"],
+  carrierName: "USPS",
+  packageCode: "package",
+  packageName: "Phase One shipping box",
+  serviceCode: "usps_priority_mail",
+  serviceName: "USPS Priority Mail",
+  carrierPackage: false,
+};
+
+export function shippingPolicyForDestination(input: {
+  state: string;
+  address1?: string;
+  address2?: string;
+}): PhaseOneShippingPolicy {
+  const state = input.state.trim().toUpperCase();
+  const address = `${input.address1 || ""} ${input.address2 || ""}`.replace(/\s+/g, " ").trim();
+  const poBox = /\b(?:P(?:OST)?\.?\s*O(?:FFICE)?\.?\s*BOX|POB)\s*#?\s*[A-Z0-9-]+\b/i.test(address);
+  return state === "PR" || poBox ? PHASE_ONE_USPS_POLICY : PHASE_ONE_SHIPPING_POLICY;
+}
 
 export function matchesPhaseOneShippingPolicy(input: {
   carrierCode: string;
   serviceCode: string;
   packageCode: string | undefined;
-}): boolean {
-  return input.carrierCode.trim().toLowerCase() === PHASE_ONE_SHIPPING_POLICY.carrierCode &&
-    input.serviceCode.trim().toLowerCase() === PHASE_ONE_SHIPPING_POLICY.serviceCode &&
-    input.packageCode?.trim().toLowerCase() === PHASE_ONE_SHIPPING_POLICY.packageCode;
+}, policy: PhaseOneShippingPolicy = PHASE_ONE_SHIPPING_POLICY): boolean {
+  return policy.carrierCodes.includes(input.carrierCode.trim().toLowerCase()) &&
+    input.serviceCode.trim().toLowerCase() === policy.serviceCode &&
+    input.packageCode?.trim().toLowerCase() === policy.packageCode;
 }
 export type ShippingLabelState =
   | "purchase_pending"
@@ -99,6 +135,11 @@ export interface ShippingRatesPayload {
     countryCode: string;
   };
   package: ShippingPackageInput;
+  policy?: {
+    carrierName: string;
+    packageName: string;
+    serviceName: string;
+  };
   rates: ShippingRateQuote[];
   quotedAt: string;
 }

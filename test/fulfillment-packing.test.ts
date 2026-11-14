@@ -131,6 +131,11 @@ test("packing creates an immutable product, quantity and COA snapshot", () => {
       lot: "LOT-201",
       batch: "BATCH-201",
       quantity: 2,
+      productId: 201,
+      variationId: 301,
+      sku: "BPC-10-BLUE",
+      productName: "BPC-157 10mg",
+      status: "Available",
     }],
   });
 });

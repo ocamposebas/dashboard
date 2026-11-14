@@ -45,6 +45,7 @@ export interface ShipStationRateInput {
   externalShipmentId: string;
   orderNumber: string;
   existingShipmentId?: string | null;
+  serviceCodes?: string[];
 }
 
 export interface ShipStationRate {
@@ -497,7 +498,9 @@ export class ShipStationGateway {
       }
       throw new ShipStationGatewayError(
         outcomeSensitive
-          ? `ShipStation rejected the label request with status ${response.status}`
+          ? providerMessage
+            ? `ShipStation could not create the label: ${providerMessage}`
+            : `ShipStation rejected the label request with status ${response.status}`
           : providerMessage
             ? `ShipStation could not rate this shipment: ${providerMessage}`
             : `ShipStation rejected the rate request with status ${response.status}`,
@@ -645,14 +648,15 @@ export class ShipStationGateway {
       throw new ShipStationGatewayError("The external shipment identifier is invalid", "invalid_response");
     }
     const phaseOnePolicySelected = packageCode === PHASE_ONE_SHIPPING_POLICY.packageCode;
+    const serviceCodes = (input.serviceCodes || []).map((value) => value.trim().toLowerCase()).filter(Boolean);
     const rateOptions = {
       carrier_ids: input.carrierIds,
       preferred_currency: "USD",
       rate_type: "shipment",
-      ...(phaseOnePolicySelected ? {
-        service_codes: [PHASE_ONE_SHIPPING_POLICY.serviceCode],
-        package_types: [PHASE_ONE_SHIPPING_POLICY.packageCode],
-      } : {}),
+      ...(serviceCodes.length ? { service_codes: serviceCodes } : phaseOnePolicySelected
+        ? { service_codes: [PHASE_ONE_SHIPPING_POLICY.serviceCode] }
+        : {}),
+      ...(phaseOnePolicySelected ? { package_types: [PHASE_ONE_SHIPPING_POLICY.packageCode] } : {}),
     };
     const shipmentDetails = {
       validate_address: "validate_only",

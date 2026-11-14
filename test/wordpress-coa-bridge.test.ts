@@ -18,3 +18,11 @@ test("WordPress COA bridge requires and forwards physical packing confirmation",
   );
   assert.match(bridgeSource, /phaseone_coa_confirmation_required/);
 });
+
+test("verified fulfillment scans bypass legacy COA mapping and preserve the customer snapshot", () => {
+  assert.match(bridgeSource, /verified_scan/);
+  assert.match(bridgeSource, /assign_verified_fulfillment_coa/);
+  assert.match(bridgeSource, /_phaseone_fulfillment_coas/);
+  assert.match(bridgeSource, /fulfillment_verified_scan/);
+  assert.match(bridgeSource, /phaseone_verified_scan_mismatch/);
+});

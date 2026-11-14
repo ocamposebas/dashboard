@@ -246,6 +246,18 @@ export function buildPackingSnapshot(input: {
         lot: allocation.lot,
         batch: coa.batch,
         quantity: allocation.quantity,
+        productId: line.productId,
+        variationId: line.variationId,
+        sku: line.sku,
+        productName: coa.productName || live.name,
+        status: coa.status,
+        ...(coa.strength ? { strength: coa.strength } : {}),
+        ...(coa.date ? { testingDate: coa.date } : {}),
+        ...(coa.laboratory ? { laboratory: coa.laboratory } : {}),
+        ...(coa.method ? { testMethod: coa.method } : {}),
+        ...(coa.purity ? { purity: coa.purity } : {}),
+        ...(coa.externalFileUrl || coa.fileUrl ? { fileUrl: coa.externalFileUrl || coa.fileUrl } : {}),
+        ...(coa.verifyUrl ? { verifyUrl: coa.verifyUrl } : {}),
       };
     });
     const primary = packedAllocations[0];

@@ -39,6 +39,28 @@ function finiteInRange(value: unknown, min: number, max: number): number | null 
   return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : null;
 }
 
+function regexEscape(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function addressLineWithoutDuplicateLocality(
+  value: string,
+  city: string,
+  state: string,
+  postalCode: string,
+): string {
+  const line = value.replace(/\s+/g, " ").trim();
+  if (!line || !city || !postalCode) return line;
+  const cityPattern = regexEscape(city.trim()).replace(/\s+/g, "\\s+");
+  const postalPattern = regexEscape(postalCode.trim()).replace(/\s+/g, "[ -]?");
+  const statePattern = state.trim()
+    ? `(?:${regexEscape(state.trim())}|[A-Za-z][A-Za-z. ]{1,28})`
+    : "[A-Za-z][A-Za-z. ]{1,28}";
+  const duplicate = new RegExp(`\\s+${cityPattern}\\s+${statePattern}\\s+${postalPattern}$`, "i");
+  const normalized = line.replace(duplicate, "").trim().replace(/[,.\s]+$/, "");
+  return normalized || line;
+}
+
 export function shippingPackageInput(value: unknown): ShippingPackageInput {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new FulfillmentShippingError("Enter package weight and dimensions", "invalid_input");
@@ -73,14 +95,17 @@ export function shippingPackageInput(value: unknown): ShippingPackageInput {
 export function shippingDestination(address: CommerceAddress): ShippingDestination {
   const name = `${address.firstName} ${address.lastName}`.trim();
   const countryCode = address.country.trim().toUpperCase();
+  const city = address.city.trim();
+  const state = address.state.trim();
+  const postalCode = address.postcode.trim();
   const destination = {
     name,
     company: address.company.trim(),
-    address1: address.address1.trim(),
+    address1: addressLineWithoutDuplicateLocality(address.address1, city, state, postalCode),
     address2: address.address2.trim(),
-    city: address.city.trim(),
-    state: address.state.trim(),
-    postalCode: address.postcode.trim(),
+    city,
+    state,
+    postalCode,
     countryCode,
     phone: address.phone.trim(),
   };

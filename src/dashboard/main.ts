@@ -5436,6 +5436,10 @@ function shippingWorkspaceMarkup(order: FulfillmentQueueEntry, state: Fulfillmen
   const policyReady = Boolean(selectedCarrier && selectedPackage);
   const oneRateSelected = true;
   const destination = state.rates?.destination;
+  const activePolicy = state.rates?.policy;
+  const activeCarrierName = activePolicy?.carrierName || PHASE_ONE_SHIPPING_POLICY.carrierName;
+  const activePackageName = activePolicy?.packageName || PHASE_ONE_SHIPPING_POLICY.packageName;
+  const activeServiceName = activePolicy?.serviceName || PHASE_ONE_SHIPPING_POLICY.serviceName;
   const rateCards = state.rates?.rates.length
     ? `<div class="shipping-rate-list">${state.rates.rates.map((rate, index) => {
       const selected = state.selectedRateIndex === index;
@@ -5445,18 +5449,18 @@ function shippingWorkspaceMarkup(order: FulfillmentQueueEntry, state: Fulfillmen
       const displayName = oneRateSelected && !/one\s*rate/i.test(rate.serviceName)
         ? `${rate.serviceName} One Rate`
         : rate.serviceName;
-      const packageDetail = selectedPackage ? ` · ${selectedPackage.name}` : "";
+      const packageDetail = ` · ${activePackageName}`;
       return `<button class="shipping-rate-card${selected ? " is-selected" : ""}" type="button" data-select-shipping-rate="${index}" aria-pressed="${selected}"><span class="shipping-carrier-mark">${escapeHtml(rate.carrierName.slice(0, 3).toUpperCase())}</span><span><strong>${escapeHtml(displayName)}</strong><small>${escapeHtml(rate.carrierName)} · ${escapeHtml(delivery + packageDetail)}</small></span><b>${formatCurrency(rate.amount, rate.currency)}</b><i>${selected ? "✓" : "Select"}</i></button>`;
     }).join("")}</div>`
     : state.rates
-      ? '<div class="shipping-empty-rates"><span>!</span><strong>FedEx One Rate Pak is unavailable</strong><p>Confirm this service is enabled on the connected FedEx account and try again.</p></div>'
+      ? `<div class="shipping-empty-rates"><span>!</span><strong>${escapeHtml(activeServiceName)} is unavailable</strong><p>No approved service was returned for this destination. Check the address and try again.</p></div>`
       : "";
   const selectedRate = state.selectedRateIndex === null
     ? null
     : state.rates?.rates[state.selectedRateIndex] || null;
   return `<section class="shipping-workspace" data-fulfillment-id="${escapeHtml(fulfillmentId)}">
     <div class="shipping-flow-rail"><span class="is-done"><i>✓</i><b>Packed</b></span><em></em><span class="is-current"><i>2</i><b>Choose shipping</b></span><em></em><span><i>3</i><b>${capabilities.dataMode === "live" ? "Purchase label" : "Test label"}</b></span></div>
-    <header class="shipping-workspace-head"><div><p class="section-kicker">Shipping · ${escapeHtml(modeLabel)}</p><h3>FedEx One Rate Pak</h3><p>The approved warehouse service is locked in, so the worker only confirms the package weight and purchases the exact rate.</p></div><span class="shipping-mode is-${capabilities.dataMode}">${capabilities.dataMode === "live" ? "CONNECTED" : "SAFE TEST MODE"}</span></header>
+    <header class="shipping-workspace-head"><div><p class="section-kicker">Shipping · ${escapeHtml(modeLabel)}</p><h3>${escapeHtml(activeServiceName)}</h3><p>The approved service is selected automatically for the destination: ${escapeHtml(activeCarrierName)} for this order.</p></div><span class="shipping-mode is-${capabilities.dataMode}">${capabilities.dataMode === "live" ? "CONNECTED" : "SAFE TEST MODE"}</span></header>
     ${capabilities.dataMode === "mock"
       ? '<div class="shipping-test-banner"><span>i</span><p><strong>Test environment</strong> Carrier names, prices and label purchase are simulated. Nothing is sent to ShipStation.</p></div>'
       : purchaseUnlocked
@@ -5471,7 +5475,7 @@ function shippingWorkspaceMarkup(order: FulfillmentQueueEntry, state: Fulfillmen
     ${destination ? `<div class="shipping-destination"><span>SHIP TO</span><strong>${escapeHtml(destination.city)}, ${escapeHtml(destination.state)} ${escapeHtml(destination.postalCode)}</strong><small>${escapeHtml(destination.countryCode)} · Address remains sourced from the order</small></div>` : ""}
     ${state.error ? `<p class="shipping-error" role="alert"><span>!</span>${escapeHtml(state.error)}</p>` : ""}
     ${rateCards}
-    ${selectedRate ? `<div class="shipping-purchase-review"><div><p class="section-kicker">Approved service</p><h4>${PHASE_ONE_SHIPPING_POLICY.serviceName}</h4><p>${formatCurrency(selectedRate.amount, selectedRate.currency)}${selectedRate.isEstimate ? " estimated" : " final quoted total"} · ${PHASE_ONE_SHIPPING_POLICY.packageName} · 4×6 PDF</p></div><div class="shipping-purchase-safety${purchaseUnlocked ? " is-live" : ""}"><span>${capabilities.dataMode === "mock" ? "TEST" : purchaseUnlocked ? "LIVE" : "LOCKED"}</span><p>${capabilities.dataMode === "mock" ? "Creates a local test label only. No postage or source order is changed." : purchaseUnlocked ? "Explicit confirmation purchases this exact rate once and writes tracking back safely." : "Live purchase is disabled on the server. Ask an administrator to complete the launch checklist."}</p></div><button class="button button--primary" type="button" ${capabilities.dataMode === "mock" ? "data-generate-shipping-label" : purchaseUnlocked ? "data-review-live-label" : "disabled"}${state.labelBusy ? " disabled" : ""}>${state.labelBusy ? "Processing safely…" : capabilities.dataMode === "mock" ? "Generate test label" : purchaseUnlocked ? `Review & purchase ${formatCurrency(selectedRate.amount, selectedRate.currency)}` : "Purchase locked"}</button></div>` : ""}
+    ${selectedRate ? `<div class="shipping-purchase-review"><div><p class="section-kicker">Approved service</p><h4>${escapeHtml(activeServiceName)}</h4><p>${formatCurrency(selectedRate.amount, selectedRate.currency)}${selectedRate.isEstimate ? " estimated" : " final quoted total"} · ${escapeHtml(activePackageName)} · 4×6 PDF</p></div><div class="shipping-purchase-safety${purchaseUnlocked ? " is-live" : ""}"><span>${capabilities.dataMode === "mock" ? "TEST" : purchaseUnlocked ? "LIVE" : "LOCKED"}</span><p>${capabilities.dataMode === "mock" ? "Creates a local test label only. No postage or source order is changed." : purchaseUnlocked ? "Explicit confirmation purchases this exact rate once and writes tracking back safely." : "Live purchase is disabled on the server. Ask an administrator to complete the launch checklist."}</p></div><button class="button button--primary" type="button" ${capabilities.dataMode === "mock" ? "data-generate-shipping-label" : purchaseUnlocked ? "data-review-live-label" : "disabled"}${state.labelBusy ? " disabled" : ""}>${state.labelBusy ? "Processing safely…" : capabilities.dataMode === "mock" ? "Generate test label" : purchaseUnlocked ? `Review & purchase ${formatCurrency(selectedRate.amount, selectedRate.currency)}` : "Purchase locked"}</button></div>` : ""}
   </section>`;
 }
 
@@ -5603,6 +5607,7 @@ async function compareShippingRates(): Promise<void> {
     if (!ratesPayload) throw new Error("FedEx did not return a rate. Nothing was charged; try again in a moment.");
     state.error = null;
     state.rates = ratesPayload;
+    state.package = ratesPayload.package;
     state.selectedRateIndex = state.rates.rates.length === 1 ? 0 : null;
   } catch (error) {
     state.error = error instanceof Error && error.name === "TimeoutError"

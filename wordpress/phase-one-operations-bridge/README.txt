@@ -50,6 +50,12 @@ Version 2.1.1 carries the immutable Packed confirmation through the protected
 COA assignment request. The bridge rejects unconfirmed manual writes and only
 forwards a physical-lot confirmation supplied by the authenticated dashboard.
 
+Version 2.1.3 accepts the exact Available COA captured by the fulfillment
+scanner as the authoritative physical lot. It validates the order item,
+variation, SKU and quantity before saving a durable customer-order snapshot,
+so certificates stored in the new Operations database no longer fail because
+the legacy WordPress COA catalog does not contain the same record.
+
 Version 1.7.0 adds idempotent native shipment tracking save and void support.
 
 Version 1.7.1 fixes inventory waitlist visibility. The bridge now reads active

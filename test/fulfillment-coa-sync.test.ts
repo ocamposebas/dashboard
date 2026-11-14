@@ -39,6 +39,11 @@ function snapshot(): FulfillmentPackingSnapshot {
         lot: "LOT-201",
         batch: "BATCH-201",
         quantity: 2,
+        productId: 201,
+        variationId: 301,
+        sku: "BPC-10-BLUE",
+        productName: "BPC-157 10mg",
+        status: "Available",
       }],
     }],
   };
@@ -71,11 +76,11 @@ function workspace(assignments: CommerceOrderCoaWorkspace["items"][number]["assi
 
 test("packed vial allocations are assigned once with a stable protected event id", async () => {
   let current = workspace();
-  const calls: Array<{ quantity: number; eventId: string; confirmed: boolean }> = [];
+  const calls: Array<{ quantity: number; eventId: string; confirmed: boolean; verified: boolean }> = [];
   const gateway = {
     getOrderCoas: async () => current,
-    assignOrderCoa: async (_orderId: number, _itemId: number, coaId: string, quantity: number, eventId?: string, confirmed = false) => {
-      calls.push({ quantity, eventId: eventId || "", confirmed });
+    assignOrderCoa: async (_orderId: number, _itemId: number, coaId: string, quantity: number, eventId?: string, confirmed = false, context?: { verifiedScan: boolean }) => {
+      calls.push({ quantity, eventId: eventId || "", confirmed, verified: context?.verifiedScan === true });
       current = workspace([{
         assignmentId: "assignment-1",
         coaId,
@@ -93,6 +98,7 @@ test("packed vial allocations are assigned once with a stable protected event id
   assert.equal(calls.length, 1);
   assert.match(calls[0]!.eventId, /^[a-f0-9]{64}$/);
   assert.equal(calls[0]!.confirmed, true);
+  assert.equal(calls[0]!.verified, true);
 
   const replay = await syncPackedCoaAssignments({ snapshot: snapshot(), gateway });
   assert.equal(replay.assignedUnits, 0);

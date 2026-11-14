@@ -2526,6 +2526,23 @@ export class WooCommerceGateway {
     quantity: number,
     eventId?: string,
     confirmed = false,
+    verifiedContext?: {
+      verifiedScan: boolean;
+      productId: number;
+      variationId: number;
+      sku: string;
+      coaNumber: string;
+      lot: string;
+      productName: string;
+      strength: string;
+      testingDate: string;
+      laboratory: string;
+      testMethod: string;
+      purity: string;
+      status: string;
+      fileUrl: string;
+      verifyUrl: string;
+    },
   ): Promise<CommerceOrderCoaWorkspace> {
     await this.requestRoute(`/wp-json/phaseone-ops/v1/orders/${orderId}/items/${itemId}/coas`, {
       method: "POST",
@@ -2534,6 +2551,23 @@ export class WooCommerceGateway {
         quantity,
         confirmed,
         ...(eventId ? { event_id: eventId } : {}),
+        ...(verifiedContext ? {
+          verified_scan: verifiedContext.verifiedScan,
+          product_id: verifiedContext.productId,
+          variation_id: verifiedContext.variationId,
+          sku: verifiedContext.sku,
+          coa_number: verifiedContext.coaNumber,
+          lot: verifiedContext.lot,
+          product_name: verifiedContext.productName,
+          strength: verifiedContext.strength,
+          testing_date: verifiedContext.testingDate,
+          laboratory: verifiedContext.laboratory,
+          test_method: verifiedContext.testMethod,
+          purity: verifiedContext.purity,
+          status: verifiedContext.status,
+          file_url: verifiedContext.fileUrl,
+          verify_url: verifiedContext.verifyUrl,
+        } : {}),
       },
       headers: this.operationsHeaders(),
     }, false);

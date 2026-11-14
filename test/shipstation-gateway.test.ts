@@ -477,3 +477,21 @@ test("surfaces a temporary FedEx carrier outage hidden inside ShipStation status
     },
   );
 });
+
+test("label purchase preserves ShipStation's safe rejection reason for the worker", async () => {
+  const gateway = new ShipStationGateway({
+    apiKey: "server-only-key", rateMode: "live", labelPurchaseEnabled: true,
+  }, async () => new Response(JSON.stringify({
+    errors: [{ message: "Recipient address could not be validated" }],
+  }), { status: 400 }), "https://shipstation.example/v2");
+
+  await assert.rejects(
+    gateway.purchaseLabelFromRate("se-rate-address"),
+    (error: unknown) => {
+      assert.ok(error instanceof ShipStationGatewayError);
+      assert.equal(error.code, "purchase_rejected");
+      assert.match(error.message, /Recipient address could not be validated/);
+      return true;
+    },
+  );
+});

@@ -106,9 +106,15 @@ export async function syncPackedCoaAssignments(input: {
     const alreadyAssigned = matchingQuantity(workspace, allocation);
     const missing = allocation.quantity - alreadyAssigned;
     if (missing <= 0) continue;
-    if (line.remainingQuantity < missing) {
+    const conflictingVerifiedUnits = line.assignments
+      .filter((assignment) => assignment.source !== "purchase_snapshot" && (
+        assignment.coaId !== allocation.coaId ||
+        normalized(assignment.lot) !== normalized(allocation.lot)
+      ))
+      .reduce((sum, assignment) => sum + assignment.quantity, 0);
+    if (conflictingVerifiedUnits > 0) {
       throw new FulfillmentCoaSyncError(
-        `${line.name} already has a different COA allocation. Review it before replacing the scanned lot.`,
+        `${line.name} already has a different verified lot. Review it before replacing the scanned lot.`,
         "conflict",
       );
     }
@@ -120,6 +126,23 @@ export async function syncPackedCoaAssignments(input: {
         missing,
         eventId(input.snapshot, allocation),
         true,
+        {
+          verifiedScan: true,
+          productId: allocation.productId || 0,
+          variationId: allocation.variationId || 0,
+          sku: allocation.sku || line.sku,
+          coaNumber: allocation.coaNumber,
+          lot: allocation.lot,
+          productName: allocation.productName || line.name,
+          strength: allocation.strength || "",
+          testingDate: allocation.testingDate || "",
+          laboratory: allocation.laboratory || "",
+          testMethod: allocation.testMethod || "",
+          purity: allocation.purity || "",
+          status: allocation.status || "Available",
+          fileUrl: allocation.fileUrl || "",
+          verifyUrl: allocation.verifyUrl || "",
+        },
       );
     } catch (error) {
       throw new FulfillmentCoaSyncError(
