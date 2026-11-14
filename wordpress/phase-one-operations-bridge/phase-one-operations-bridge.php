@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Phase One Operations Bridge
  * Description: Secure bridge between Phase One Operations Suite, storefront controls, customer rewards and existing COA Manager records.
- * Version: 2.1.3
+ * Version: 2.1.4
  * Author: Phase One Labz
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -163,7 +163,7 @@ final class Phase_One_Operations_Bridge {
     public static function status() {
         return rest_ensure_response([
             'connected' => true,
-            'version' => '2.1.2',
+            'version' => '2.1.4',
             'capabilities' => array_values(array_filter([
                 'edit_coa',
                 'read_customer_rewards',
@@ -571,6 +571,44 @@ final class Phase_One_Operations_Bridge {
         return self::proxy_request('DELETE', '/phaseone/v1/order-evidence/orders/' . absint($request['id']) . '/' . sanitize_key($request['evidence']), $request);
     }
 
+    private static function packaging_evidence_email_html($subject, $content) {
+        $logo_url = function_exists('p1mail_logo_url') ? p1mail_logo_url() : '';
+        if ($logo_url === '') {
+            $uploads = wp_upload_dir();
+            $logo_url = !empty($uploads['baseurl'])
+                ? trailingslashit($uploads['baseurl']) . '2026/06/TRANSPARENCIA-01-1-scaled.png'
+                : '';
+        }
+
+        $logo = $logo_url !== ''
+            ? '<img src="' . esc_url($logo_url) . '" width="176" alt="Phase One Labz" style="display:block;width:176px!important;max-width:176px!important;height:auto!important;margin:0;border:0;outline:none;text-decoration:none;">'
+            : '<div style="font-size:18px;line-height:1.2;font-weight:800;letter-spacing:2px;color:#ffffff;">PHASE ONE LABZ</div>';
+
+        return '<!doctype html><html lang="en"><head>'
+            . '<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            . '<meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark">'
+            . '<title>' . esc_html(wp_strip_all_tags($subject)) . '</title>'
+            . '<style type="text/css">'
+            . 'body{margin:0!important;padding:0!important;-webkit-text-size-adjust:100%!important;background:#eef3f6;color:#33475b;font-family:Arial,Helvetica,sans-serif;}'
+            . 'table{border-collapse:separate;border-spacing:0;}img{border:0;display:block;}'
+            . '@media only screen and (max-width:660px){.p1e-wrap{padding:12px 0 24px!important}.p1e-card{width:94%!important;border-radius:16px!important}.p1e-pad{padding-left:22px!important;padding-right:22px!important}.p1e-title{font-size:27px!important;line-height:1.15!important}}'
+            . '@media (prefers-color-scheme:dark){body,.p1e-wrap{background:#030a12!important}.p1e-card,.p1e-main{background:#08131f!important}.p1e-copy{color:#cbd5e1!important;-webkit-text-fill-color:#cbd5e1!important}.p1e-panel{background:#0d1e2c!important;border-color:#244052!important}.p1e-footer{background:#07111d!important;border-color:#244052!important;color:#91a4b7!important}}'
+            . '[data-ogsc] .p1e-wrap{background:#030a12!important}[data-ogsc] .p1e-card,[data-ogsc] .p1e-main{background:#08131f!important}[data-ogsc] .p1e-copy{color:#cbd5e1!important}'
+            . '</style></head>'
+            . '<body><table class="p1e-wrap" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#eef3f6" style="width:100%;background:#eef3f6;padding:30px 12px 38px;">'
+            . '<tr><td align="center">'
+            . '<table class="p1e-card" role="presentation" width="620" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="width:620px;max-width:620px;background:#ffffff;border:1px solid #dce5ec;border-radius:20px;overflow:hidden;">'
+            . '<tr><td class="p1e-pad" bgcolor="#071421" style="padding:28px 34px 30px;background:#071421;">'
+            . $logo
+            . '<div style="margin-top:22px;font-size:10px;line-height:1.2;letter-spacing:2.2px;text-transform:uppercase;font-weight:800;color:#78d7f2;">Verified fulfillment record</div>'
+            . '<div class="p1e-title" style="margin-top:9px;font-size:31px;line-height:1.12;font-weight:800;letter-spacing:-.02em;color:#ffffff;">' . esc_html(wp_strip_all_tags($subject)) . '</div>'
+            . '</td></tr>'
+            . '<tr><td class="p1e-main p1e-pad p1e-copy" bgcolor="#ffffff" style="padding:30px 34px 28px;background:#ffffff;color:#33475b;font-size:15px;line-height:1.7;">' . $content . '</td></tr>'
+            . '<tr><td class="p1e-footer p1e-pad" bgcolor="#f5f8fa" style="padding:20px 34px;background:#f5f8fa;border-top:1px solid #dce5ec;color:#66798c;font-size:12px;line-height:1.6;">'
+            . 'Phase One Labz · For research use only.<br>Questions? Reply to this email or contact <a href="mailto:support@phaseonelabz.com" style="color:#0879ad;font-weight:700;text-decoration:none;">support@phaseonelabz.com</a>.'
+            . '</td></tr></table></td></tr></table></body></html>';
+    }
+
     /**
      * Email the dashboard's two confirmed packaging photos through WordPress.
      *
@@ -678,19 +716,14 @@ final class Phase_One_Operations_Bridge {
             $customer_name = trim((string) $order->get_formatted_billing_full_name());
             $confirmed_at = sanitize_text_field((string) $request->get_param('confirmed_at'));
             $body = sprintf(
-                '<p style="margin:0 0 16px;">Hello %s,</p><p style="margin:0 0 16px;">Your order <strong>#%s</strong> has been packed and verified.</p><table role="presentation" width="100%%" cellspacing="0" cellpadding="0" border="0" style="width:100%%;margin:22px 0;border:1px solid #dbe6ee;border-radius:12px;background:#f5f9fc;"><tr><td style="padding:18px;"><p style="margin:0 0 7px;color:#0a6ea8;font-size:11px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;">Packaging record</p><p style="margin:0;color:#33475b;line-height:1.6;">We attached %s from the verified packaging process.%s</p></td></tr></table><p style="margin:0;">Please keep this email with your order records. If you need help, reply to this message.</p>',
+                '<p class="p1e-copy" style="margin:0 0 16px;color:#33475b;">Hello %s,</p><p class="p1e-copy" style="margin:0 0 16px;color:#33475b;">Your order <strong>#%s</strong> has been packed and verified.</p><table class="p1e-panel" role="presentation" width="100%%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f5f9fc" style="width:100%%;margin:22px 0;border:1px solid #dbe6ee;border-radius:12px;background:#f5f9fc;"><tr><td style="padding:18px;"><p style="margin:0 0 7px;color:#0a6ea8;font-size:11px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;">Packaging record</p><p class="p1e-copy" style="margin:0;color:#33475b;line-height:1.6;">We attached %s from the verified packaging process.%s</p></td></tr></table><p class="p1e-copy" style="margin:0;color:#33475b;">Please keep this email with your order records. If you need help, reply to this message.</p>',
                 esc_html($customer_name ?: 'there'),
                 esc_html($order->get_order_number()),
                 count($temp_files) === 1 ? 'one evidence photo' : 'two evidence photos',
                 $confirmed_at ? '<br><strong>Packaging confirmed:</strong> ' . esc_html($confirmed_at) : ''
             );
-            $mailer = WC()->mailer();
-            $message = method_exists($mailer, 'wrap_message')
-                ? $mailer->wrap_message('Your Phase One Labz packaging evidence', $body)
-                : $body;
-            if (is_object($mailer) && method_exists($mailer, 'style_inline')) {
-                $message = $mailer->style_inline($message);
-            }
+            $subject = sprintf('Your Phase One Labz packaging evidence - Order #%s', $order->get_order_number());
+            $message = self::packaging_evidence_email_html($subject, $body);
             $content_type_filter = static function () {
                 return 'text/html';
             };
@@ -698,7 +731,7 @@ final class Phase_One_Operations_Bridge {
             try {
                 $accepted = (bool) wp_mail(
                     $recipient,
-                    sprintf('Your Phase One Labz packaging evidence - Order #%s', $order->get_order_number()),
+                    $subject,
                     $message,
                     ['Reply-To: Phase One Labz <support@phaseonelabz.com>'],
                     $temp_files

@@ -26,3 +26,12 @@ test("verified fulfillment scans bypass legacy COA mapping and preserve the cust
   assert.match(bridgeSource, /fulfillment_verified_scan/);
   assert.match(bridgeSource, /phaseone_verified_scan_mismatch/);
 });
+
+test("packaging evidence email uses one bounded standalone layout", () => {
+  assert.match(bridgeSource, /packaging_evidence_email_html/);
+  assert.match(bridgeSource, /width=\"176\"/);
+  assert.match(bridgeSource, /width:\s*620px/);
+  assert.match(bridgeSource, /supported-color-schemes/);
+  assert.doesNotMatch(bridgeSource, /->wrap_message\(/);
+  assert.doesNotMatch(bridgeSource, /->style_inline\(/);
+});

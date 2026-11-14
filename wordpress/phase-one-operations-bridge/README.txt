@@ -56,6 +56,11 @@ variation, SKU and quantity before saving a durable customer-order snapshot,
 so certificates stored in the new Operations database no longer fail because
 the legacy WordPress COA catalog does not contain the same record.
 
+Version 2.1.4 gives packaging-evidence notifications one self-contained,
+responsive email layout instead of nesting the message inside the active
+WooCommerce theme. The logo has an explicit email-safe size, content remains
+readable in light and dark mode, and the evidence photos remain attachments.
+
 Version 1.7.0 adds idempotent native shipment tracking save and void support.
 
 Version 1.7.1 fixes inventory waitlist visibility. The bridge now reads active
