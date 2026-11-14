@@ -191,6 +191,7 @@ test("Phase One shipping requests only FedEx 2Day with the One Rate Pak package"
   const rateRequest = requests.find((request) => request.url.endsWith("/rates"));
   const shipment = rateRequest?.body.shipment as Record<string, unknown>;
   const parcel = (shipment.packages as Array<Record<string, unknown>>)[0];
+  assert.equal(shipment.validate_address, "validate_and_clean");
   assert.equal(parcel?.package_code, "fedex_pak_onerate");
   assert.equal("dimensions" in (parcel || {}), false);
   assert.equal(shipment.insurance_provider, "none");
@@ -366,6 +367,7 @@ test("rate shopping updates and reuses one exported pending shipment", async () 
   assert.equal(rates[0]?.shipmentId, "se-shipment-pending");
   const update = requests.find((request) => request.url.endsWith("/shipments/se-shipment-pending"));
   assert.equal(update?.method, "PUT");
+  assert.equal(update?.body.validate_address, "validate_and_clean");
   assert.equal((update?.body.packages as Array<Record<string, unknown>>)[0]?.package_code, "package");
   const rate = requests.find((request) => request.url.endsWith("/rates"));
   assert.equal(rate?.body.shipment_id, "se-shipment-pending");

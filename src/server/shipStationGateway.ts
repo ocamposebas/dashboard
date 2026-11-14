@@ -659,7 +659,7 @@ export class ShipStationGateway {
       ...(phaseOnePolicySelected ? { package_types: [PHASE_ONE_SHIPPING_POLICY.packageCode] } : {}),
     };
     const shipmentDetails = {
-      validate_address: "validate_only",
+      validate_address: "validate_and_clean",
       warehouse_id: origin.id,
       confirmation: "none",
       insurance_provider: "none",
