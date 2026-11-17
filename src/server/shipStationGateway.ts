@@ -83,6 +83,27 @@ export interface ShipStationOrderReconciliation {
   reusableShipmentId: string | null;
 }
 
+export interface ShipStationTrackingEvent {
+  occurredAt: string | null;
+  description: string;
+  city: string;
+  state: string;
+  postalCode: string;
+}
+
+export interface ShipStationTrackingResult {
+  trackingNumber: string;
+  statusCode: string;
+  statusDescription: string;
+  carrierStatusCode: string;
+  carrierStatusDescription: string;
+  shippedDate: string | null;
+  estimatedDeliveryDate: string | null;
+  actualDeliveryDate: string | null;
+  exceptionDescription: string | null;
+  events: ShipStationTrackingEvent[];
+}
+
 export interface ShipStationVoidResult {
   approved: boolean;
   message: string;
@@ -294,6 +315,46 @@ function labelList(value: unknown): ShipStationLabelResult[] {
     throw new ShipStationGatewayError("ShipStation returned an invalid label list", "invalid_response");
   }
   return items.map(labelResult);
+}
+
+function optionalDate(value: unknown): string | null {
+  const raw = textValue(value);
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function trackingResult(value: unknown): ShipStationTrackingResult {
+  const source = record(value);
+  const trackingNumber = textValue(source?.tracking_number);
+  const statusCode = textValue(source?.status_code).toUpperCase();
+  const statusDescription = textValue(source?.status_description);
+  if (!source || !trackingNumber || !/^[A-Z]{2}$/.test(statusCode) || !statusDescription) {
+    throw new ShipStationGatewayError("ShipStation returned an invalid tracking record", "invalid_response");
+  }
+  const events = Array.isArray(source.events) ? source.events.flatMap((value) => {
+    const event = record(value);
+    if (!event) return [];
+    return [{
+      occurredAt: optionalDate(event.occurred_at),
+      description: textValue(event.description),
+      city: textValue(event.city_locality),
+      state: textValue(event.state_province),
+      postalCode: textValue(event.postal_code),
+    }];
+  }).sort((left, right) => Date.parse(right.occurredAt || "") - Date.parse(left.occurredAt || "")) : [];
+  return {
+    trackingNumber,
+    statusCode,
+    statusDescription,
+    carrierStatusCode: textValue(source.carrier_status_code),
+    carrierStatusDescription: textValue(source.carrier_status_description),
+    shippedDate: optionalDate(source.shipped_date),
+    estimatedDeliveryDate: optionalDate(source.estimated_delivery_date),
+    actualDeliveryDate: optionalDate(source.actual_delivery_date),
+    exceptionDescription: textValue(source.exception_description) || null,
+    events,
+  };
 }
 
 function shipmentList(value: unknown): Array<{ shipmentId: string; shipmentNumber: string; status: string }> {
@@ -854,6 +915,17 @@ export class ShipStationGateway {
       throw new ShipStationGatewayError("The ShipStation label identifier is invalid", "invalid_response");
     }
     return labelResult(await this.request(`/labels/${encodeURIComponent(normalized)}`));
+  }
+
+  async trackLabelById(labelId: string): Promise<ShipStationTrackingResult> {
+    const normalized = labelId.trim();
+    if (!normalized || normalized.length > 160 || !/^[a-zA-Z0-9_-]+$/.test(normalized)) {
+      throw new ShipStationGatewayError("The ShipStation label identifier is invalid", "invalid_response");
+    }
+    if (this.config.rateMode !== "live") {
+      throw new ShipStationGatewayError("Live delivery tracking is unavailable in mock mode", "not_configured");
+    }
+    return trackingResult(await this.request(`/labels/${encodeURIComponent(normalized)}/track`));
   }
 
   async voidLabel(labelId: string): Promise<ShipStationVoidResult> {

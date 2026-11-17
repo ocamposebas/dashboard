@@ -21,6 +21,9 @@ import { FulfillmentEvidenceStorage } from "./fulfillmentEvidenceStorage.js";
 import { OrderPushRepository } from "./orderPushRepository.js";
 import { OrderPushService } from "./orderPushService.js";
 import { orderNotificationPayload, type OrderNotificationSource } from "./orderNotifications.js";
+import { WooCommerceGateway } from "./wooCommerceGateway.js";
+import { DeliveryMonitorRepository } from "./deliveryMonitorRepository.js";
+import { DeliveryMonitorService } from "./deliveryMonitorService.js";
 
 const config = loadConfig();
 if (config.evidenceStorage) {
@@ -59,6 +62,15 @@ const store = new PresenceStore(
   config.presenceTtlMs,
   config.analyticsTimeZone,
 );
+const deliveryMonitor = fulfillmentDatabase && config.wooCommerce
+  ? new DeliveryMonitorService(
+      new DeliveryMonitorRepository(fulfillmentDatabase),
+      shipStationGateway,
+      new WooCommerceGateway(config.wooCommerce),
+      store,
+      config.dashboardOrigin,
+    )
+  : undefined;
 const recordNewOrder = async (order: OrderNotificationSource): Promise<void> => {
   const payload = orderNotificationPayload(order);
   const recorded = await store.addNotificationOnce(payload.dedupeKey, payload.notification);
@@ -72,6 +84,7 @@ const server = createMonitorServer(config, store, {
   ...(orderPushService ? { orderPushService } : {}),
   recordNewOrder,
   shipStationGateway,
+  ...(deliveryMonitor ? { deliveryMonitor } : {}),
 });
 const hub = new SocketHub(config, store);
 const upstreamMonitor = config.upstreamMonitor
@@ -156,6 +169,7 @@ if (config.monitorPasswordResetHash) {
     ? "One-time administrator password recovery applied; previous sessions were invalidated"
     : "One-time administrator password recovery was already applied");
 }
+deliveryMonitor?.start();
 if (siteControlRepository) {
   const durableControls = await siteControlRepository.get();
   if (!durableControls) {
@@ -201,6 +215,7 @@ async function shutdown(signal: string): Promise<void> {
   await upstreamMonitor?.close();
   await orderSync?.close();
   await affiliateShadowSync?.close();
+  deliveryMonitor?.close();
   await fulfillmentDatabase?.close();
   await hub.close();
   await store.disconnect();

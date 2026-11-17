@@ -31,6 +31,7 @@
             <button class="nav-item" type="button" data-view="bulk-orders"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4zM4 11h16M8 7V4h8v3M8 15h3M14 15h2"/></svg></span><span>Bulk Orders</span><b class="nav-count" id="bulk-orders-nav-count" hidden>0</b></button>
             <button class="nav-item" type="button" data-view="insurance"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v5c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6zM9 12l2 2 4-5"/></svg></span><span>Insurance fund</span></button>
             <button class="nav-item" type="button" data-view="fulfillment"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m4 7 8-4 8 4-8 4zM4 7v10l8 4 8-4V7M8.5 14l2 2 4-4"/></svg></span><span>Fulfillment</span><b class="nav-count" id="fulfillment-nav-count">0</b></button>
+            <button class="nav-item" type="button" data-view="delivery"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6h11v10H3zM14 9h4l3 3v4h-7zM7 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg></span><span>Delivery monitor</span><b class="nav-count delivery-nav-count" id="delivery-nav-count" hidden>0</b></button>
             <button class="nav-item" type="button" data-view="monitor"><span class="nav-icon nav-icon--live" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg></span><span>Live monitor</span><b class="nav-count nav-presence-count" id="nav-live-count" hidden>0</b></button>
           </div>
 
@@ -181,6 +182,41 @@
               <article class="surface insurance-activity-card"><header class="insurance-card-header"><div><p class="section-kicker">Reserve ledger</p><h2>Money movement</h2><p>Every collected protection fee and approved loss, newest first.</p></div><div class="insurance-tabs" role="tablist"><button class="is-active" type="button" data-insurance-tab="contributions">Collections</button><button type="button" data-insurance-tab="claims">Claims</button></div></header><div class="insurance-ledger" id="insurance-contributions"></div><div class="insurance-ledger" id="insurance-claims-ledger" hidden></div></article>
 
               <aside class="surface insurance-claim-card"><div class="insurance-claim-heading"><span class="insurance-claim-icon">−</span><div><p class="section-kicker">Record a loss</p><h2>Add a verified claim</h2><p>Search the protected order, confirm the payout and deduct it from the reserve.</p></div><span class="integration-state" id="insurance-claim-permission">Administrator</span></div><div class="insurance-claim-step"><b>1</b><span><strong>Find the protected order</strong><small>Order number, customer or email</small></span></div><label class="insurance-search"><span>Protected order</span><div><input id="insurance-order-search" type="search" placeholder="Example: 3230 or customer email" autocomplete="off" /><button class="button button--secondary" id="insurance-order-find" type="button">Search</button></div></label><div class="insurance-order-results" id="insurance-order-results"><div class="insurance-claim-empty"><span>⌕</span><strong>No order selected</strong><small>Search only when a shipment loss needs to be recorded.</small></div></div><form id="insurance-claim-form" hidden><input id="insurance-claim-order-id" type="hidden" /><div class="insurance-claim-step"><b>2</b><span><strong>Confirm the deduction</strong><small>This action is saved in the claims ledger</small></span></div><div class="insurance-selected-order" id="insurance-selected-order"></div><div class="insurance-claim-fields"><label><span>Amount paid</span><div class="insurance-money-field"><b>$</b><input id="insurance-claim-amount" type="number" min="0.01" step="0.01" required /></div></label><label><span>Why was it paid?</span><textarea id="insurance-claim-reason" minlength="3" maxlength="500" placeholder="Package lost in transit; replacement issued…" required></textarea></label></div><button class="button button--primary insurance-claim-submit" type="submit">Record claim &amp; deduct</button><p class="insurance-claim-warning">This changes the available reserve and cannot be hidden from the audit history.</p></form></aside>
+            </div>
+          </section>
+
+          <section class="view-panel delivery-workspace" data-view-panel="delivery" aria-labelledby="delivery-title">
+            <div class="page-header delivery-page-header">
+              <div><p class="eyebrow">Shipment health</p><h1 id="delivery-title">Delivery monitor</h1><p class="page-description">See delayed packages, carrier exceptions and delivery confirmation in one owner-controlled queue.</p></div>
+              <div class="page-actions"><span class="delivery-live-state" id="delivery-live-state"><i></i><span><small>LAST CARRIER CHECK</small><b id="delivery-last-check">Waiting for first check</b></span></span><button class="button button--secondary" id="delivery-refresh" type="button">Refresh tracking</button></div>
+            </div>
+
+            <section class="delivery-alert-strip" id="delivery-alert-strip" aria-live="polite"><span>!</span><div><strong>No delivery emergencies detected</strong><p>The carrier queue will highlight packages that need action.</p></div></section>
+
+            <section class="delivery-kpis" aria-label="Delivery summary">
+              <article class="is-critical"><span>NEEDS ATTENTION</span><strong id="delivery-stat-attention">—</strong><small>Delayed or carrier exception</small></article>
+              <article><span>IN TRANSIT</span><strong id="delivery-stat-transit">—</strong><small>Moving through the carrier</small></article>
+              <article><span>AWAITING FIRST SCAN</span><strong id="delivery-stat-unscanned">—</strong><small>Label created, no movement yet</small></article>
+              <article><span>DELIVERED</span><strong id="delivery-stat-delivered">—</strong><small>Confirmed by the carrier</small></article>
+            </section>
+
+            <div class="delivery-layout">
+              <article class="surface delivery-queue-card">
+                <header class="delivery-queue-head"><div><p class="section-kicker">Carrier queue</p><h2>Every tracked shipment</h2><p>Urgent records stay first. Acknowledging an alert keeps it visible but marks it as reviewed.</p></div><div class="delivery-filter-tabs" role="group" aria-label="Filter deliveries"><button class="is-active" type="button" data-delivery-filter="attention">Attention</button><button type="button" data-delivery-filter="active">Active</button><button type="button" data-delivery-filter="delivered">Delivered</button><button type="button" data-delivery-filter="all">All</button></div></header>
+                <label class="delivery-search"><span>⌕</span><input id="delivery-search" type="search" placeholder="Order, customer or tracking number" /></label>
+                <div class="delivery-list" id="delivery-list"><div class="table-loading">Loading carrier tracking…</div></div>
+              </article>
+
+              <aside class="surface delivery-settings-card">
+                <div class="delivery-settings-heading"><span>⚙</span><div><p class="section-kicker">Owner alerts</p><h2>Email control</h2><p>Only the selected active owner receives delivery-delay email.</p></div></div>
+                <form id="delivery-settings-form">
+                  <label><span>Alert after</span><div class="delivery-days-field"><input id="delivery-delay-days" type="number" min="1" max="30" step="1" value="5" /><b>days</b></div><small>Counts full calendar days after the carrier shipment date.</small></label>
+                  <label><span>Owner recipient</span><select id="delivery-owner-recipient"><option value="">Loading owner accounts…</option></select><small id="delivery-owner-email">One active owner account is selected.</small></label>
+                  <label class="delivery-email-toggle"><span><strong>Email alerts</strong><small>Send once when the limit is crossed or a carrier exception appears.</small></span><input id="delivery-email-enabled" type="checkbox" checked /></label>
+                  <button class="button button--primary" id="delivery-settings-save" type="submit">Save owner alerts</button>
+                </form>
+                <div class="delivery-policy-note"><i>✓</i><p><strong>No duplicate emails</strong><span>Each incident has one protected delivery event. Refreshing does not resend it.</span></p></div>
+              </aside>
             </div>
           </section>
 

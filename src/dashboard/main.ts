@@ -7,9 +7,11 @@ import "./finance.css";
 import "./tiktok-integration.css";
 import "./bulk-orders.css";
 import "./coupons-admin.css";
+import "./delivery-monitor.css";
 import { initBulkOrders, loadBulkOrders } from "./bulk-orders";
 import { initAffiliateAdmin, loadAffiliateAdmin } from "./affiliates-admin";
 import { initCouponAdmin, loadCoupons } from "./coupons-admin";
+import { initDeliveryMonitor, loadDeliveryMonitor } from "./delivery-monitor";
 import type { AffiliateCommissionSummary } from "../shared/affiliates";
 import {
   TIKTOK_PIXEL_EVENT_KEYS,
@@ -9301,6 +9303,7 @@ const viewNames: Record<string, string> = {
   insurance: "Insurance money collected",
   products: "Products",
   fulfillment: "Fulfillment",
+  delivery: "Delivery monitor",
   labels: "Product barcode labels",
   media: "Media library",
   customers: "Customers",
@@ -9518,6 +9521,7 @@ function navigate(view: string): void {
   if (view === "settings") showSettingsView(requestedTeamSettings ? "team" : "general");
   if (view === "labels") void loadFulfillmentLocations();
   if (view === "fulfillment") void loadFulfillmentQueue();
+  if (view === "delivery") void loadDeliveryMonitor();
 }
 
 function openCommandPalette(): void {
@@ -12603,6 +12607,7 @@ loadSavedSettings();
 initAffiliateAdmin();
 initBulkOrders();
 initCouponAdmin();
+initDeliveryMonitor();
 hydrateFastStatisticPreviews();
 renderOverviewFinancials();
 renderInsuranceFund();
@@ -12624,6 +12629,7 @@ void loadWorkspaceSession().then(() => {
   if (activeView === "seo") void loadSeo();
   if (activeView === "loyalty") void loadLoyalty();
   if (activeView === "integrations") void loadTikTokPixelSettings();
+  if (activeView !== "delivery") void loadDeliveryMonitor(true);
 });
 void loadTikTokPixelSettings();
 void loadExtensions();

@@ -258,6 +258,33 @@ test("prepared label creation and reconciliation use only the documented endpoin
   assert.match(requests[3]?.url || "", /\/labels\/se-label-20\/void$/);
 });
 
+test("label tracking reads carrier status and the latest event from the documented endpoint", async () => {
+  const requests: string[] = [];
+  const gateway = new ShipStationGateway({
+    apiKey: "server-only-key", rateMode: "live", labelPurchaseEnabled: false,
+  }, async (input) => {
+    requests.push(String(input));
+    return new Response(JSON.stringify({
+      tracking_number: "TRACK-200",
+      status_code: "IT",
+      status_description: "In Transit",
+      carrier_status_code: "PU",
+      carrier_status_description: "Picked up",
+      shipped_date: "2026-11-01T12:00:00.000Z",
+      estimated_delivery_date: "2026-11-04T12:00:00.000Z",
+      actual_delivery_date: null,
+      exception_description: null,
+      events: [{ occurred_at: "2026-11-02T18:30:00.000Z", description: "Departed facility", city_locality: "Memphis", state_province: "TN", postal_code: "38116" }],
+    }), { status: 200 });
+  }, "https://shipstation.example/v2");
+
+  const tracked = await gateway.trackLabelById("se-label-200");
+  assert.equal(requests[0], "https://shipstation.example/v2/labels/se-label-200/track");
+  assert.equal(tracked.statusCode, "IT");
+  assert.equal(tracked.events[0]?.description, "Departed facility");
+  assert.equal(tracked.events[0]?.city, "Memphis");
+});
+
 test("exported orders reconcile purchased labels by exact ShipStation order number", async () => {
   const requests: string[] = [];
   const labelResponse = {

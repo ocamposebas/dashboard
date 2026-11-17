@@ -152,6 +152,7 @@ import {
   ShipStationGatewayError,
 } from "./shipStationGateway.js";
 import type { ManagedUserRecord, ManagedUserRole, PresenceStore } from "./presenceStore.js";
+import type { DeliveryMonitorService } from "./deliveryMonitorService.js";
 import {
   ProductLocationError,
   ProductLocationRepository,
@@ -506,6 +507,7 @@ export interface MonitorServerDependencies {
   siteControlRepository?: SiteControlRepository;
   tiktokPixelRepository?: TikTokPixelRepository;
   orderPushService?: OrderPushService;
+  deliveryMonitor?: DeliveryMonitorService;
   recordNewOrder?: (order: OrderNotificationSource) => Promise<void>;
 }
 
@@ -3046,6 +3048,81 @@ export function createMonitorServer(
 
       if (url.pathname === "/api/session" && request.method === "GET") {
         json(response, 200, { authenticated: true, user: publicUser(currentUser), permissions: { administer: canAdminister, operate: canOperate } });
+        return;
+      }
+
+      if (url.pathname === "/api/delivery-monitor" && request.method === "GET") {
+        if (!dependencies.deliveryMonitor) {
+          json(response, 503, { error: "Delivery monitoring is not configured" });
+          return;
+        }
+        try {
+          json(response, 200, await dependencies.deliveryMonitor.payload(canAdminister));
+        } catch (error: unknown) {
+          console.error("Delivery monitor could not be loaded", error);
+          json(response, 500, { error: "Delivery monitoring could not be loaded" });
+        }
+        return;
+      }
+
+      if (url.pathname === "/api/delivery-monitor/refresh" && request.method === "POST") {
+        if (!canOperate || !isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Operations access is required" });
+          return;
+        }
+        if (!dependencies.deliveryMonitor) {
+          json(response, 503, { error: "Delivery monitoring is not configured" });
+          return;
+        }
+        try {
+          await dependencies.deliveryMonitor.refresh();
+          json(response, 200, await dependencies.deliveryMonitor.payload(canAdminister));
+        } catch (error: unknown) {
+          console.error("Delivery monitor refresh failed", error);
+          json(response, 502, { error: "Carrier tracking could not be refreshed safely" });
+        }
+        return;
+      }
+
+      if (url.pathname === "/api/delivery-monitor/settings" && request.method === "PUT") {
+        if (!canAdminister || !isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Owner or administrator approval is required" });
+          return;
+        }
+        if (!dependencies.deliveryMonitor) {
+          json(response, 503, { error: "Delivery monitoring is not configured" });
+          return;
+        }
+        try {
+          const payload = JSON.parse((await readBodyBuffer(request, 32 * 1024)).toString("utf8")) as Record<string, unknown>;
+          await dependencies.deliveryMonitor.saveSettings({
+            delayDays: Number(payload.delayDays),
+            recipientUserId: typeof payload.recipientUserId === "string" ? payload.recipientUserId : null,
+            emailEnabled: payload.emailEnabled === true,
+          });
+          json(response, 200, await dependencies.deliveryMonitor.payload(true));
+        } catch (error: unknown) {
+          json(response, 400, { error: error instanceof Error ? error.message : "Delivery settings could not be saved" });
+        }
+        return;
+      }
+
+      const deliveryAcknowledge = url.pathname.match(/^\/api\/delivery-monitor\/([a-zA-Z0-9_-]+)\/acknowledge$/);
+      if (deliveryAcknowledge && request.method === "POST") {
+        if (!canOperate || !isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Operations access is required" });
+          return;
+        }
+        if (!dependencies.deliveryMonitor) {
+          json(response, 503, { error: "Delivery monitoring is not configured" });
+          return;
+        }
+        const item = await dependencies.deliveryMonitor.acknowledge(deliveryAcknowledge[1]!, currentUser.id);
+        if (!item) {
+          json(response, 404, { error: "Delivery record not found" });
+          return;
+        }
+        json(response, 200, { saved: true, item });
         return;
       }
 
