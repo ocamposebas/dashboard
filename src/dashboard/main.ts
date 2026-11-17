@@ -6,8 +6,10 @@ import "./clean-ui.css";
 import "./finance.css";
 import "./tiktok-integration.css";
 import "./bulk-orders.css";
+import "./coupons-admin.css";
 import { initBulkOrders, loadBulkOrders } from "./bulk-orders";
 import { initAffiliateAdmin, loadAffiliateAdmin } from "./affiliates-admin";
+import { initCouponAdmin, loadCoupons } from "./coupons-admin";
 import type { AffiliateCommissionSummary } from "../shared/affiliates";
 import {
   TIKTOK_PIXEL_EVENT_KEYS,
@@ -8367,6 +8369,8 @@ async function loadWorkspaceSession(): Promise<void> {
     requiredElement<HTMLElement>("#account-menu-name").textContent = workspaceSession.user.displayName;
     requiredElement<HTMLElement>("#account-menu-role").textContent = `${role} account`;
     requiredElement<HTMLButtonElement>("#open-user-create").hidden = !workspaceSession.permissions.administer;
+    requiredElement<HTMLButtonElement>('[data-view="coupons"]').hidden = !workspaceSession.permissions.administer;
+    if (!workspaceSession.permissions.administer && location.hash === "#coupons") navigate("overview");
     if (loyaltyData) renderLoyalty();
     if (extensionsData) renderSiteControls();
     if (fulfillmentLocations) renderLabelWorkspace();
@@ -9301,6 +9305,7 @@ const viewNames: Record<string, string> = {
   media: "Media library",
   customers: "Customers",
   affiliates: "Affiliates",
+  coupons: "Coupon Studio",
   loyalty: "Loyalty control",
   seo: "SEO reports",
   marketing: "Marketing",
@@ -9505,6 +9510,7 @@ function navigate(view: string): void {
   if (view === "insurance") void loadInsuranceFund();
   if (view === "bulk-orders") void loadBulkOrders();
   if (view === "affiliates") void loadAffiliateAdmin();
+  if (view === "coupons") void loadCoupons();
   if (view === "marketing") void loadMarketingEmailCenter();
   if (view === "loyalty") void loadLoyalty();
   if (view === "seo") void loadSeo();
@@ -12596,6 +12602,7 @@ const initialView = location.hash.slice(1);
 loadSavedSettings();
 initAffiliateAdmin();
 initBulkOrders();
+initCouponAdmin();
 hydrateFastStatisticPreviews();
 renderOverviewFinancials();
 renderInsuranceFund();

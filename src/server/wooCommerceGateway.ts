@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 import type { LegacyAffiliateCoupon } from "../shared/affiliates.js";
+import { couponStatusLabel, type CouponWriteInput } from "../shared/coupons.js";
 import { productSkuBase, skuCandidate } from "../shared/productSku.js";
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -85,6 +86,32 @@ export interface CommerceProductCategory {
   slug: string;
   count: number;
   parentId: number;
+}
+
+export interface CommerceCoupon {
+  id: number;
+  code: string;
+  description: string;
+  discountType: CouponWriteInput["discountType"];
+  amount: number;
+  status: "active" | "paused" | "expired";
+  expiresAt: string | null;
+  usageCount: number;
+  usageLimit: number | null;
+  usageLimitPerUser: number | null;
+  limitUsageToXItems: number | null;
+  individualUse: boolean;
+  freeShipping: boolean;
+  excludeSaleItems: boolean;
+  minimumAmount: number | null;
+  maximumAmount: number | null;
+  productIds: number[];
+  excludedProductIds: number[];
+  categoryIds: number[];
+  excludedCategoryIds: number[];
+  emailRestrictions: string[];
+  createdAt: string | null;
+  modifiedAt: string | null;
 }
 
 export class CommerceServiceError extends Error {
@@ -1575,6 +1602,79 @@ function rewardSettingsPayload(settings: CommerceRewardSettings): Record<string,
   };
 }
 
+function optionalPositiveNumber(value: unknown): number | null {
+  const result = number(value);
+  return result > 0 ? result : null;
+}
+
+function integerList(value: unknown): number[] {
+  return Array.isArray(value)
+    ? [...new Set(value.map((item) => Math.trunc(number(item))).filter((item) => item > 0))]
+    : [];
+}
+
+function mapCoupon(value: unknown): CommerceCoupon {
+  const coupon = record(value);
+  const discountValue = text(coupon.discount_type);
+  const discountType = discountValue === "fixed_cart" || discountValue === "fixed_product"
+    ? discountValue
+    : "percent";
+  const expiresAt = isoDate(coupon.date_expires_gmt || coupon.date_expires);
+  return {
+    id: Math.max(0, Math.trunc(number(coupon.id))),
+    code: text(coupon.code).toUpperCase(),
+    description: decodedText(coupon.description),
+    discountType,
+    amount: Math.max(0, number(coupon.amount)),
+    status: couponStatusLabel({ status: text(coupon.status), expiresAt }),
+    expiresAt,
+    usageCount: Math.max(0, Math.trunc(number(coupon.usage_count))),
+    usageLimit: optionalPositiveNumber(coupon.usage_limit),
+    usageLimitPerUser: optionalPositiveNumber(coupon.usage_limit_per_user),
+    limitUsageToXItems: optionalPositiveNumber(coupon.limit_usage_to_x_items),
+    individualUse: Boolean(coupon.individual_use),
+    freeShipping: Boolean(coupon.free_shipping),
+    excludeSaleItems: Boolean(coupon.exclude_sale_items),
+    minimumAmount: optionalPositiveNumber(coupon.minimum_amount),
+    maximumAmount: optionalPositiveNumber(coupon.maximum_amount),
+    productIds: integerList(coupon.product_ids),
+    excludedProductIds: integerList(coupon.excluded_product_ids),
+    categoryIds: integerList(coupon.product_categories),
+    excludedCategoryIds: integerList(coupon.excluded_product_categories),
+    emailRestrictions: stringList(coupon.email_restrictions).map((email) => email.toLowerCase()),
+    createdAt: isoDate(coupon.date_created_gmt || coupon.date_created),
+    modifiedAt: isoDate(coupon.date_modified_gmt || coupon.date_modified),
+  };
+}
+
+function couponPayload(input: CouponWriteInput): Record<string, unknown> {
+  return {
+    code: input.code.toLowerCase(),
+    description: input.description,
+    discount_type: input.discountType,
+    amount: input.amount.toFixed(2),
+    status: input.status === "active" ? "publish" : "draft",
+    date_expires: input.expiresAt,
+    minimum_amount: input.minimumAmount === null ? "" : input.minimumAmount.toFixed(2),
+    maximum_amount: input.maximumAmount === null ? "" : input.maximumAmount.toFixed(2),
+    usage_limit: input.usageLimit,
+    usage_limit_per_user: input.usageLimitPerUser,
+    limit_usage_to_x_items: input.limitUsageToXItems,
+    individual_use: input.individualUse,
+    free_shipping: input.freeShipping,
+    exclude_sale_items: input.excludeSaleItems,
+    product_ids: input.productIds,
+    excluded_product_ids: input.excludedProductIds,
+    product_categories: input.categoryIds,
+    excluded_product_categories: input.excludedCategoryIds,
+    email_restrictions: input.emailRestrictions,
+    meta_data: [
+      { key: "_phaseone_dashboard_coupon", value: "yes" },
+      { key: "_phaseone_dashboard_coupon_updated_at", value: new Date().toISOString() },
+    ],
+  };
+}
+
 function mapRewardControl(value: unknown): CommerceRewardControl {
   const payload = record(value);
   const metrics = record(payload.metrics);
@@ -1611,6 +1711,47 @@ function visibilityPayload(visibility: CommerceProductWrite["visibility"]): Reco
 
 export class WooCommerceGateway {
   constructor(private readonly config: GatewayConfig, private readonly fetchImpl: typeof fetch = fetch) {}
+
+  async listCoupons(): Promise<CommerceCoupon[]> {
+    const payload = await this.requestAllPages("coupons", {
+      orderby: "modified",
+      order: "desc",
+      _fields: [
+        "id", "code", "description", "discount_type", "amount", "status", "date_expires_gmt",
+        "usage_count", "usage_limit", "usage_limit_per_user", "limit_usage_to_x_items",
+        "individual_use", "free_shipping", "exclude_sale_items", "minimum_amount", "maximum_amount",
+        "product_ids", "excluded_product_ids", "product_categories", "excluded_product_categories",
+        "email_restrictions", "date_created_gmt", "date_modified_gmt",
+      ].join(","),
+    });
+    return payload.flatMap((value) => {
+      try {
+        const coupon = mapCoupon(value);
+        return coupon.id > 0 && coupon.code ? [coupon] : [];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  async saveCoupon(input: CouponWriteInput, couponId?: number): Promise<CommerceCoupon> {
+    const id = couponId && Number.isSafeInteger(couponId) && couponId > 0 ? couponId : null;
+    return mapCoupon(await this.request(id ? `coupons/${id}` : "coupons", {
+      method: id ? "PUT" : "POST",
+      body: couponPayload(input),
+    }));
+  }
+
+  async setCouponActive(couponId: number, active: boolean, clearExpiredDate = false): Promise<CommerceCoupon> {
+    if (!Number.isSafeInteger(couponId) || couponId <= 0) throw new Error("invalid_coupon_id");
+    return mapCoupon(await this.request(`coupons/${couponId}`, {
+      method: "PUT",
+      body: {
+        status: active ? "publish" : "draft",
+        ...(active && clearExpiredDate ? { date_expires: null } : {}),
+      },
+    }));
+  }
 
   async listLegacyAffiliateCoupons(): Promise<LegacyAffiliateCoupon[]> {
     const payload = await this.requestAllPages("coupons", {

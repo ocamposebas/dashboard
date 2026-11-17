@@ -71,6 +71,7 @@ import { productVariantSku } from "../shared/productSku.js";
 import type { MonthlyFinanceOrder } from "../shared/monthlyFinance.js";
 import type { FinanceOrder } from "../shared/financeAnalytics.js";
 import type { MarketingEmailProduct } from "../shared/marketingEmail.js";
+import { CouponInputError, couponWriteInput } from "../shared/coupons.js";
 import { fulfillmentAccessForRole } from "./fulfillmentAccess.js";
 import {
   FulfillmentRepository,
@@ -3045,6 +3046,146 @@ export function createMonitorServer(
 
       if (url.pathname === "/api/session" && request.method === "GET") {
         json(response, 200, { authenticated: true, user: publicUser(currentUser), permissions: { administer: canAdminister, operate: canOperate } });
+        return;
+      }
+
+      if (url.pathname === "/api/coupons" && request.method === "GET") {
+        if (!canAdminister) {
+          json(response, 403, { error: "Administrator access is required" });
+          return;
+        }
+        if (!commerce || !commerceConfig) {
+          json(response, 503, { error: "The live store connection is not configured" });
+          return;
+        }
+        try {
+          await restoreCommerceCache();
+          const products = Array.isArray(commerceCache?.payload.products)
+            ? commerceCache.payload.products as Array<Record<string, unknown>>
+            : [];
+          const categories = Array.isArray(commerceCache?.payload.categories)
+            ? commerceCache.payload.categories as Array<Record<string, unknown>>
+            : [];
+          const coupons = await commerce.listCoupons();
+          json(response, 200, {
+            connected: true,
+            writeEnabled: commerceConfig.accessMode === "read_write",
+            coupons,
+            products: products.map((product) => ({
+              id: Number(product.id) || 0,
+              name: typeof product.name === "string" ? product.name : "Product",
+              sku: typeof product.sku === "string" ? product.sku : "",
+              imageUrl: typeof product.thumbnailUrl === "string" ? product.thumbnailUrl
+                : typeof product.imageUrl === "string" ? product.imageUrl : "",
+            })).filter((product) => product.id > 0),
+            categories: categories.map((category) => ({
+              id: Number(category.id) || 0,
+              name: typeof category.name === "string" ? category.name : "Category",
+              count: Number(category.count) || 0,
+            })).filter((category) => category.id > 0),
+            syncedAt: new Date().toISOString(),
+          });
+        } catch (error: unknown) {
+          console.error("Coupon directory failed", error);
+          json(response, 502, { error: "Coupons could not be loaded from the live store" });
+        }
+        return;
+      }
+
+      if (url.pathname === "/api/coupons" && request.method === "POST") {
+        if (!canAdminister || !isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Administrator approval is required" });
+          return;
+        }
+        if (!commerce || commerceConfig?.accessMode !== "read_write") {
+          json(response, 503, { error: "Store coupon write access is not enabled" });
+          return;
+        }
+        try {
+          const payload = JSON.parse((await readBodyBuffer(request, 256 * 1024)).toString("utf8")) as unknown;
+          const input = couponWriteInput(payload);
+          const coupon = await commerce.saveCoupon(input);
+          await store.addNotification({
+            type: "system", severity: coupon.status === "active" ? "success" : "info",
+            title: `Coupon ${coupon.code} created`,
+            message: `${currentUser.displayName} created a ${coupon.discountType === "percent" ? `${coupon.amount}%` : `$${coupon.amount.toFixed(2)}`} discount in the live store.`,
+            actionView: "coupons",
+          });
+          json(response, 201, { saved: true, coupon });
+        } catch (error: unknown) {
+          const duplicate = error instanceof CommerceServiceError && /coupon.*exist|already exists/i.test(`${error.code} ${error.serviceMessage}`);
+          const invalid = error instanceof CouponInputError;
+          console.error("Coupon creation failed", error);
+          json(response, duplicate ? 409 : invalid ? 400 : 502, {
+            error: duplicate
+              ? "That coupon code already exists. Open it from the list to edit or reactivate it."
+              : error instanceof Error ? error.message : "The coupon could not be created",
+          });
+        }
+        return;
+      }
+
+      const couponUpdateMatch = url.pathname.match(/^\/api\/coupons\/(\d+)$/);
+      if (couponUpdateMatch && request.method === "PUT") {
+        if (!canAdminister || !isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Administrator approval is required" });
+          return;
+        }
+        if (!commerce || commerceConfig?.accessMode !== "read_write") {
+          json(response, 503, { error: "Store coupon write access is not enabled" });
+          return;
+        }
+        try {
+          const couponId = Number(couponUpdateMatch[1]);
+          const payload = JSON.parse((await readBodyBuffer(request, 256 * 1024)).toString("utf8")) as unknown;
+          const input = couponWriteInput(payload);
+          const coupon = await commerce.saveCoupon(input, couponId);
+          await store.addNotification({
+            type: "system", severity: coupon.status === "active" ? "success" : "warning",
+            title: `Coupon ${coupon.code} updated`,
+            message: `${currentUser.displayName} saved the coupon rules in the live store.`,
+            actionView: "coupons",
+          });
+          json(response, 200, { saved: true, coupon });
+        } catch (error: unknown) {
+          const duplicate = error instanceof CommerceServiceError && /coupon.*exist|already exists/i.test(`${error.code} ${error.serviceMessage}`);
+          const invalid = error instanceof CouponInputError;
+          console.error("Coupon update failed", error);
+          json(response, duplicate ? 409 : invalid ? 400 : 502, {
+            error: duplicate ? "That coupon code is already used by another coupon." : error instanceof Error ? error.message : "The coupon could not be updated",
+          });
+        }
+        return;
+      }
+
+      const couponStatusMatch = url.pathname.match(/^\/api\/coupons\/(\d+)\/status$/);
+      if (couponStatusMatch && request.method === "POST") {
+        if (!canAdminister || !isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Administrator approval is required" });
+          return;
+        }
+        if (!commerce || commerceConfig?.accessMode !== "read_write") {
+          json(response, 503, { error: "Store coupon write access is not enabled" });
+          return;
+        }
+        try {
+          const payload = JSON.parse((await readBodyBuffer(request, 16 * 1024)).toString("utf8")) as Record<string, unknown>;
+          const coupon = await commerce.setCouponActive(
+            Number(couponStatusMatch[1]),
+            payload.active === true,
+            payload.clearExpiredDate === true,
+          );
+          await store.addNotification({
+            type: "system", severity: coupon.status === "active" ? "success" : "warning",
+            title: `Coupon ${coupon.code} ${coupon.status === "active" ? "activated" : "paused"}`,
+            message: `${currentUser.displayName} changed this checkout coupon from Coupon Studio.`,
+            actionView: "coupons",
+          });
+          json(response, 200, { saved: true, coupon });
+        } catch (error: unknown) {
+          console.error("Coupon status change failed", error);
+          json(response, 502, { error: "The coupon status could not be changed" });
+        }
         return;
       }
 

@@ -2,6 +2,48 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CommerceServiceError, WooCommerceGateway } from "../src/server/wooCommerceGateway.js";
 
+test("creates a governed live coupon with WooCommerce restrictions", async () => {
+  let requestUrl = "";
+  let requestMethod = "";
+  let requestBody: Record<string, unknown> = {};
+  const fetchImpl: typeof fetch = async (input, init) => {
+    requestUrl = String(input);
+    requestMethod = init?.method || "GET";
+    requestBody = JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      id: 501,
+      ...requestBody,
+      usage_count: 0,
+      date_created_gmt: "2026-11-16T10:00:00",
+      date_modified_gmt: "2026-11-16T10:00:00",
+    }), { status: 201 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://shop.example", consumerKey: "ck_test", consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  const coupon = await gateway.saveCoupon({
+    code: "VIP25", description: "Private launch", discountType: "percent", amount: 25,
+    status: "active", expiresAt: "2027-01-01T04:59:59.000Z", minimumAmount: 50,
+    maximumAmount: null, usageLimit: 100, usageLimitPerUser: 1, limitUsageToXItems: null,
+    individualUse: true, freeShipping: false, excludeSaleItems: true,
+    productIds: [12], excludedProductIds: [15], categoryIds: [3], excludedCategoryIds: [],
+    emailRestrictions: ["*@example.com"],
+  });
+
+  assert.match(requestUrl, /\/wp-json\/wc\/v3\/coupons$/);
+  assert.equal(requestMethod, "POST");
+  assert.equal(requestBody.code, "vip25");
+  assert.equal(requestBody.status, "publish");
+  assert.equal(requestBody.amount, "25.00");
+  assert.deepEqual(requestBody.product_ids, [12]);
+  assert.deepEqual(requestBody.product_categories, [3]);
+  assert.deepEqual(requestBody.email_restrictions, ["*@example.com"]);
+  assert.equal(coupon.code, "VIP25");
+  assert.equal(coupon.status, "active");
+  assert.equal(coupon.minimumAmount, 50);
+});
+
 test("maps WooCommerce products and orders without exposing credentials", async () => {
   const requests: Array<{ url: URL; authorization: string | null }> = [];
   const fetchImpl: typeof fetch = async (input, init) => {
