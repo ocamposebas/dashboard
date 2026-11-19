@@ -301,9 +301,10 @@ test("one untouched imported simple-product COA becomes its current storefront c
   assert.deepEqual(repairs[0]?.skus, ["KLOW"]);
 });
 
-test("legacy current-lot promotion stays closed for ambiguous or previously edited history", () => {
+test("the newest exact legacy certificate becomes current even after earlier edits", () => {
   const base = {
     ...coa,
+    id: "edited",
     source: "wordpress_import",
     revision: 2,
     status: "Available",
@@ -323,9 +324,56 @@ test("legacy current-lot promotion stays closed for ambiguous or previously edit
     attributes: [{ id: 1, name: "MG", option: "30 MG" }],
   } as CommerceVariation;
 
-  assert.deepEqual(exactLegacyCoaCatalogRepairs([base], [kpv], new Map([[539, [variation]]])), []);
-  assert.deepEqual(exactLegacyCoaCatalogRepairs([
-    { ...base, id: "a", revision: 1 },
-    { ...base, id: "b", revision: 1 },
-  ], [kpv], new Map([[539, [variation]]])), []);
+  assert.equal(
+    exactLegacyCoaCatalogRepairs([base], [kpv], new Map([[539, [variation]]]))[0]?.currentShippingLot,
+    true,
+  );
+
+  const repairs = exactLegacyCoaCatalogRepairs([
+    { ...base, id: "older", date: "2026-08-01", currentShippingLot: true },
+    { ...base, id: "newer", date: "2026-09-01", currentShippingLot: false },
+  ], [kpv], new Map([[539, [variation]]]));
+  assert.deepEqual(repairs.map((repair) => ({
+    id: repair.coa.id,
+    current: repair.currentShippingLot,
+  })), [
+    { id: "older", current: false },
+    { id: "newer", current: true },
+  ]);
+});
+
+test("a newer KLOW certificate replaces an older exact current lot", () => {
+  const catalog = { ...product, id: 543, name: "KLOW", sku: "KLOW", type: "simple" };
+  const older = {
+    ...coa,
+    id: "klow-old",
+    source: "wordpress_import",
+    revision: 2,
+    status: "Available",
+    productName: "KLOW",
+    familyName: "KLOW",
+    compound: "KLOW",
+    strength: "82.65mg",
+    date: "2026-07-16",
+    matchedProductId: 543,
+    matchedVariationId: 0,
+    skus: ["KLOW"],
+    currentShippingLot: true,
+  } as unknown as CommerceCoa & { source: string; revision: number };
+  const newer = {
+    ...older,
+    id: "klow-new",
+    strength: "80mg",
+    date: "2026-08-05",
+    currentShippingLot: false,
+  };
+
+  const repairs = exactLegacyCoaCatalogRepairs([older, newer], [catalog], new Map());
+  assert.deepEqual(repairs.map((repair) => ({
+    id: repair.coa.id,
+    current: repair.currentShippingLot,
+  })), [
+    { id: "klow-old", current: false },
+    { id: "klow-new", current: true },
+  ]);
 });

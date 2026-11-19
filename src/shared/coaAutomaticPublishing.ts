@@ -208,10 +208,10 @@ function uniqueCatalogSkus(values: string[]): string[] {
  * match and, for variable products, a unique exact strength match are used.
  *
  * The old WordPress model could designate one lot only at the parent level.
- * When an exact catalog presentation has exactly one untouched migrated
- * Available certificate and no current lot, that presentation can safely
- * inherit its own current-lot flag. Ambiguous or edited history is never
- * promoted.
+ * For every exact catalog presentation, the newest dated Available
+ * certificate is the only current shipping lot. This also repairs stale
+ * flags left behind by later imports while preserving strict variation
+ * matching for variable products.
  */
 export function exactLegacyCoaCatalogRepairs(
   coas: Array<CommerceCoa & { recordId?: string; source?: string; revision?: number }>,
@@ -251,10 +251,10 @@ export function exactLegacyCoaCatalogRepairs(
     exactPresentationGroups.set(key, [...(exactPresentationGroups.get(key) || []), candidate]);
   }
   for (const group of exactPresentationGroups.values()) {
-    if (group.some((candidate) => candidate.currentShippingLot) || group.length !== 1) continue;
-    const candidate = group[0]!;
-    if (candidate.coa.source === "wordpress_import" && candidate.coa.revision === 1) {
-      candidate.currentShippingLot = true;
+    const winnerId = newestCurrentCoaId(group.map((candidate) => candidate.coa));
+    if (!winnerId) continue;
+    for (const candidate of group) {
+      candidate.currentShippingLot = certificateId(candidate.coa) === winnerId;
     }
   }
 
