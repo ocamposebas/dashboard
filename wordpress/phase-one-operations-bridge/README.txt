@@ -61,6 +61,11 @@ responsive email layout instead of nesting the message inside the active
 WooCommerce theme. The logo has an explicit email-safe size, content remains
 readable in light and dark mode, and the evidence photos remain attachments.
 
+Version 2.2.0 adds product-level affiliate exclusions controlled from the
+Operations Suite. Excluded products reject affiliate coupon discounts and are
+marked on order lines so both the legacy plugin and the Phase One commission
+ledger omit those products while preserving every other coupon rule.
+
 Version 1.7.0 adds idempotent native shipment tracking save and void support.
 
 Version 1.7.1 fixes inventory waitlist visibility. The bridge now reads active

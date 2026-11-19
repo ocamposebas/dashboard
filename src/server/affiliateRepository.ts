@@ -473,7 +473,10 @@ export class AffiliateRepository {
           couponCodes: order.couponLines.map((line) => line.code),
           commissionType: coupon.commission_type,
           commissionValue: Number(coupon.commission_value),
-          productNet: money(order.lineItems.reduce((sum, item) => sum + Math.max(0, item.total), 0)),
+          productNet: money(order.lineItems.reduce(
+            (sum, item) => sum + (item.affiliateEligible === false ? 0 : Math.max(0, item.total)),
+            0,
+          )),
           shipping: money(order.shippingTotal),
           tax: money(order.totalTax),
           fees: money(order.feeLines.reduce((sum, fee) => sum + fee.total, 0)),

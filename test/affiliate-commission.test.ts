@@ -24,6 +24,17 @@ test("affiliate commission uses net merchandise and excludes shipping, taxes and
   assert.equal(result.status, "approved");
 });
 
+test("products disabled for affiliates do not earn commission", () => {
+  const result = calculateAffiliateCommission(order({
+    lineItems: [
+      { total: 70, affiliateEligible: true },
+      { total: 47, affiliateEligible: false },
+    ] as CommerceOrder["lineItems"],
+  }), { type: "percent", value: 10 }, 0, new Date("2026-10-20T12:00:00.000Z"));
+  assert.equal(result.eligibleAmount, 70);
+  assert.equal(result.commissionAmount, 7);
+});
+
 test("checkout discounts reduce the commission base while positive fees stay excluded", () => {
   const result = calculateAffiliateCommission(order({
     status: "on-hold",
@@ -31,7 +42,7 @@ test("checkout discounts reduce the commission base while positive fees stay exc
     lineItems: [{ total: 101.25 }, { total: 48.6 }] as CommerceOrder["lineItems"],
     feeLines: [
       { id: 1, name: "Zelle 5% discount", taxStatus: "none", total: -7.49, totalTax: 0 },
-      { id: 2, name: "Shipping Protection", taxStatus: "none", total: 2.18, totalTax: 0 },
+      { id: 2, name: "Shipping Protection", taxStatus: "none", total: 6, totalTax: 0 },
     ],
   }), { type: "percent", value: 10 }, 14);
   assert.equal(result.eligibleAmount, 142.36);

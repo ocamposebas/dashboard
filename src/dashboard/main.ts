@@ -184,6 +184,7 @@ interface CommerceProduct {
   images: CommerceMedia[];
   variationIds: number[];
   attributes: Array<{ id: number; name: string; options: string[]; variation: boolean }>;
+  affiliateExcluded?: boolean;
   cost: CommerceCost | null;
   estimatedProfit: number | null;
   margin: number | null;
@@ -9433,6 +9434,7 @@ const productSkuStatus = requiredElement<HTMLElement>("#product-sku-status");
 const productStockInput = requiredElement<HTMLInputElement>("#product-stock-input");
 const productCategoryInput = requiredElement<HTMLSelectElement>("#product-category-input");
 const productStatusInput = requiredElement<HTMLSelectElement>("#product-status-input");
+const productAffiliateExcludedInput = requiredElement<HTMLInputElement>("#product-affiliate-excluded-input");
 const productCostInput = requiredElement<HTMLInputElement>("#product-cost-input");
 const productPriceInput = requiredElement<HTMLInputElement>("#product-price-input");
 const productPackagingInput = requiredElement<HTMLInputElement>("#product-packaging-input");
@@ -10577,6 +10579,7 @@ function populateProductWorkspace(product: CommerceProduct, variations: Commerce
   productStockInput.value = String(product?.stockQuantity ?? 0);
   renderProductCategoryOptions(product?.categoryId || 0, product?.category || "");
   productStatusInput.value = product?.visibility || "draft";
+  productAffiliateExcludedInput.checked = Boolean(product?.affiliateExcluded);
   productCostInput.value = String(product?.cost?.unitCost ?? 0);
   productPriceInput.value = String(product?.price ?? 0);
   productPackagingInput.value = String(product?.cost?.packagingCost ?? 0);
@@ -10644,6 +10647,7 @@ function applyProductEditorMode(): void {
   productStockInput.readOnly = costsOnly;
   productCategoryInput.disabled = costsOnly;
   productStatusInput.disabled = costsOnly;
+  productAffiliateExcludedInput.disabled = costsOnly;
   productPriceInput.readOnly = costsOnly;
   productImagesInput.disabled = costsOnly;
   productVariantsToggle.disabled = costsOnly;
@@ -10677,6 +10681,7 @@ function openProductDrawer(product?: CommerceProduct, mode: "catalog" | "costs" 
   productStockInput.value = String(product?.stockQuantity ?? 0);
   renderProductCategoryOptions(product?.categoryId || 0, product?.category || "");
   productStatusInput.value = product?.visibility || "draft";
+  productAffiliateExcludedInput.checked = Boolean(product?.affiliateExcluded);
   productCostInput.value = String(product?.cost?.unitCost ?? 0);
   productPriceInput.value = String(product?.regularPrice || product?.price || 0);
   productPackagingInput.value = String(product?.cost?.packagingCost ?? 0);
@@ -11783,6 +11788,7 @@ productForm.addEventListener("submit", async (event) => {
           stockQuantity: Number(productStockInput.value) || 0,
           categoryId: Number(productCategoryInput.value) || 0,
           visibility: productStatusInput.value,
+          affiliateExcluded: productAffiliateExcludedInput.checked,
           regularPrice: Number(productPriceInput.value) || 0,
           unitCost: Number(productCostInput.value) || 0,
           packagingCost: Number(productPackagingInput.value) || 0,

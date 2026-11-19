@@ -226,6 +226,7 @@ test("saves the selected catalog category with the generated product SKU", async
     stockQuantity: 12,
     categoryId: 16,
     visibility: "public",
+    affiliateExcluded: true,
     images: [{ src: "https://dashboard.example/api/public/product-media/token/kpv.jpg" }],
     variants: [],
   });
@@ -235,6 +236,7 @@ test("saves the selected catalog category with the generated product SKU", async
   assert.equal(requestBody?.sku, "KPV-30-MG");
   assert.equal(requestBody?.description, "A complete customer-facing product description.");
   assert.equal(requestBody?.short_description, "A complete customer-facing product description.");
+  assert.deepEqual(requestBody?.meta_data, [{ key: "_phaseone_affiliate_excluded", value: "yes" }]);
   assert.deepEqual(requestBody?.images, [{ src: "https://dashboard.example/api/public/product-media/token/kpv.jpg" }]);
 });
 

@@ -46,6 +46,7 @@ export interface CommerceProduct {
   images: CommerceImage[];
   variationIds: number[];
   attributes: CommerceProductAttribute[];
+  affiliateExcluded?: boolean;
   modifiedAt: string | null;
 }
 
@@ -68,6 +69,7 @@ export interface CommerceProductWrite {
   stockQuantity: number;
   categoryId: number;
   visibility: "public" | "hidden" | "private" | "draft";
+  affiliateExcluded?: boolean;
   images: Array<{ id?: number; src?: string }>;
   attributeName?: string;
   variants?: Array<{
@@ -145,6 +147,7 @@ export interface CommerceOrderLineItem {
   total: number;
   totalTax: number;
   imageUrl: string | null;
+  affiliateEligible?: boolean;
 }
 
 export interface CommerceAddress {
@@ -838,7 +841,9 @@ function mapProduct(value: unknown, thumbnails = new Map<number, string>()): Com
     categoryId: Math.max(0, Math.trunc(number(record(categories[0]).id))), imageUrl: images[0]?.src || null,
     thumbnailUrl: images[0]?.thumbnailUrl || null, images,
     variationIds: Array.isArray(product.variations) ? product.variations.map(number).filter((value) => value > 0) : [],
-    attributes, modifiedAt: isoDate(product.date_modified_gmt),
+    attributes,
+    affiliateExcluded: text(metadataValue(product, "_phaseone_affiliate_excluded")).trim().toLowerCase() === "yes",
+    modifiedAt: isoDate(product.date_modified_gmt),
   };
 }
 
@@ -876,6 +881,7 @@ function mapLineItem(value: unknown): CommerceOrderLineItem | null {
     id: number(item.id), productId, variationId: number(item.variation_id), name: text(item.name) || `Product #${productId}`,
     sku: text(item.sku), quantity: Math.max(0, number(item.quantity)), price: number(item.price), subtotal: number(item.subtotal),
     subtotalTax: number(item.subtotal_tax), total: number(item.total), totalTax: number(item.total_tax), imageUrl: text(image.src) || null,
+    affiliateEligible: !truthy(metadataValue(item, "_phaseone_affiliate_excluded")),
   };
 }
 
@@ -1839,6 +1845,60 @@ export class WooCommerceGateway {
     });
   }
 
+  async listAffiliateExcludedProductIds(): Promise<number[]> {
+    const products = await this.requestAllPages("products", {
+      status: "any",
+      _fields: "id,meta_data",
+    });
+
+    return products.flatMap((value) => {
+      const product = record(value);
+      const id = Math.trunc(number(product.id));
+      const excluded = text(metadataValue(product, "_phaseone_affiliate_excluded")).trim().toLowerCase() === "yes";
+      return id > 0 && excluded ? [id] : [];
+    });
+  }
+
+  async syncAffiliateProductExclusion(productId: number, excluded: boolean): Promise<void> {
+    const cleanProductId = Math.trunc(productId);
+    if (cleanProductId <= 0) throw new Error("affiliate_product_id_invalid");
+
+    const coupons = await this.requestAllPages("coupons", {
+      orderby: "date",
+      order: "desc",
+      _fields: "id,excluded_product_ids,meta_data",
+    });
+    const updates: Array<{ id: number; excludedProductIds: number[] }> = [];
+
+    for (const value of coupons) {
+      const coupon = record(value);
+      const id = Math.trunc(number(coupon.id));
+      if (id <= 0) continue;
+
+      const ownerId = Math.trunc(number(
+        metadataValue(coupon, "wcu_select_coupon_user_id") || metadataValue(coupon, "wcu_select_coupon_user"),
+      ));
+      const managed = text(metadataValue(coupon, "_phaseone_affiliate_coupon_managed")).trim().toLowerCase() === "yes";
+      if (ownerId <= 0 && !managed) continue;
+
+      const current = integerList(coupon.excluded_product_ids);
+      const next = excluded
+        ? [...new Set([...current, cleanProductId])]
+        : current.filter((idValue) => idValue !== cleanProductId);
+      if (next.length === current.length && next.every((idValue, index) => idValue === current[index])) continue;
+      updates.push({ id, excludedProductIds: next });
+    }
+
+    for (let offset = 0; offset < updates.length; offset += 10) {
+      await Promise.all(updates.slice(offset, offset + 10).map((update) =>
+        this.request(`coupons/${update.id}`, {
+          method: "PUT",
+          body: { excluded_product_ids: update.excludedProductIds },
+        }),
+      ));
+    }
+  }
+
   async saveManagedAffiliateCoupon(input: ManagedAffiliateCouponWrite): Promise<ManagedAffiliateCouponResult> {
     let wpCouponId = input.wpCouponId && input.wpCouponId > 0 ? Math.trunc(input.wpCouponId) : null;
     let adoptedExisting = false;
@@ -1869,11 +1929,13 @@ export class WooCommerceGateway {
       }
     }
 
+    const excludedProductIds = await this.listAffiliateExcludedProductIds();
     const body = {
       code: input.code.toLowerCase(),
       status: "publish",
       discount_type: "percent",
       amount: input.discountValue.toFixed(2),
+      excluded_product_ids: excludedProductIds,
       meta_data: [
         { key: "wcu_select_coupon_user", value: String(input.wpUserId) },
         { key: "wcu_select_coupon_user_id", value: String(input.wpUserId) },
@@ -1950,7 +2012,7 @@ export class WooCommerceGateway {
     const [payload, thumbnails] = await Promise.all([
       this.requestAllPages("products", {
         orderby: "modified", order: "desc", status: "any",
-        _fields: "id,name,slug,permalink,sku,type,status,catalog_visibility,price,regular_price,sale_price,date_on_sale_from_gmt,date_on_sale_to_gmt,stock_quantity,stock_status,categories,images,variations,attributes,date_modified_gmt",
+        _fields: "id,name,slug,permalink,sku,type,status,catalog_visibility,price,regular_price,sale_price,date_on_sale_from_gmt,date_on_sale_to_gmt,stock_quantity,stock_status,categories,images,variations,attributes,meta_data,date_modified_gmt",
       }),
       this.listPublicThumbnails().catch(() => new Map<number, string>()),
     ]);
@@ -2113,6 +2175,7 @@ export class WooCommerceGateway {
         short_description: input.description,
       }),
       categories: input.categoryId > 0 ? [{ id: input.categoryId }] : [],
+      meta_data: [{ key: "_phaseone_affiliate_excluded", value: input.affiliateExcluded ? "yes" : "no" }],
       ...visibilityPayload(input.visibility),
       // SKU fields are immutable in the operations UI. Re-sending a legacy
       // SKU during an unrelated cost or inventory edit makes WooCommerce run

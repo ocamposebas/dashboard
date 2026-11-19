@@ -6608,6 +6608,7 @@ export function createMonitorServer(
         const regularPrice = Number(input.regularPrice);
         const stockQuantity = Number(input.stockQuantity);
         const categoryId = Number(input.categoryId || 0);
+        const affiliateExcluded = input.affiliateExcluded === true;
         if (
           (productId !== null && (!Number.isSafeInteger(productId) || productId <= 0)) ||
           !name || name.length > 200 || !["public", "hidden", "private", "draft"].includes(visibility) ||
@@ -6681,6 +6682,7 @@ export function createMonitorServer(
             stockQuantity,
             categoryId,
             visibility: visibility as CommerceProductWrite["visibility"],
+            affiliateExcluded,
             images,
             ...(typeof input.attributeName === "string"
               ? { attributeName: input.attributeName.trim().slice(0, 100) }
@@ -6689,6 +6691,13 @@ export function createMonitorServer(
           };
           const saved = await commerce.saveProduct(productId, write);
           let profitabilitySaved = true;
+          let affiliateRulesSaved = true;
+          try {
+            await commerce.syncAffiliateProductExclusion(saved.id, affiliateExcluded);
+          } catch (affiliateError: unknown) {
+            affiliateRulesSaved = false;
+            console.error("Product saved but affiliate coupon exclusions could not be synchronized", affiliateError);
+          }
           try {
             const defaultCost = {
               unitCost: Math.max(0, Number(input.unitCost) || 0),
@@ -6722,7 +6731,12 @@ export function createMonitorServer(
             saved: true,
             product: saved,
             profitabilitySaved,
-            ...(profitabilitySaved ? {} : { warning: "The product was saved, but its internal cost details need to be saved again." }),
+            affiliateRulesSaved,
+            ...(!profitabilitySaved
+              ? { warning: "The product was saved, but its internal cost details need to be saved again." }
+              : !affiliateRulesSaved
+                ? { warning: "The product was saved, but affiliate coupon exclusions need to be synchronized again." }
+                : {}),
           });
         } catch (error: unknown) {
           console.error("Product save failed", error);

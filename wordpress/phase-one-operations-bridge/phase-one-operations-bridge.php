@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Phase One Operations Bridge
  * Description: Secure bridge between Phase One Operations Suite, storefront controls, customer rewards and existing COA Manager records.
- * Version: 2.1.4
+ * Version: 2.2.0
  * Author: Phase One Labz
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -23,6 +23,8 @@ final class Phase_One_Operations_Bridge {
         add_action('rest_api_init', [__CLASS__, 'register_routes']);
         add_action('rest_api_init', [__CLASS__, 'register_rewards_redemption_override'], 99);
         add_action('plugins_loaded', [__CLASS__, 'configure_rewards_engine'], 20);
+        add_filter('woocommerce_coupon_is_valid_for_product', [__CLASS__, 'filter_affiliate_coupon_product'], 10, 4);
+        add_action('woocommerce_new_order_item', [__CLASS__, 'mark_affiliate_excluded_order_item'], 10, 3);
     }
 
     public static function register_routes() {
@@ -163,7 +165,7 @@ final class Phase_One_Operations_Bridge {
     public static function status() {
         return rest_ensure_response([
             'connected' => true,
-            'version' => '2.1.4',
+            'version' => '2.2.0',
             'capabilities' => array_values(array_filter([
                 'edit_coa',
                 'read_customer_rewards',
@@ -171,6 +173,7 @@ final class Phase_One_Operations_Bridge {
                 function_exists('lab_points_get_points_balance_safe') ? 'manage_reward_settings' : null,
                 function_exists('lab_points_record_transaction') ? 'adjust_customer_points' : null,
                 class_exists('WooCommerce') ? 'order_operations' : null,
+                class_exists('WooCommerce') ? 'affiliate_product_exclusions' : null,
                 class_exists('WooCommerce') ? 'idempotent_order_coa_assignment' : null,
                 class_exists('WooCommerce') ? 'email_order_evidence' : null,
                 class_exists('WooCommerce') ? 'save_native_shipping_label' : null,
@@ -2061,6 +2064,56 @@ final class Phase_One_Operations_Bridge {
             ],
         ]);
         return empty($posts) ? 0 : absint($posts[0]);
+    }
+
+    public static function filter_affiliate_coupon_product($valid, $product, $coupon, $values = []) {
+        if (!$valid || !is_object($coupon) || !self::is_affiliate_coupon($coupon)) {
+            return $valid;
+        }
+
+        return self::is_affiliate_excluded_product($product) ? false : $valid;
+    }
+
+    public static function mark_affiliate_excluded_order_item($item_id, $item, $order_id) {
+        if (!class_exists('WC_Order_Item_Product') || !($item instanceof WC_Order_Item_Product)) {
+            return;
+        }
+
+        $product = $item->get_product();
+        if (!self::is_affiliate_excluded_product($product)) {
+            return;
+        }
+
+        if (function_exists('wc_add_order_item_meta')) {
+            wc_add_order_item_meta(absint($item_id), '_phaseone_affiliate_excluded', 'yes', true);
+        }
+    }
+
+    private static function is_affiliate_coupon($coupon) {
+        if (!is_object($coupon) || !method_exists($coupon, 'get_meta')) {
+            return false;
+        }
+
+        if (strtolower(trim((string) $coupon->get_meta('_phaseone_affiliate_coupon_managed', true))) === 'yes') {
+            return true;
+        }
+
+        return absint($coupon->get_meta('wcu_select_coupon_user_id', true)) > 0
+            || absint($coupon->get_meta('wcu_select_coupon_user', true)) > 0;
+    }
+
+    private static function is_affiliate_excluded_product($product) {
+        if (!is_object($product) || !method_exists($product, 'get_meta')) {
+            return false;
+        }
+
+        if (strtolower(trim((string) $product->get_meta('_phaseone_affiliate_excluded', true))) === 'yes') {
+            return true;
+        }
+
+        $parent_id = method_exists($product, 'get_parent_id') ? absint($product->get_parent_id()) : 0;
+        return $parent_id > 0
+            && strtolower(trim((string) get_post_meta($parent_id, '_phaseone_affiliate_excluded', true))) === 'yes';
     }
 
     private static function clean_text_list($value) {

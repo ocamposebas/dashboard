@@ -28,7 +28,10 @@ export function calculateAffiliateCommission(
   holdDays: number,
   now = new Date(),
 ): AffiliateCommissionCalculation {
-  const productNet = cents(order.lineItems.reduce((sum, item) => sum + Math.max(0, item.total), 0));
+  const productNet = cents(order.lineItems.reduce(
+    (sum, item) => sum + (item.affiliateEligible === false ? 0 : Math.max(0, item.total)),
+    0,
+  ));
   // Positive operational fees are not commissionable. Negative fee lines are
   // checkout discounts (for example the Zelle discount) and reduce the same
   // merchandise base used by the legacy affiliate ledger.
