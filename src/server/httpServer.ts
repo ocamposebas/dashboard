@@ -154,6 +154,11 @@ import {
 import type { ManagedUserRecord, ManagedUserRole, PresenceStore } from "./presenceStore.js";
 import type { DeliveryMonitorService } from "./deliveryMonitorService.js";
 import {
+  RESEARCHER_TYPES,
+  ResearchConsentRepository,
+  type ResearcherType,
+} from "./researchConsentRepository.js";
+import {
   ProductLocationError,
   ProductLocationRepository,
 } from "./productLocationRepository.js";
@@ -551,6 +556,9 @@ export function createMonitorServer(
     : undefined;
   const customCoas = dependencies.fulfillmentDatabase
     ? new CoaRepository(dependencies.fulfillmentDatabase, config.coaPublicOrigin)
+    : undefined;
+  const researchConsents = dependencies.fulfillmentDatabase
+    ? new ResearchConsentRepository(dependencies.fulfillmentDatabase)
     : undefined;
   const fulfillmentRepository = dependencies.fulfillmentDatabase
     ? new FulfillmentRepository(dependencies.fulfillmentDatabase)
@@ -2342,6 +2350,129 @@ export function createMonitorServer(
         response.setHeader("ETag", `\"${document.sha256}\"`);
         if (request.method === "HEAD") response.end();
         else response.end(document.content);
+        return;
+      }
+
+      if (url.pathname.startsWith("/api/internal/research-consent/")) {
+        if (!affiliateServiceRequestAllowed(request, config)) {
+          json(response, 401, { error: "Research consent service authentication failed" });
+          return;
+        }
+        if (!researchConsents || !config.affiliateServiceSecret) {
+          json(response, 503, { error: "The research consent registry is not configured" });
+          return;
+        }
+        if (request.method !== "POST") {
+          json(response, 405, { error: "Method not allowed" });
+          return;
+        }
+        let payload: Record<string, unknown>;
+        try {
+          payload = JSON.parse(await readBody(request, 32 * 1024)) as Record<string, unknown>;
+        } catch {
+          json(response, 400, { error: "Invalid research consent request" });
+          return;
+        }
+        const visitorToken = typeof payload.visitorToken === "string"
+          ? payload.visitorToken.trim()
+          : "";
+        if (!/^[a-zA-Z0-9_-]{32,160}$/.test(visitorToken)) {
+          json(response, 400, { error: "The research consent identifier is invalid" });
+          return;
+        }
+        const visitorTokenHash = createHash("sha256")
+          .update(`${config.affiliateServiceSecret}|research-consent|${visitorToken}`)
+          .digest("hex");
+
+        if (url.pathname === "/api/internal/research-consent/status") {
+          const consent = await researchConsents.status(visitorTokenHash);
+          json(response, 200, consent
+            ? {
+                accepted: true,
+                consentId: consent.id,
+                researcherType: consent.researcherType,
+                acceptedAt: consent.acceptedAt,
+                expiresAt: consent.expiresAt,
+                linked: Boolean(consent.customerId),
+              }
+            : { accepted: false });
+          return;
+        }
+
+        if (url.pathname === "/api/internal/research-consent/accept") {
+          const researcherType = typeof payload.researcherType === "string"
+            ? payload.researcherType.trim()
+            : "";
+          const consentVersion = typeof payload.consentVersion === "string"
+            ? payload.consentVersion.trim()
+            : "";
+          const policyVersion = typeof payload.policyVersion === "string"
+            ? payload.policyVersion.trim()
+            : "";
+          const ipHash = typeof payload.ipHash === "string" && /^[a-f0-9]{64}$/i.test(payload.ipHash)
+            ? payload.ipHash.toLowerCase()
+            : null;
+          const userAgentHash = typeof payload.userAgentHash === "string" && /^[a-f0-9]{64}$/i.test(payload.userAgentHash)
+            ? payload.userAgentHash.toLowerCase()
+            : null;
+          if (
+            !RESEARCHER_TYPES.includes(researcherType as ResearcherType) ||
+            payload.confirmsLegalAge !== true ||
+            payload.confirmsResearchOnly !== true ||
+            !/^[a-zA-Z0-9._-]{1,48}$/.test(consentVersion) ||
+            !/^[a-zA-Z0-9._-]{1,48}$/.test(policyVersion)
+          ) {
+            json(response, 400, { error: "Complete every researcher verification field" });
+            return;
+          }
+          const consent = await researchConsents.accept({
+            visitorTokenHash,
+            researcherType: researcherType as ResearcherType,
+            consentVersion,
+            policyVersion,
+            ipHash,
+            userAgentHash,
+          });
+          json(response, 201, {
+            accepted: true,
+            consentId: consent.id,
+            researcherType: consent.researcherType,
+            acceptedAt: consent.acceptedAt,
+            expiresAt: consent.expiresAt,
+            linked: Boolean(consent.customerId),
+          });
+          return;
+        }
+
+        if (url.pathname === "/api/internal/research-consent/link") {
+          const customerId = Number(payload.customerId || 0);
+          const customerEmail = typeof payload.customerEmail === "string"
+            ? payload.customerEmail.trim().toLowerCase()
+            : "";
+          const customerDisplayName = typeof payload.customerDisplayName === "string"
+            ? payload.customerDisplayName.trim().slice(0, 200)
+            : "";
+          if (
+            !Number.isSafeInteger(customerId) || customerId < 1 ||
+            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail) ||
+            customerEmail.length > 320
+          ) {
+            json(response, 400, { error: "The verified customer identity is invalid" });
+            return;
+          }
+          const consent = await researchConsents.link({
+            visitorTokenHash,
+            customerId,
+            customerEmail,
+            customerDisplayName,
+          });
+          json(response, consent ? 200 : 404, consent
+            ? { linked: true, consentId: consent.id, linkedAt: consent.linkedAt }
+            : { linked: false, error: "No active research consent was found for this browser" });
+          return;
+        }
+
+        json(response, 404, { error: "Research consent endpoint not found" });
         return;
       }
 
