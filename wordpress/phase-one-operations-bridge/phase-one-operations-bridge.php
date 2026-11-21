@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Phase One Operations Bridge
  * Description: Secure bridge between Phase One Operations Suite, storefront controls, customer rewards and existing COA Manager records.
- * Version: 2.2.0
+ * Version: 2.2.4
  * Author: Phase One Labz
  * Requires at least: 6.0
  * Requires PHP: 7.4
@@ -18,13 +18,68 @@ final class Phase_One_Operations_Bridge {
     const META_PREFIX = '_p1coa_';
     const REWARDS_SETTINGS_OPTION = 'phaseone_ops_rewards_settings';
     const REWARDS_AUDIT_OPTION = 'phaseone_ops_rewards_settings_audit';
+    const REWARDS_SECURITY_SECRET_OPTION = 'phaseone_ops_rewards_security_secret_v1';
 
     public static function init() {
+        add_action('init', [__CLASS__, 'harden_public_surface'], 1);
+        add_action('send_headers', [__CLASS__, 'remove_disclosure_headers'], PHP_INT_MAX);
+        add_filter('wp_headers', [__CLASS__, 'filter_public_headers'], PHP_INT_MAX);
+        add_filter('the_generator', '__return_empty_string', PHP_INT_MAX);
+        add_filter('xmlrpc_enabled', '__return_false', PHP_INT_MAX);
+        add_filter('xmlrpc_methods', [__CLASS__, 'disable_xmlrpc_methods'], PHP_INT_MAX);
+        add_filter('pings_open', '__return_false', PHP_INT_MAX);
         add_action('rest_api_init', [__CLASS__, 'register_routes']);
         add_action('rest_api_init', [__CLASS__, 'register_rewards_redemption_override'], 99);
         add_action('plugins_loaded', [__CLASS__, 'configure_rewards_engine'], 20);
+        add_action('phaseone_retry_award_points_for_order', [__CLASS__, 'award_points_for_order'], 10, 1);
         add_filter('woocommerce_coupon_is_valid_for_product', [__CLASS__, 'filter_affiliate_coupon_product'], 10, 4);
         add_action('woocommerce_new_order_item', [__CLASS__, 'mark_affiliate_excluded_order_item'], 10, 3);
+    }
+
+    public static function harden_public_surface() {
+        remove_action('wp_head', 'wp_generator');
+        remove_action('wp_head', 'rsd_link');
+        remove_action('wp_head', 'wlwmanifest_link');
+        remove_action('rss2_head', 'the_generator');
+        remove_action('rss_head', 'the_generator');
+        remove_action('rdf_header', 'the_generator');
+        remove_action('atom_head', 'the_generator');
+        remove_action('commentsrss2_head', 'the_generator');
+        remove_action('opml_head', 'the_generator');
+        self::remove_disclosure_headers();
+    }
+
+    public static function remove_disclosure_headers() {
+        if (!headers_sent()) {
+            header_remove('X-Powered-By');
+            header_remove('X-Pingback');
+            header('X-Content-Type-Options: nosniff', true);
+            header('Referrer-Policy: strict-origin-when-cross-origin', true);
+            header('X-Frame-Options: SAMEORIGIN', true);
+            if (function_exists('is_ssl') && is_ssl()) {
+                header('Strict-Transport-Security: max-age=31536000', true);
+            } else {
+                header_remove('Strict-Transport-Security');
+            }
+        }
+    }
+
+    public static function filter_public_headers($headers) {
+        $headers = is_array($headers) ? $headers : [];
+        unset($headers['X-Pingback'], $headers['x-pingback'], $headers['X-Powered-By'], $headers['x-powered-by']);
+        $headers['X-Content-Type-Options'] = 'nosniff';
+        $headers['Referrer-Policy'] = 'strict-origin-when-cross-origin';
+        $headers['X-Frame-Options'] = 'SAMEORIGIN';
+        if (function_exists('is_ssl') && is_ssl()) {
+            $headers['Strict-Transport-Security'] = 'max-age=31536000';
+        } else {
+            unset($headers['Strict-Transport-Security'], $headers['strict-transport-security']);
+        }
+        return $headers;
+    }
+
+    public static function disable_xmlrpc_methods($methods) {
+        return [];
     }
 
     public static function register_routes() {
@@ -165,7 +220,7 @@ final class Phase_One_Operations_Bridge {
     public static function status() {
         return rest_ensure_response([
             'connected' => true,
-            'version' => '2.2.0',
+            'version' => '2.2.4',
             'capabilities' => array_values(array_filter([
                 'edit_coa',
                 'read_customer_rewards',
@@ -1543,25 +1598,67 @@ final class Phase_One_Operations_Bridge {
             return new WP_Error('phaseone_rewards_adjustment_invalid', 'The adjustment amount must be greater than zero.', ['status' => 400]);
         }
 
-        $before = max(0, (int) lab_points_get_points_balance_safe($user_id));
-        $after = 'set' === $operation ? $amount : ('subtract' === $operation ? $before - $amount : $before + $amount);
-        if ($after < 0 || $after > 1000000) {
-            return new WP_Error('phaseone_rewards_adjustment_out_of_range', 'The resulting balance must stay between zero and 1,000,000 points.', ['status' => 409]);
-        }
-        $change = $after - $before;
-        if (0 === $change) {
-            return new WP_Error('phaseone_rewards_no_change', 'The requested adjustment does not change the customer balance.', ['status' => 409]);
+        global $wpdb;
+        $lock_name = self::rewards_lock_name($user_id);
+        if (!self::acquire_rewards_lock($lock_name)) {
+            return new WP_Error('rewards_busy', 'This customer rewards balance is already being updated. Please try again.', ['status' => 409]);
         }
 
-        update_user_meta($user_id, '_lab_points_balance', $after);
+        $transaction_open = false;
+        $before = 0;
+        $after = 0;
+        $change = 0;
+        try {
+            if (false === $wpdb->query('START TRANSACTION')) {
+                throw new RuntimeException('Could not start the rewards transaction.');
+            }
+            $transaction_open = true;
+            $balances = self::locked_reward_balances($user_id);
+            $before = max(0, (int) $balances['points']);
+            $after = 'set' === $operation ? $amount : ('subtract' === $operation ? $before - $amount : $before + $amount);
+            if ($after < 0 || $after > 1000000) {
+                $wpdb->query('ROLLBACK');
+                $transaction_open = false;
+                return new WP_Error('phaseone_rewards_adjustment_out_of_range', 'The resulting balance must stay between zero and 1,000,000 points.', ['status' => 409]);
+            }
+            $change = $after - $before;
+            if (0 === $change) {
+                $wpdb->query('ROLLBACK');
+                $transaction_open = false;
+                return new WP_Error('phaseone_rewards_no_change', 'The requested adjustment does not change the customer balance.', ['status' => 409]);
+            }
+
+            if (!self::write_reward_balance($user_id, '_lab_points_balance', $after)) {
+                throw new RuntimeException('Could not update the customer points balance.');
+            }
+            wp_cache_delete($user_id, 'user_meta');
+            lab_points_record_transaction($user_id, $change, $before, $after, 'manual_adjustment', $reason, [
+                'actor_id' => get_current_user_id(),
+                'email_requested' => $notify,
+            ]);
+            if (!empty($wpdb->last_error)) {
+                throw new RuntimeException('Could not record the rewards adjustment.');
+            }
+            if (false === $wpdb->query('COMMIT')) {
+                throw new RuntimeException('Could not commit the rewards adjustment.');
+            }
+            $transaction_open = false;
+        } catch (Throwable $error) {
+            if ($transaction_open) {
+                $wpdb->query('ROLLBACK');
+            }
+            wp_cache_delete($user_id, 'user_meta');
+            error_log('Phase One rewards adjustment failed: ' . $error->getMessage());
+            return new WP_Error('phaseone_rewards_adjustment_failed', 'The rewards balance could not be updated safely.', ['status' => 500]);
+        } finally {
+            self::release_rewards_lock($lock_name);
+        }
+
+        wp_cache_delete($user_id, 'user_meta');
         $email_sent = null;
         if ($notify && function_exists('lab_points_send_adjustment_email')) {
             $email_sent = (bool) lab_points_send_adjustment_email($user, $change, $after, $reason);
         }
-        lab_points_record_transaction($user_id, $change, $before, $after, 'manual_adjustment', $reason, [
-            'actor_id' => get_current_user_id(),
-            'email_sent' => $email_sent,
-        ]);
         if (function_exists('lab_points_clear_admin_stats_cache')) {
             lab_points_clear_admin_stats_cache();
         }
@@ -1602,6 +1699,90 @@ final class Phase_One_Operations_Bridge {
         add_action('woocommerce_order_status_completed', [__CLASS__, 'award_points_for_order'], 10, 1);
     }
 
+    private static function schedule_points_award_retry($order_id) {
+        $order_id = absint($order_id);
+        if (!$order_id || wp_next_scheduled('phaseone_retry_award_points_for_order', [$order_id])) {
+            return;
+        }
+        wp_schedule_single_event(time() + 30, 'phaseone_retry_award_points_for_order', [$order_id]);
+    }
+
+    private static function reload_order_after_rewards_rollback($order, $order_id) {
+        $order_id = absint($order_id);
+        if (!$order_id) {
+            return null;
+        }
+
+        // WC_Order keeps metadata in memory and WooCommerce may also retain it
+        // in a persistent object cache. A database rollback alone would leave a
+        // stale `_lab_points_awarded=yes` visible to the scheduled retry.
+        if ($order instanceof WC_Order) {
+            try {
+                $data_store = $order->get_data_store();
+                if (is_object($data_store) && is_callable([$data_store, 'clear_caches'])) {
+                    $data_store->clear_caches($order);
+                }
+            } catch (Throwable $cache_error) {
+                // Continue with the explicit cache eviction below.
+            }
+        }
+        wp_cache_delete($order_id, 'post_meta');
+        wp_cache_delete($order_id, 'posts');
+        wp_cache_delete($order_id, 'orders');
+        wp_cache_delete('order-items-' . $order_id, 'orders');
+        wp_cache_delete('orders-' . $order_id, 'orders');
+        if (function_exists('clean_post_cache')) {
+            clean_post_cache($order_id);
+        }
+        if (function_exists('wc_delete_shop_order_transients')) {
+            wc_delete_shop_order_transients($order_id);
+        }
+
+        if ($order instanceof WC_Order) {
+            try {
+                $order->read_meta_data(true);
+            } catch (Throwable $reload_error) {
+                // The new instance below remains the source of truth.
+            }
+        }
+        $fresh_order = wc_get_order($order_id);
+        if ($fresh_order instanceof WC_Order) {
+            $fresh_order->read_meta_data(true);
+            return $fresh_order;
+        }
+        return null;
+    }
+
+    private static function points_for_order($order, array $settings) {
+        if (!$order instanceof WC_Order) {
+            return 0;
+        }
+        $eligible = (float) $order->get_total();
+        if (empty($settings['include_shipping'])) {
+            $eligible -= (float) $order->get_shipping_total();
+        }
+        if (empty($settings['include_tax'])) {
+            $eligible -= (float) $order->get_total_tax();
+        }
+        $eligible = max(0, $eligible);
+        if ($eligible < (float) $settings['minimum_order_amount']) {
+            return 0;
+        }
+
+        $raw_points = $eligible * (float) $settings['points_per_currency'];
+        if ('ceil' === $settings['rounding']) {
+            $points = (int) ceil($raw_points);
+        } elseif ('round' === $settings['rounding']) {
+            $points = (int) round($raw_points);
+        } else {
+            $points = (int) floor($raw_points);
+        }
+        if ((int) $settings['maximum_points_per_order'] > 0) {
+            $points = min($points, (int) $settings['maximum_points_per_order']);
+        }
+        return max(0, $points);
+    }
+
     public static function award_points_for_order($order_id) {
         $settings = self::get_rewards_settings();
         if (empty($settings['earning_enabled']) || !$order_id) {
@@ -1621,51 +1802,107 @@ final class Phase_One_Operations_Bridge {
             return;
         }
 
-        $eligible = (float) $order->get_total();
-        if (empty($settings['include_shipping'])) {
-            $eligible -= (float) $order->get_shipping_total();
-        }
-        if (empty($settings['include_tax'])) {
-            $eligible -= (float) $order->get_total_tax();
-        }
-        $eligible = max(0, $eligible);
-        if ($eligible < (float) $settings['minimum_order_amount']) {
-            $order->add_order_note('Loyalty: No points awarded because the eligible amount was below the configured minimum.');
-            return;
-        }
-        $raw_points = $eligible * (float) $settings['points_per_currency'];
-        if ('ceil' === $settings['rounding']) {
-            $points = (int) ceil($raw_points);
-        } elseif ('round' === $settings['rounding']) {
-            $points = (int) round($raw_points);
-        } else {
-            $points = (int) floor($raw_points);
-        }
-        if ((int) $settings['maximum_points_per_order'] > 0) {
-            $points = min($points, (int) $settings['maximum_points_per_order']);
-        }
+        $points = self::points_for_order($order, $settings);
         if ($points <= 0) {
+            $order->add_order_note('Loyalty: No points awarded because this order did not meet the current rewards policy.');
             return;
         }
 
-        $before = max(0, (int) lab_points_get_points_balance_safe($user_id));
-        $after = $before + $points;
-        update_user_meta($user_id, '_lab_points_balance', $after);
-        lab_points_record_transaction(
-            $user_id,
-            $points,
-            $before,
-            $after,
-            'order_earned',
-            sprintf('Points earned from order #%s.', $order->get_order_number()),
-            ['order_id' => $order_id, 'actor_id' => 0]
-        );
+        $lock_name = self::rewards_lock_name($user_id);
+        if (!self::acquire_rewards_lock($lock_name)) {
+            self::schedule_points_award_retry($order_id);
+            return;
+        }
+
+        global $wpdb;
+        $transaction_open = false;
+        $before = 0;
+        $after = 0;
+        try {
+            if (false === $wpdb->query('START TRANSACTION')) {
+                throw new RuntimeException('Could not start the points-award transaction.');
+            }
+            $transaction_open = true;
+
+            // Re-read the order after acquiring the customer lock. A concurrent
+            // processing/completed hook may already have finished the award.
+            $order = wc_get_order($order_id);
+            if (!$order instanceof WC_Order) {
+                throw new RuntimeException('The order could not be reloaded for its points award.');
+            }
+            $order->read_meta_data(true);
+            if ('yes' === $order->get_meta('_lab_points_awarded', true)) {
+                $wpdb->query('ROLLBACK');
+                $transaction_open = false;
+                return;
+            }
+            if ((int) $order->get_user_id() !== (int) $user_id
+                || !in_array($order->get_status(), $settings['award_statuses'], true)) {
+                $wpdb->query('ROLLBACK');
+                $transaction_open = false;
+                self::schedule_points_award_retry($order_id);
+                return;
+            }
+            $points = self::points_for_order($order, $settings);
+            if ($points <= 0) {
+                $wpdb->query('ROLLBACK');
+                $transaction_open = false;
+                return;
+            }
+
+            $balances = self::locked_reward_balances($user_id);
+            $before = max(0, (int) $balances['points']);
+            $after = $before + $points;
+            if (!self::write_reward_balance($user_id, '_lab_points_balance', $after)) {
+                throw new RuntimeException('Could not update the customer points balance.');
+            }
+            wp_cache_delete($user_id, 'user_meta');
+            lab_points_record_transaction(
+                $user_id,
+                $points,
+                $before,
+                $after,
+                'order_earned',
+                sprintf('Points earned from order #%s.', $order->get_order_number()),
+                ['order_id' => $order_id, 'actor_id' => 0]
+            );
+            if (!empty($wpdb->last_error)) {
+                throw new RuntimeException('Could not record the points award.');
+            }
+
+            // The marker and balance commit together, so a second status hook
+            // can neither double-credit nor observe a half-finished award.
+            $order->update_meta_data('_lab_points_awarded', 'yes');
+            $order->update_meta_data('_lab_points_earned', $points);
+            $order->save();
+            if (!empty($wpdb->last_error)) {
+                throw new RuntimeException('Could not persist the points-award marker.');
+            }
+            if (false === $wpdb->query('COMMIT')) {
+                throw new RuntimeException('Could not commit the points award.');
+            }
+            $transaction_open = false;
+        } catch (Throwable $error) {
+            if ($transaction_open) {
+                $wpdb->query('ROLLBACK');
+                $transaction_open = false;
+            }
+            wp_cache_delete($user_id, 'user_meta');
+            $order = self::reload_order_after_rewards_rollback($order, $order_id);
+            error_log('Phase One order points award failed: ' . $error->getMessage());
+            // Reload first so the retry cannot observe metadata that existed
+            // only in the rolled-back transaction or the old object instance.
+            self::schedule_points_award_retry($order_id);
+            return;
+        } finally {
+            self::release_rewards_lock($lock_name);
+        }
+
+        wp_cache_delete($user_id, 'user_meta');
+        wp_clear_scheduled_hook('phaseone_retry_award_points_for_order', [absint($order_id)]);
         if (function_exists('lab_points_clear_admin_stats_cache')) {
             lab_points_clear_admin_stats_cache();
         }
-        $order->update_meta_data('_lab_points_awarded', 'yes');
-        $order->update_meta_data('_lab_points_earned', $points);
-        $order->save();
         $order->add_order_note(sprintf('Loyalty: %d points awarded. New balance: %d.', $points, $after));
     }
 
@@ -1701,6 +1938,171 @@ final class Phase_One_Operations_Bridge {
         ]);
     }
 
+    private static function redemption_idempotency_hash(WP_REST_Request $request, array $input) {
+        $raw = trim((string) $request->get_header('x-phaseone-idempotency-key'));
+        if ($raw === '') {
+            $raw = trim((string) $request->get_header('idempotency-key'));
+        }
+        if ($raw === '') {
+            $raw = trim((string) ($input['idempotency_key'] ?? $input['idempotencyKey'] ?? ''));
+        }
+        if (!preg_match('/^[A-Za-z0-9._:-]{16,128}$/', $raw)) {
+            return '';
+        }
+        $secret = self::rewards_security_secret();
+        if ($secret === '') {
+            return '';
+        }
+        return hash_hmac('sha256', 'rewards-idempotency:v1:' . $raw, $secret);
+    }
+
+    private static function rewards_lock_name($user_id) {
+        $secret = self::rewards_security_secret();
+        if ($secret === '') {
+            return '';
+        }
+        return 'p1_rewards_' . substr(hash_hmac('sha256', 'rewards-lock:v1:' . absint($user_id), $secret), 0, 40);
+    }
+
+    private static function rewards_security_secret() {
+        static $secret = null;
+        if (is_string($secret)) {
+            return $secret;
+        }
+
+        $stored = (string) get_option(self::REWARDS_SECURITY_SECRET_OPTION, '');
+        if (preg_match('/^[a-f0-9]{64}$/', $stored)) {
+            $secret = $stored;
+            return $secret;
+        }
+
+        try {
+            $candidate = bin2hex(random_bytes(32));
+        } catch (Throwable $error) {
+            $candidate = hash('sha256', wp_generate_password(64, true, true) . ':' . microtime(true) . ':' . wp_rand());
+        }
+
+        // add_option is a single INSERT guarded by WordPress' unique option-name
+        // index. Competing workers therefore converge on the same persisted key.
+        if (add_option(self::REWARDS_SECURITY_SECRET_OPTION, $candidate, '', false)) {
+            $secret = $candidate;
+            return $secret;
+        }
+
+        // Another request may have won the insert race. Read the authoritative
+        // row directly because this worker may still have a local `notoptions`
+        // cache entry from the initial miss.
+        global $wpdb;
+        $stored = (string) $wpdb->get_var($wpdb->prepare(
+            "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s LIMIT 1",
+            self::REWARDS_SECURITY_SECRET_OPTION
+        ));
+        $secret = preg_match('/^[a-f0-9]{64}$/', $stored) ? $stored : '';
+        return $secret;
+    }
+
+    private static function acquire_rewards_lock($lock_name) {
+        global $wpdb;
+        if (!is_string($lock_name) || $lock_name === '') {
+            return false;
+        }
+        return 1 === (int) $wpdb->get_var($wpdb->prepare('SELECT GET_LOCK(%s, %d)', $lock_name, 5));
+    }
+
+    private static function release_rewards_lock($lock_name) {
+        global $wpdb;
+        if (!is_string($lock_name) || $lock_name === '') {
+            return;
+        }
+        $wpdb->get_var($wpdb->prepare('SELECT RELEASE_LOCK(%s)', $lock_name));
+    }
+
+    private static function locked_reward_balances($user_id) {
+        global $wpdb;
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT meta_key, meta_value FROM {$wpdb->usermeta}
+             WHERE user_id = %d AND meta_key IN (%s, %s, %s, %s)
+             FOR UPDATE",
+            absint($user_id),
+            '_lab_points_balance',
+            '_lab_store_credit_balance',
+            '_lab_points_transaction_history',
+            '_lab_store_credit_redemptions'
+        ));
+        if (!empty($wpdb->last_error)) {
+            throw new RuntimeException('Could not lock the rewards ledger.');
+        }
+        $points = 0;
+        $credit = 0.0;
+        foreach ((array) $rows as $row) {
+            if ($row->meta_key === '_lab_points_balance') {
+                $points = max(0, (int) $row->meta_value);
+            } elseif ($row->meta_key === '_lab_store_credit_balance') {
+                $credit = max(0, (float) $row->meta_value);
+            }
+        }
+        return ['points' => $points, 'credit' => $credit];
+    }
+
+    private static function write_reward_balance($user_id, $meta_key, $value) {
+        global $wpdb;
+        $serialized = maybe_serialize($value);
+        $exists = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$wpdb->usermeta} WHERE user_id = %d AND meta_key = %s",
+            absint($user_id),
+            $meta_key
+        ));
+        if (!empty($wpdb->last_error)) {
+            return false;
+        }
+        if ($exists > 0) {
+            return false !== $wpdb->query($wpdb->prepare(
+                "UPDATE {$wpdb->usermeta} SET meta_value = %s WHERE user_id = %d AND meta_key = %s",
+                $serialized,
+                absint($user_id),
+                $meta_key
+            ));
+        }
+        return false !== $wpdb->insert($wpdb->usermeta, [
+            'user_id' => absint($user_id),
+            'meta_key' => $meta_key,
+            'meta_value' => $serialized,
+        ], ['%d', '%s', '%s']);
+    }
+
+    private static function redemption_by_idempotency(array $history, $idempotency_hash) {
+        foreach ($history as $record) {
+            if (is_array($record) && !empty($record['idempotency_key']) && hash_equals((string) $record['idempotency_key'], (string) $idempotency_hash)) {
+                return $record;
+            }
+        }
+        return null;
+    }
+
+    private static function redemption_idempotency_meta_key($idempotency_hash) {
+        return '_p1_reward_idem_' . substr((string) $idempotency_hash, 0, 40);
+    }
+
+    private static function redemption_response(array $record) {
+        $points = max(0, (int) ($record['points_balance'] ?? 0));
+        $credit = max(0, (float) ($record['store_credit_balance'] ?? 0));
+        $redeemed_points = max(0, (int) ($record['points'] ?? 0));
+        $redeemed_credit = max(0, (float) ($record['credit'] ?? 0));
+        return rest_ensure_response([
+            'success' => true,
+            'message' => number_format_i18n($redeemed_points) . ' points were converted into $' . wc_format_decimal($redeemed_credit, 2) . ' store credit.',
+            'points' => $points,
+            'pointsBalance' => $points,
+            'points_balance' => $points,
+            'store_credit' => $credit,
+            'storeCredit' => $credit,
+            'credit' => $credit,
+            'store_credit_redemptions' => lab_points_get_store_credit_redemptions(absint($record['user_id'] ?? 0)),
+            'redemption' => $record,
+            'idempotent' => !empty($record['idempotent_replay']),
+        ]);
+    }
+
     public static function redeem_points(WP_REST_Request $request) {
         $settings = self::get_rewards_settings();
         if (empty($settings['redemption_enabled'])) {
@@ -1717,6 +2119,10 @@ final class Phase_One_Operations_Bridge {
         }
         $input = $request->get_json_params();
         $input = is_array($input) ? $input : [];
+        $idempotency_hash = self::redemption_idempotency_hash($request, $input);
+        if ($idempotency_hash === '') {
+            return new WP_Error('missing_idempotency_key', 'A valid idempotency key is required for point redemption.', ['status' => 400]);
+        }
         $points = intval($input['points'] ?? 0);
         $credit = (float) ($input['credit'] ?? 0);
         $block_points = max(1, (int) $settings['redemption_block_points']);
@@ -1732,51 +2138,111 @@ final class Phase_One_Operations_Bridge {
                 'received_credit' => $credit,
             ]);
         }
-        $available = max(0, (int) lab_points_get_points_balance_safe($user->ID));
-        if ($available < $points) {
-            return new WP_Error('not_enough_points', 'Not enough points available.', ['status' => 400, 'available_points' => $available]);
+        global $wpdb;
+        $lock_name = self::rewards_lock_name($user->ID);
+        if (!self::acquire_rewards_lock($lock_name)) {
+            return new WP_Error('rewards_busy', 'Your rewards balance is already being updated. Please try again.', ['status' => 409]);
         }
-        $current_credit = (float) lab_points_get_store_credit_balance($user->ID);
-        $next_points = $available - $points;
-        $next_credit = $current_credit + $expected_credit;
-        update_user_meta($user->ID, '_lab_points_balance', $next_points);
-        update_user_meta($user->ID, '_lab_store_credit_balance', $next_credit);
-        lab_points_record_transaction(
-            $user->ID,
-            -$points,
-            $available,
-            $next_points,
-            'store_credit_redemption',
-            sprintf('%s points converted into $%s store credit.', number_format_i18n($points), wc_format_decimal($expected_credit, 2)),
-            ['actor_id' => $user->ID]
-        );
-        $history = lab_points_get_store_credit_redemptions($user->ID);
-        $record = [
-            'id' => 'redemption_' . wp_generate_uuid4(),
-            'points' => $points,
-            'credit' => $expected_credit,
-            'currency' => 'USD',
-            'created_at' => current_time('mysql'),
-            'status' => 'completed',
-            'note' => $points . ' points converted into $' . $expected_credit . ' store credit.',
-        ];
-        array_unshift($history, $record);
-        lab_points_save_store_credit_redemptions($user->ID, $history);
-        if (function_exists('lab_points_clear_admin_stats_cache')) {
-            lab_points_clear_admin_stats_cache();
+
+        $transaction_open = false;
+        try {
+            $idempotency_meta_key = self::redemption_idempotency_meta_key($idempotency_hash);
+            $existing = get_user_meta($user->ID, $idempotency_meta_key, true);
+            if (!is_array($existing)) {
+                $history = lab_points_get_store_credit_redemptions($user->ID);
+                $history = is_array($history) ? $history : [];
+                $existing = self::redemption_by_idempotency($history, $idempotency_hash);
+            }
+            if (is_array($existing)) {
+                if ((int) ($existing['points'] ?? 0) !== $points || abs((float) ($existing['credit'] ?? 0) - $expected_credit) > 0.0001) {
+                    return new WP_Error('idempotency_conflict', 'This redemption key was already used for a different amount.', ['status' => 409]);
+                }
+                $existing['idempotent_replay'] = true;
+                $existing['user_id'] = $user->ID;
+                return self::redemption_response($existing);
+            }
+
+            if (false === $wpdb->query('START TRANSACTION')) {
+                throw new RuntimeException('Could not start the rewards transaction.');
+            }
+            $transaction_open = true;
+            $balances = self::locked_reward_balances($user->ID);
+            $available = max(0, (int) $balances['points']);
+            $current_credit = max(0, (float) $balances['credit']);
+
+            if ($available < $points) {
+                $wpdb->query('ROLLBACK');
+                $transaction_open = false;
+                return new WP_Error('not_enough_points', 'Not enough points available.', ['status' => 400, 'available_points' => $available]);
+            }
+
+            $next_points = $available - $points;
+            $next_credit = round($current_credit + $expected_credit, 2);
+            if (!self::write_reward_balance($user->ID, '_lab_points_balance', $next_points)
+                || !self::write_reward_balance($user->ID, '_lab_store_credit_balance', $next_credit)) {
+                throw new RuntimeException('Could not update the rewards balances.');
+            }
+            wp_cache_delete($user->ID, 'user_meta');
+
+            lab_points_record_transaction(
+                $user->ID,
+                -$points,
+                $available,
+                $next_points,
+                'store_credit_redemption',
+                sprintf('%s points converted into $%s store credit.', number_format_i18n($points), wc_format_decimal($expected_credit, 2)),
+                ['actor_id' => $user->ID, 'idempotency_key' => $idempotency_hash]
+            );
+            if (!empty($wpdb->last_error)) {
+                throw new RuntimeException('Could not record the rewards transaction.');
+            }
+
+            $history = lab_points_get_store_credit_redemptions($user->ID);
+            $history = is_array($history) ? $history : [];
+            $record = [
+                'id' => 'redemption_' . wp_generate_uuid4(),
+                'idempotency_key' => $idempotency_hash,
+                'user_id' => $user->ID,
+                'points' => $points,
+                'credit' => $expected_credit,
+                'points_balance' => $next_points,
+                'store_credit_balance' => $next_credit,
+                'currency' => 'USD',
+                'created_at' => current_time('mysql'),
+                'status' => 'completed',
+                'note' => $points . ' points converted into $' . $expected_credit . ' store credit.',
+            ];
+            array_unshift($history, $record);
+            lab_points_save_store_credit_redemptions($user->ID, $history);
+            if (!empty($wpdb->last_error)) {
+                throw new RuntimeException('Could not record the store-credit redemption.');
+            }
+            // Store every completed logical request outside the display history.
+            // Some rewards plugins trim that history, but an old network retry
+            // must still never become a second redemption.
+            if (!self::write_reward_balance($user->ID, $idempotency_meta_key, $record)) {
+                throw new RuntimeException('Could not persist the redemption idempotency record.');
+            }
+
+            if (false === $wpdb->query('COMMIT')) {
+                throw new RuntimeException('Could not commit the rewards transaction.');
+            }
+            $transaction_open = false;
+            wp_cache_delete($user->ID, 'user_meta');
+            if (function_exists('lab_points_clear_admin_stats_cache')) {
+                lab_points_clear_admin_stats_cache();
+            }
+            return self::redemption_response($record);
+        } catch (Throwable $error) {
+            if ($transaction_open) {
+                $wpdb->query('ROLLBACK');
+            }
+            wp_cache_delete($user->ID, 'user_meta');
+            error_log('Phase One rewards redemption failed: ' . $error->getMessage());
+            return new WP_Error('redemption_failed', 'The rewards balance could not be updated safely. No points were redeemed.', ['status' => 500]);
+        } finally {
+            self::release_rewards_lock($lock_name);
         }
-        return rest_ensure_response([
-            'success' => true,
-            'message' => number_format_i18n($points) . ' points were converted into $' . wc_format_decimal($expected_credit, 2) . ' store credit.',
-            'points' => $next_points,
-            'pointsBalance' => $next_points,
-            'points_balance' => $next_points,
-            'store_credit' => $next_credit,
-            'storeCredit' => $next_credit,
-            'credit' => $next_credit,
-            'store_credit_redemptions' => lab_points_get_store_credit_redemptions($user->ID),
-            'redemption' => $record,
-        ]);
     }
 
     public static function update_site_controls(WP_REST_Request $request) {
