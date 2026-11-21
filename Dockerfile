@@ -8,9 +8,11 @@ RUN npm run build
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-RUN apk add --no-cache su-exec
+RUN apk upgrade --no-cache && apk add --no-cache su-exec
 COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev \
+    && npm cache clean --force \
+    && rm -rf /root/.npm /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/migrations ./migrations
 COPY docker-entrypoint.sh /usr/local/bin/phaseone-entrypoint
