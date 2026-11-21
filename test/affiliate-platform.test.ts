@@ -189,6 +189,18 @@ test("managed coupons are provisioned with the legacy bridge metadata and can be
   assert.equal(create.path, "/wp-json/wc/v3/coupons");
   assert.equal(create.body?.code, "partner10");
   assert.equal(create.body?.amount, "10.00");
+  assert.deepEqual(create.body?.product_ids, []);
+  assert.deepEqual(create.body?.product_categories, []);
+  assert.deepEqual(create.body?.excluded_product_categories, []);
+  assert.deepEqual(create.body?.email_restrictions, []);
+  assert.equal(create.body?.minimum_amount, "0.00");
+  assert.equal(create.body?.maximum_amount, "0.00");
+  assert.equal(create.body?.usage_limit, 0);
+  assert.equal(create.body?.usage_limit_per_user, 0);
+  assert.equal(create.body?.limit_usage_to_x_items, 0);
+  assert.equal(create.body?.date_expires, "");
+  assert.equal(create.body?.individual_use, false);
+  assert.equal(create.body?.exclude_sale_items, false);
   const metadata = new Map((create.body?.meta_data as Array<{ key: string; value: string }>).map((item) => [item.key, item.value]));
   assert.equal(metadata.get("wcu_select_coupon_user"), "1615");
   assert.equal(metadata.get("wcu_commission_percent"), "15");
@@ -235,9 +247,75 @@ test("an existing unowned WordPress coupon is safely adopted without losing its 
   assert.equal(requests.some((request) => request.method === "POST"), false);
   const update = requests.find((request) => request.method === "PUT")!;
   assert.equal(update.path, "/wp-json/wc/v3/coupons/3392");
+  assert.deepEqual(update.body?.product_ids, []);
+  assert.deepEqual(update.body?.product_categories, []);
+  assert.deepEqual(update.body?.excluded_product_categories, []);
+  assert.deepEqual(update.body?.email_restrictions, []);
   const metadata = new Map((update.body?.meta_data as Array<{ key: string; value: string }>).map((item) => [item.key, item.value]));
   assert.equal(metadata.get("wcu_select_coupon_user_id"), "1615");
   assert.equal(metadata.get("_phaseone_affiliate_coupon_managed"), "yes");
+});
+
+test("affiliate product exclusions remove contradictory include rules", async () => {
+  const requests: Array<{ method: string; path: string; body: Record<string, unknown> | null }> = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    const method = init?.method || "GET";
+    const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
+    requests.push({ method, path: url.pathname, body });
+    if (method === "GET") {
+      return new Response(JSON.stringify([{
+        id: 815,
+        product_ids: [545, 777],
+        excluded_product_ids: [],
+        meta_data: [{ key: "wcu_select_coupon_user_id", value: "3" }],
+      }]), { status: 200 });
+    }
+    return new Response(JSON.stringify({ id: 815 }), { status: 200 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://phaseonelabz.com",
+    consumerKey: "ck_test",
+    consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  await gateway.syncAffiliateProductExclusion(545, true);
+
+  const update = requests.find((request) => request.method === "PUT")!;
+  assert.equal(update.path, "/wp-json/wc/v3/coupons/815");
+  assert.deepEqual(update.body?.product_ids, [777]);
+  assert.deepEqual(update.body?.excluded_product_ids, [545]);
+});
+
+test("managed affiliate exclusion sync clears every legacy include rule", async () => {
+  const requests: Array<{ method: string; path: string; body: Record<string, unknown> | null }> = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    const method = init?.method || "GET";
+    const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
+    requests.push({ method, path: url.pathname, body });
+    if (method === "GET") {
+      return new Response(JSON.stringify([{
+        id: 815,
+        product_ids: [545, 777],
+        excluded_product_ids: [545],
+        meta_data: [{ key: "_phaseone_affiliate_coupon_managed", value: "yes" }],
+      }]), { status: 200 });
+    }
+    return new Response(JSON.stringify({ id: 815 }), { status: 200 });
+  };
+  const gateway = new WooCommerceGateway({
+    baseUrl: "https://phaseonelabz.com",
+    consumerKey: "ck_test",
+    consumerSecret: "cs_test",
+  }, fetchImpl);
+
+  await gateway.syncAffiliateProductExclusion(545, true);
+
+  const update = requests.find((request) => request.method === "PUT")!;
+  assert.equal(update.path, "/wp-json/wc/v3/coupons/815");
+  assert.deepEqual(update.body?.product_ids, []);
+  assert.deepEqual(update.body?.excluded_product_ids, [545]);
 });
 
 test("an existing coupon owned by another affiliate remains protected", async () => {

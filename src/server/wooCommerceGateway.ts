@@ -1866,9 +1866,13 @@ export class WooCommerceGateway {
     const coupons = await this.requestAllPages("coupons", {
       orderby: "date",
       order: "desc",
-      _fields: "id,excluded_product_ids,meta_data",
+      _fields: "id,product_ids,excluded_product_ids,meta_data",
     });
-    const updates: Array<{ id: number; excludedProductIds: number[] }> = [];
+    const updates: Array<{
+      id: number;
+      productIds: number[];
+      excludedProductIds: number[];
+    }> = [];
 
     for (const value of coupons) {
       const coupon = record(value);
@@ -1881,19 +1885,44 @@ export class WooCommerceGateway {
       const managed = text(metadataValue(coupon, "_phaseone_affiliate_coupon_managed")).trim().toLowerCase() === "yes";
       if (ownerId <= 0 && !managed) continue;
 
-      const current = integerList(coupon.excluded_product_ids);
-      const next = excluded
-        ? [...new Set([...current, cleanProductId])]
-        : current.filter((idValue) => idValue !== cleanProductId);
-      if (next.length === current.length && next.every((idValue, index) => idValue === current[index])) continue;
-      updates.push({ id, excludedProductIds: next });
+      const currentProductIds = integerList(coupon.product_ids);
+      const currentExcludedProductIds = integerList(coupon.excluded_product_ids);
+      // The dashboard models affiliate exclusions only. Canonicalize coupons
+      // it owns back to all products. For a legacy plugin coupon, preserve
+      // intentional targeting but never let the newly excluded product remain
+      // in both the include and exclude lists.
+      const nextProductIds = managed
+        ? []
+        : excluded
+          ? currentProductIds.filter((idValue) => idValue !== cleanProductId)
+          : currentProductIds;
+      const nextExcludedProductIds = excluded
+        ? [...new Set([...currentExcludedProductIds, cleanProductId])]
+        : currentExcludedProductIds.filter((idValue) => idValue !== cleanProductId);
+      const productIdsChanged =
+        nextProductIds.length !== currentProductIds.length ||
+        nextProductIds.some((idValue, index) => idValue !== currentProductIds[index]);
+      const excludedProductIdsChanged =
+        nextExcludedProductIds.length !== currentExcludedProductIds.length ||
+        nextExcludedProductIds.some(
+          (idValue, index) => idValue !== currentExcludedProductIds[index],
+        );
+      if (!productIdsChanged && !excludedProductIdsChanged) continue;
+      updates.push({
+        id,
+        productIds: nextProductIds,
+        excludedProductIds: nextExcludedProductIds,
+      });
     }
 
     for (let offset = 0; offset < updates.length; offset += 10) {
       await Promise.all(updates.slice(offset, offset + 10).map((update) =>
         this.request(`coupons/${update.id}`, {
           method: "PUT",
-          body: { excluded_product_ids: update.excludedProductIds },
+          body: {
+            product_ids: update.productIds,
+            excluded_product_ids: update.excludedProductIds,
+          },
         }),
       ));
     }
@@ -1935,7 +1964,24 @@ export class WooCommerceGateway {
       status: "publish",
       discount_type: "percent",
       amount: input.discountValue.toFixed(2),
+      // The Operations Suite is the source of truth for affiliate coupons.
+      // Clear every legacy WooCommerce targeting rule that is not represented
+      // in the dashboard so an adopted coupon cannot silently remain limited to
+      // an old product, category, customer email, sale state, or usage window.
+      product_ids: [],
       excluded_product_ids: excludedProductIds,
+      product_categories: [],
+      excluded_product_categories: [],
+      email_restrictions: [],
+      minimum_amount: "0.00",
+      maximum_amount: "0.00",
+      usage_limit: 0,
+      usage_limit_per_user: 0,
+      limit_usage_to_x_items: 0,
+      date_expires: "",
+      individual_use: false,
+      exclude_sale_items: false,
+      free_shipping: false,
       meta_data: [
         { key: "wcu_select_coupon_user", value: String(input.wpUserId) },
         { key: "wcu_select_coupon_user_id", value: String(input.wpUserId) },
