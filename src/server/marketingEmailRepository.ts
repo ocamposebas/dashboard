@@ -20,6 +20,7 @@ export interface MarketingContactInput {
 export interface MarketingCampaignInput {
   name: string;
   templateKey: string;
+  contentMode: "template" | "image";
   subject: string;
   preheader: string;
   heading: string;
@@ -27,6 +28,9 @@ export interface MarketingCampaignInput {
   buttonLabel: string;
   buttonUrl: string;
   products: MarketingEmailProduct[];
+  imageAssetId: string | null;
+  imageAlt: string;
+  imageLink: string;
   audienceTag: string;
   actorId: string;
   actorName: string;
@@ -43,11 +47,23 @@ interface ContactRow {
 interface CampaignRow {
   id: string; name: string; template_key: string; subject: string; preheader: string;
   heading: string; message: string; button_label: string; button_url: string;
+  content_mode: "template" | "image"; image_asset_id: string | null;
+  image_alt: string; image_link: string;
   products: unknown;
   audience_tag: string; status: string; recipient_count: number; sent_count: number;
   failed_count: number; uncertain_count: number; created_by_name: string;
   created_at: Date | string; updated_at: Date | string;
   launched_at: Date | string | null; completed_at: Date | string | null;
+}
+
+interface MarketingAssetRow {
+  id: string;
+  file_name: string;
+  mime: "image/jpeg" | "image/png" | "image/webp";
+  byte_size: number;
+  sha256: string;
+  content: Buffer;
+  created_at: Date | string;
 }
 
 function mapProducts(value: unknown): MarketingEmailProduct[] {
@@ -111,6 +127,7 @@ function mapCampaign(row: CampaignRow) {
     id: row.id,
     name: row.name,
     templateKey: row.template_key,
+    contentMode: row.content_mode || "template",
     subject: row.subject,
     preheader: row.preheader,
     heading: row.heading,
@@ -118,6 +135,9 @@ function mapCampaign(row: CampaignRow) {
     buttonLabel: row.button_label,
     buttonUrl: row.button_url,
     products: mapProducts(row.products),
+    imageAssetId: row.image_asset_id,
+    imageAlt: row.image_alt || "",
+    imageLink: row.image_link || "",
     audienceTag: row.audience_tag,
     status: row.status,
     recipientCount: Number(row.recipient_count) || 0,
@@ -134,6 +154,46 @@ function mapCampaign(row: CampaignRow) {
 
 export class MarketingEmailRepository {
   constructor(private readonly database: Database) {}
+
+  async createAsset(input: {
+    fileName: string;
+    mime: "image/jpeg" | "image/png" | "image/webp";
+    bytes: Buffer;
+    sha256: string;
+    actorId: string;
+  }): Promise<{ id: string; fileName: string; mime: string; size: number; sha256: string; createdAt: string | null }> {
+    const result = await this.database.query<MarketingAssetRow>(`
+      INSERT INTO marketing_email_assets (
+        id, file_name, mime, byte_size, sha256, content, created_by
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT (sha256) DO UPDATE SET sha256 = EXCLUDED.sha256
+      RETURNING *
+    `, [randomUUID(), input.fileName, input.mime, input.bytes.byteLength, input.sha256, input.bytes, input.actorId]);
+    const row = result.rows[0]!;
+    return {
+      id: row.id,
+      fileName: row.file_name,
+      mime: row.mime,
+      size: Number(row.byte_size) || 0,
+      sha256: row.sha256,
+      createdAt: iso(row.created_at),
+    };
+  }
+
+  async asset(id: string): Promise<MarketingAssetRow | null> {
+    const result = await this.database.query<MarketingAssetRow>(`
+      SELECT id, file_name, mime, byte_size, sha256, content, created_at
+      FROM marketing_email_assets WHERE id = $1
+    `, [id]);
+    return result.rows[0] || null;
+  }
+
+  async hasAsset(id: string): Promise<boolean> {
+    const result = await this.database.query<{ exists: boolean }>(`
+      SELECT EXISTS(SELECT 1 FROM marketing_email_assets WHERE id = $1) AS exists
+    `, [id]);
+    return result.rows[0]?.exists === true;
+  }
 
   async confirmRegisteredContacts(): Promise<number> {
     const result = await this.database.query(`
@@ -265,14 +325,16 @@ export class MarketingEmailRepository {
   async createCampaign(input: MarketingCampaignInput) {
     const result = await this.database.query<CampaignRow>(`
       INSERT INTO marketing_email_campaigns (
-        id, name, template_key, subject, preheader, heading, message, button_label,
-        button_url, products, audience_tag, created_by, created_by_name
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13)
+        id, name, template_key, content_mode, subject, preheader, heading, message,
+        button_label, button_url, products, image_asset_id, image_alt, image_link,
+        audience_tag, created_by, created_by_name
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$16,$17)
       RETURNING *
     `, [
-      randomUUID(), input.name, input.templateKey, input.subject, input.preheader,
-      input.heading, input.message, input.buttonLabel, input.buttonUrl,
-      JSON.stringify(input.products), input.audienceTag, input.actorId, input.actorName,
+      randomUUID(), input.name, input.templateKey, input.contentMode, input.subject,
+      input.preheader, input.heading, input.message, input.buttonLabel, input.buttonUrl,
+      JSON.stringify(input.products), input.imageAssetId, input.imageAlt, input.imageLink,
+      input.audienceTag, input.actorId, input.actorName,
     ]);
     return mapCampaign(result.rows[0]!);
   }
@@ -381,8 +443,8 @@ export class MarketingEmailRepository {
   async markDelivery(input: { deliveryId: string; contactId: string; campaignId: string; status: "sent" | "failed" | "uncertain"; error?: string; sentAt?: string | null }): Promise<void> {
     await this.database.transaction(async (client) => {
       await client.query(`
-        UPDATE marketing_email_deliveries SET status = $2, last_error = $3,
-          sent_at = CASE WHEN $2 = 'sent' THEN COALESCE($4::timestamptz, now()) ELSE sent_at END,
+        UPDATE marketing_email_deliveries SET status = $2::varchar(24), last_error = $3,
+          sent_at = CASE WHEN $2::varchar(24) = 'sent' THEN COALESCE($4::timestamptz, now()) ELSE sent_at END,
           updated_at = now() WHERE id = $1
       `, [input.deliveryId, input.status, (input.error || "").slice(0, 1000), input.sentAt || null]);
       if (input.status === "sent") {

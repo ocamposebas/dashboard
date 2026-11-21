@@ -29,6 +29,12 @@ export class MarketingEmailService {
     return PHASE_ONE_EMAIL_TEMPLATES;
   }
 
+  private assetUrl(assetId: string | null): string {
+    return assetId
+      ? new URL(`/api/public/marketing/assets/${encodeURIComponent(assetId)}`, this.publicOrigin).toString()
+      : "";
+  }
+
   start(): void {
     if (this.timer) return;
     this.timer = setInterval(() => void this.processOne(), 2_000);
@@ -38,6 +44,7 @@ export class MarketingEmailService {
 
   async sendTest(input: {
     recipient: string;
+    contentMode: "template" | "image";
     subject: string;
     preheader: string;
     heading: string;
@@ -46,6 +53,9 @@ export class MarketingEmailService {
     buttonUrl: string;
     templateKey: string;
     products: MarketingEmailProduct[];
+    imageAssetId: string | null;
+    imageAlt: string;
+    imageLink: string;
   }) {
     const template = PHASE_ONE_EMAIL_TEMPLATES.find((item) => item.key === input.templateKey);
     const rendered = renderPhaseOneEmail({
@@ -53,6 +63,10 @@ export class MarketingEmailService {
       recipientName: "Phase One team",
       unsubscribeUrl: "https://phaseonelabz.com/",
       logoUrl: `${this.publicOrigin}/assets/phase-one-email-logo-v2.png`,
+      contentMode: input.contentMode,
+      imageUrl: this.assetUrl(input.imageAssetId),
+      imageAlt: input.imageAlt,
+      imageLink: input.imageLink,
       ...(template?.accent ? { accent: template.accent } : {}),
     });
     return this.transport.sendMarketingEmail({
@@ -96,6 +110,7 @@ export class MarketingEmailService {
       const template = PHASE_ONE_EMAIL_TEMPLATES.find((item) => item.key === delivery.campaign.templateKey);
       const unsubscribeUrl = this.unsubscribeUrl(delivery.contactId);
       const rendered = renderPhaseOneEmail({
+        contentMode: delivery.campaign.contentMode,
         preheader: delivery.campaign.preheader,
         heading: delivery.campaign.heading,
         message: delivery.campaign.message,
@@ -105,6 +120,9 @@ export class MarketingEmailService {
         unsubscribeUrl,
         logoUrl: `${this.publicOrigin}/assets/phase-one-email-logo-v2.png`,
         products: delivery.campaign.products,
+        imageUrl: this.assetUrl(delivery.campaign.imageAssetId),
+        imageAlt: delivery.campaign.imageAlt,
+        imageLink: delivery.campaign.imageLink,
         ...(template?.accent ? { accent: template.accent } : {}),
       });
       try {

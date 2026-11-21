@@ -55,3 +55,25 @@ test("renders the real Phase One logo and governed catalog product cards", () =>
   assert.match(rendered.html, /KPV &lt;30MG&gt;/);
   assert.match(rendered.text, /KPV <30MG> — \$40\.00/);
 });
+
+test("renders a complete campaign image with a legal footer and text fallback", () => {
+  const rendered = renderPhaseOneEmail({
+    contentMode: "image",
+    preheader: "Private image campaign",
+    heading: "",
+    message: "",
+    buttonLabel: "",
+    buttonUrl: "",
+    recipientName: "Research partner",
+    unsubscribeUrl: "https://phaseonelabz.is/api/public/marketing/unsubscribe?token=safe",
+    imageUrl: "https://phaseonelabz.is/api/public/marketing/assets/11111111-1111-4111-8111-111111111111",
+    imageAlt: "Phase One Labz winter research catalog",
+    imageLink: "https://phaseonelabz.com/research-peptides/",
+  });
+  assert.match(rendered.html, /width="680"/);
+  assert.match(rendered.html, /Phase One Labz winter research catalog/);
+  assert.match(rendered.html, /href="https:\/\/phaseonelabz\.com\/research-peptides\/"/);
+  assert.match(rendered.html, /Unsubscribe/);
+  assert.match(rendered.html, /\{\{PHASEONE_BUSINESS_ADDRESS\}\}/);
+  assert.match(rendered.text, /View this update: https:\/\/phaseonelabz\.com\/research-peptides\//);
+});

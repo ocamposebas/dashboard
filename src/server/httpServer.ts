@@ -211,6 +211,7 @@ const dashboardDirectory = fileURLToPath(
 const MAX_LOGIN_BODY_BYTES = 8_192;
 const MAX_EVIDENCE_BODY_BYTES = 20 * 1024 * 1024;
 const MAX_MARKETING_IMPORT_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_MARKETING_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_PRODUCT_SAVE_BODY_BYTES = 512 * 1024;
 const MAX_PRODUCT_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_STAGED_PRODUCT_IMAGE_BYTES = 64 * 1024 * 1024;
@@ -233,6 +234,12 @@ function productImageMime(bytes: Buffer): StagedProductImage["mime"] | null {
 function productImageFilename(value: string, mime: StagedProductImage["mime"]): string {
   const extension = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
   const base = value.replace(/\.[^.]+$/, "").normalize("NFKD").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "product-image";
+  return `${base}.${extension}`;
+}
+
+function marketingEmailImageFilename(value: string, mime: StagedProductImage["mime"]): string {
+  const extension = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
+  const base = value.replace(/\.[^.]+$/, "").normalize("NFKD").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 96) || "campaign-image";
   return `${base}.${extension}`;
 }
 
@@ -2207,6 +2214,34 @@ export function createMonitorServer(
         return;
       }
 
+      const marketingAssetMatch = url.pathname.match(/^\/api\/public\/marketing\/assets\/([a-f0-9-]{36})$/i);
+      if (marketingAssetMatch && (request.method === "GET" || request.method === "HEAD")) {
+        const asset = marketingEmailRepository
+          ? await marketingEmailRepository.asset(marketingAssetMatch[1] || "")
+          : null;
+        if (!asset) {
+          json(response, 404, { error: "This campaign image is not available" });
+          return;
+        }
+        const etag = `"${asset.sha256}"`;
+        if (request.headers["if-none-match"] === etag) {
+          response.statusCode = 304;
+          response.end();
+          return;
+        }
+        response.statusCode = 200;
+        response.setHeader("Content-Type", asset.mime);
+        response.setHeader("Content-Length", String(asset.byte_size));
+        response.setHeader("Content-Disposition", `inline; filename="${asset.file_name.replace(/["\\\r\n]/g, "-")}"`);
+        response.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        response.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setHeader("ETag", etag);
+        if (request.method === "HEAD") response.end();
+        else response.end(asset.content);
+        return;
+      }
+
       if (url.pathname === "/api/public/marketing/unsubscribe" && request.method === "GET") {
         const token = url.searchParams.get("token") || "";
         const contactId = marketingEmails?.contactIdFromToken(token) || null;
@@ -3602,6 +3637,56 @@ export function createMonitorServer(
         return;
       }
 
+      if (url.pathname === "/api/marketing/assets" && request.method === "POST") {
+        if (!canOperate || !isLoginOriginAllowed(request, config)) {
+          json(response, 403, { error: "Operations access is required" });
+          return;
+        }
+        if (!marketingEmailRepository) {
+          json(response, 503, { error: "Campaign image storage is not configured" });
+          return;
+        }
+        try {
+          const bytes = await readBodyBuffer(request, MAX_MARKETING_IMAGE_BYTES);
+          const mime = productImageMime(bytes);
+          if (!mime) {
+            json(response, 400, { error: "Use a valid JPG, PNG or WebP image" });
+            return;
+          }
+          let suppliedName = "campaign-image";
+          try {
+            suppliedName = decodeURIComponent(firstHeaderValue(request.headers["x-phaseone-file-name"])) || suppliedName;
+          } catch {
+            suppliedName = "campaign-image";
+          }
+          const asset = await marketingEmailRepository.createAsset({
+            fileName: marketingEmailImageFilename(suppliedName, mime),
+            mime,
+            bytes,
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+            actorId: currentUser.id,
+          });
+          json(response, 201, {
+            uploaded: true,
+            asset: {
+              id: asset.id,
+              filename: asset.fileName,
+              mime: asset.mime,
+              size: asset.size,
+              url: new URL(`/api/public/marketing/assets/${encodeURIComponent(asset.id)}`, config.dashboardOrigin).toString(),
+            },
+          });
+        } catch (error: unknown) {
+          const tooLarge = error instanceof Error && error.message === "Request body too large";
+          json(response, tooLarge ? 413 : 500, {
+            error: tooLarge
+              ? "Campaign images must be 5 MB or smaller"
+              : "The campaign image could not be saved",
+          });
+        }
+        return;
+      }
+
       if (url.pathname === "/api/marketing/campaigns" && request.method === "POST") {
         if (!canOperate || !isLoginOriginAllowed(request, config)) {
           json(response, 403, { error: "Operations access is required" });
@@ -3615,15 +3700,21 @@ export function createMonitorServer(
         try { input = JSON.parse(await readBody(request)) as Record<string, unknown>; }
         catch { json(response, 400, { error: "Invalid JSON request" }); return; }
         const field = (key: string, max: number) => typeof input[key] === "string" ? input[key].trim().slice(0, max) : "";
+        const contentMode: "template" | "image" = input.contentMode === "image" ? "image" : "template";
         const buttonUrl = field("buttonUrl", 1000);
-        if (buttonUrl) {
+        const imageLink = field("imageLink", 1000);
+        for (const [link, errorMessage] of [
+          [buttonUrl, "The button must use a secure phaseonelabz.com link"],
+          [imageLink, "The campaign image must link to a secure phaseonelabz.com page"],
+        ] as const) {
+          if (!link) continue;
           try {
-            const target = new URL(buttonUrl);
+            const target = new URL(link);
             if (target.protocol !== "https:" || !["phaseonelabz.com", "www.phaseonelabz.com"].includes(target.hostname.toLowerCase())) {
               throw new Error("invalid host");
             }
           } catch {
-            json(response, 400, { error: "The button must use a secure phaseonelabz.com link" });
+            json(response, 400, { error: errorMessage });
             return;
           }
         }
@@ -3631,7 +3722,7 @@ export function createMonitorServer(
           ? [...new Set(input.productIds.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))].slice(0, 4)
           : [];
         const products: MarketingEmailProduct[] = [];
-        if (productIds.length) {
+        if (contentMode === "template" && productIds.length) {
           if (!commerce) {
             json(response, 503, { error: "The live product catalog is not connected" });
             return;
@@ -3665,15 +3756,30 @@ export function createMonitorServer(
             return;
           }
         }
+        const imageAssetId = contentMode === "image" ? field("imageAssetId", 36) : "";
+        const imageAlt = contentMode === "image" ? field("imageAlt", 240) : "";
+        if (contentMode === "image") {
+          if (!/^[a-f0-9-]{36}$/i.test(imageAssetId) || !(await marketingEmailRepository.hasAsset(imageAssetId))) {
+            json(response, 400, { error: "Upload a campaign image before saving this email" });
+            return;
+          }
+          if (imageAlt.length < 2) {
+            json(response, 400, { error: "Add a short description for the campaign image" });
+            return;
+          }
+        }
         const campaignInput = {
-          name: field("name", 160), templateKey: field("templateKey", 40), subject: field("subject", 180),
+          name: field("name", 160), templateKey: field("templateKey", 40), contentMode,
+          subject: field("subject", 180),
           preheader: field("preheader", 240), heading: field("heading", 180), message: field("message", 5000),
           buttonLabel: field("buttonLabel", 80), buttonUrl, products,
+          imageAssetId: imageAssetId || null, imageAlt, imageLink,
           audienceTag: field("audienceTag", 80).toLowerCase(),
           actorId: currentUser.id, actorName: currentUser.displayName,
         };
-        if (campaignInput.name.length < 2 || campaignInput.subject.length < 2 || campaignInput.heading.length < 2 || campaignInput.message.length < 2) {
-          json(response, 400, { error: "Name, subject, heading and message are required" });
+        const missingTemplateContent = contentMode === "template" && (campaignInput.heading.length < 2 || campaignInput.message.length < 2);
+        if (campaignInput.name.length < 2 || campaignInput.subject.length < 2 || missingTemplateContent) {
+          json(response, 400, { error: contentMode === "image" ? "Campaign name and subject are required" : "Name, subject, heading and message are required" });
           return;
         }
         json(response, 201, { saved: true, campaign: await marketingEmailRepository.createCampaign(campaignInput) });
@@ -3714,9 +3820,11 @@ export function createMonitorServer(
           return;
         }
         const result = await marketingEmails.sendTest({
-          recipient, subject: campaign.subject, preheader: campaign.preheader,
+          recipient, contentMode: campaign.contentMode,
+          subject: campaign.subject, preheader: campaign.preheader,
           heading: campaign.heading, message: campaign.message, buttonLabel: campaign.buttonLabel,
           buttonUrl: campaign.buttonUrl, templateKey: campaign.templateKey, products: campaign.products,
+          imageAssetId: campaign.imageAssetId, imageAlt: campaign.imageAlt, imageLink: campaign.imageLink,
         });
         json(response, 200, { sent: result.state === "sent", result });
         return;

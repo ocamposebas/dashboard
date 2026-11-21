@@ -757,10 +757,16 @@ interface MarketingEmailProduct {
   productId: number; name: string; sku: string; price: number; regularPrice: number;
   imageUrl: string; productUrl: string;
 }
+type MarketingEmailContentMode = "template" | "image";
+interface MarketingEmailAsset {
+  id: string; url: string; mime: string; filename: string; size: number;
+}
 interface MarketingEmailCampaign {
-  id: string; name: string; templateKey: string; subject: string; preheader: string;
+  id: string; name: string; templateKey: string; contentMode: MarketingEmailContentMode;
+  subject: string; preheader: string;
   heading: string; message: string; buttonLabel: string; buttonUrl: string; audienceTag: string;
   products: MarketingEmailProduct[];
+  imageAssetId: string | null; imageAlt: string; imageLink: string;
   status: string; recipientCount: number; sentCount: number; failedCount: number;
   uncertainCount: number; createdAt: string;
 }
@@ -989,6 +995,12 @@ const emailContactNext = requiredElement<HTMLButtonElement>("#email-contact-next
 const emailComposer = requiredElement<HTMLDialogElement>("#email-composer");
 const emailComposerForm = requiredElement<HTMLFormElement>("#email-composer-form");
 const emailLaunchConfirm = requiredElement<HTMLDialogElement>("#email-launch-confirm");
+const emailImageFileInput = requiredElement<HTMLInputElement>("#email-image-file");
+const emailImageStatus = requiredElement<HTMLElement>("#email-image-status");
+const emailImageFileCard = requiredElement<HTMLElement>("#email-image-file-card");
+const emailImageAltInput = requiredElement<HTMLInputElement>("#email-image-alt");
+const emailImageLinkInput = requiredElement<HTMLInputElement>("#email-image-link");
+const emailPreviewFrame = requiredElement<HTMLElement>("#email-preview-frame");
 const monitorIntentKpis = requiredElement<HTMLElement>("#monitor-intent-kpis");
 const monitorCartCount = requiredElement<HTMLElement>("#monitor-cart-count");
 const monitorCartStream = requiredElement<HTMLElement>("#monitor-cart-stream");
@@ -1221,6 +1233,12 @@ let marketingEmailSyncRefreshTimer: number | undefined;
 let marketingEmailCampaignFilter: "all" | "draft" | "sent" = "all";
 let marketingEmailSelectedProducts: MarketingEmailProduct[] = [];
 let marketingEmailContactPage = 1;
+let marketingEmailContentMode: MarketingEmailContentMode = "template";
+let marketingEmailAsset: MarketingEmailAsset | undefined;
+let marketingEmailPendingFile: File | undefined;
+let marketingEmailImagePreviewUrl = "";
+let marketingEmailAssetUploadState: "idle" | "uploading" | "ready" | "error" = "idle";
+let marketingEmailAssetUploadRevision = 0;
 let pendingEmailLaunchId = "";
 const SESSION_PAGE_SIZE = 5;
 const CUSTOMER_PAGE_SIZE = 50;
@@ -1854,8 +1872,15 @@ function renderMarketingEmailCenter(): void {
   emailTemplateStrip.innerHTML = center.templates.map((template) => `<button class="email-template-card" type="button" data-email-template="${escapeHtml(template.key)}" style="--template-accent:${escapeHtml(template.accent)}"><span>USE TEMPLATE</span><strong>${escapeHtml(template.name)}</strong><small>${escapeHtml(template.description)}</small></button>`).join("");
   emailCampaignList.innerHTML = visibleCampaigns.length ? visibleCampaigns.map((campaign) => {
     const productCount = Array.isArray(campaign.products) ? campaign.products.length : 0;
-    const productSummary = productCount ? ` · ${productCount} product${productCount === 1 ? "" : "s"}` : "";
-    const progress = campaign.status === "draft" ? `Safe draft · nobody emailed${productSummary}` : `${formatNumber(campaign.sentCount)} of ${formatNumber(campaign.recipientCount)} delivered${productSummary}`;
+    const productSummary = campaign.contentMode === "image"
+      ? " · full-image email"
+      : productCount ? ` · ${productCount} product${productCount === 1 ? "" : "s"}` : "";
+    const deliveryIssues = `${campaign.failedCount ? ` · ${formatNumber(campaign.failedCount)} failed` : ""}${campaign.uncertainCount ? ` · ${formatNumber(campaign.uncertainCount)} awaiting confirmation` : ""}`;
+    const progress = campaign.status === "draft"
+      ? `Safe draft · nobody emailed${productSummary}`
+      : campaign.status === "cancelled"
+        ? `Stopped · ${formatNumber(campaign.sentCount)} delivered${deliveryIssues}${productSummary}`
+        : `${formatNumber(campaign.sentCount)} of ${formatNumber(campaign.recipientCount)} delivered${deliveryIssues}${productSummary}`;
     const actions = campaign.status === "draft" && workspaceSession?.permissions.administer
       ? `<button type="button" data-email-test="${campaign.id}">Test first</button><button type="button" data-email-launch="${campaign.id}">Send to ${formatNumber(center.counts.subscribed)}</button>`
       : ["queued", "sending"].includes(campaign.status) && workspaceSession?.permissions.administer
@@ -1889,20 +1914,27 @@ async function loadMarketingEmailCenter(): Promise<void> {
     return;
   }
   marketingEmailLoading = true;
+  requiredElement<HTMLElement>("#email-sync-line").dataset.state = "loading";
+  requiredElement<HTMLButtonElement>("#email-center-retry").hidden = true;
   try {
     const query = new URLSearchParams({ search: emailContactSearch.value.trim(), status: emailContactFilter.value, contactPage: String(marketingEmailContactPage) });
     const response = await fetch(`/api/marketing/email-center?${query.toString()}`, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
-    const payload: unknown = await response.json();
+    const payload: unknown = await response.json().catch(() => null);
     if (!response.ok || !isRecord(payload) || !Array.isArray(payload.contacts) || !Array.isArray(payload.campaigns) || !Array.isArray(payload.templates)) {
-      throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "Email center unavailable");
+      throw new Error(isRecord(payload) && typeof payload.error === "string"
+        ? payload.error
+        : `Email center unavailable${response.status ? ` (${response.status})` : ""}`);
     }
     marketingEmailCenter = payload as unknown as MarketingEmailCenterPayload;
+    requiredElement<HTMLElement>("#email-sync-line").dataset.state = "ready";
     renderMarketingEmailCenter();
     if (marketingEmailCenter.contactSync?.state === "syncing") {
       if (marketingEmailSyncRefreshTimer) window.clearTimeout(marketingEmailSyncRefreshTimer);
       marketingEmailSyncRefreshTimer = window.setTimeout(() => void loadMarketingEmailCenter(), 2_500);
     }
   } catch (error) {
+    requiredElement<HTMLElement>("#email-sync-line").dataset.state = "error";
+    requiredElement<HTMLButtonElement>("#email-center-retry").hidden = false;
     requiredElement<HTMLElement>("#email-center-updated").textContent = error instanceof Error ? error.message : "Email center unavailable";
   } finally {
     marketingEmailLoading = false;
@@ -1911,6 +1943,157 @@ async function loadMarketingEmailCenter(): Promise<void> {
       void loadMarketingEmailCenter();
     }
   }
+}
+
+function marketingEmailImageLinkIsValid(value: string): boolean {
+  if (!value.trim()) return true;
+  try {
+    const parsed = new URL(value.trim());
+    return parsed.protocol === "https:" && ["phaseonelabz.com", "www.phaseonelabz.com"].includes(parsed.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+function marketingEmailFileSize(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function releaseMarketingEmailImagePreview(): void {
+  if (marketingEmailImagePreviewUrl.startsWith("blob:")) URL.revokeObjectURL(marketingEmailImagePreviewUrl);
+  marketingEmailImagePreviewUrl = "";
+}
+
+function renderMarketingEmailImageState(): void {
+  const statusCopy: Record<typeof marketingEmailAssetUploadState, { title: string; detail: string }> = {
+    idle: { title: "No image uploaded", detail: "Choose the final artwork for this campaign." },
+    uploading: { title: "Uploading image…", detail: "Keep this window open while the secure upload finishes." },
+    ready: { title: "Image ready", detail: "The campaign is using the saved marketing asset." },
+    error: { title: "Image could not be uploaded", detail: "Retry the upload before saving this campaign." },
+  };
+  const copy = statusCopy[marketingEmailAssetUploadState];
+  emailImageStatus.dataset.state = marketingEmailAssetUploadState;
+  const title = emailImageStatus.querySelector<HTMLElement>("strong");
+  const detail = emailImageStatus.querySelector<HTMLElement>("small");
+  if (title) title.textContent = copy.title;
+  if (detail) detail.textContent = copy.detail;
+  requiredElement<HTMLButtonElement>("#email-image-retry").hidden = marketingEmailAssetUploadState !== "error" || !marketingEmailPendingFile;
+  const selectedFile = marketingEmailAsset || marketingEmailPendingFile;
+  emailImageFileCard.hidden = !selectedFile;
+  requiredElement<HTMLButtonElement>("#email-image-choose").hidden = Boolean(selectedFile);
+  if (selectedFile) {
+    const filename = selectedFile instanceof File ? selectedFile.name : selectedFile.filename;
+    const mime = selectedFile instanceof File ? selectedFile.type : selectedFile.mime;
+    requiredElement<HTMLElement>("#email-image-filename").textContent = filename;
+    requiredElement<HTMLElement>("#email-image-meta").textContent = `${mime} · ${marketingEmailFileSize(selectedFile.size)}`;
+  }
+  const thumbnail = requiredElement<HTMLImageElement>("#email-image-thumbnail");
+  const previewUrl = marketingEmailAsset?.url || marketingEmailImagePreviewUrl;
+  if (previewUrl) {
+    thumbnail.src = previewUrl;
+    thumbnail.hidden = false;
+  } else {
+    thumbnail.removeAttribute("src");
+    thumbnail.hidden = true;
+  }
+  updateEmailPreview();
+}
+
+function clearMarketingEmailImage(): void {
+  marketingEmailAssetUploadRevision += 1;
+  releaseMarketingEmailImagePreview();
+  marketingEmailAsset = undefined;
+  marketingEmailPendingFile = undefined;
+  marketingEmailAssetUploadState = "idle";
+  emailImageFileInput.value = "";
+  emailImageAltInput.value = "";
+  emailImageLinkInput.value = "";
+  emailImageLinkInput.setCustomValidity("");
+  renderMarketingEmailImageState();
+}
+
+function openMarketingEmailImagePicker(): void {
+  emailImageFileInput.value = "";
+  emailImageFileInput.click();
+}
+
+function setMarketingEmailContentMode(mode: MarketingEmailContentMode): void {
+  marketingEmailContentMode = mode;
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-email-content-mode]")) {
+    const active = button.dataset.emailContentMode === mode;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  const isImage = mode === "image";
+  requiredElement<HTMLElement>("#email-builder-content").hidden = isImage;
+  requiredElement<HTMLElement>("#email-image-content").hidden = !isImage;
+  requiredElement<HTMLElement>("#email-template-field").hidden = isImage;
+  const message = requiredElement<HTMLTextAreaElement>("#email-message");
+  message.required = !isImage;
+  message.disabled = isImage;
+  requiredElement<HTMLSelectElement>("#email-template-select").disabled = isImage;
+  requiredElement<HTMLInputElement>("#email-button-label").disabled = isImage;
+  requiredElement<HTMLInputElement>("#email-button-url").disabled = isImage;
+  emailImageAltInput.required = isImage;
+  emailImageAltInput.disabled = !isImage;
+  emailImageLinkInput.disabled = !isImage;
+  renderEmailProductSelector();
+  updateEmailPreview();
+}
+
+async function uploadMarketingEmailAsset(file: File): Promise<void> {
+  const supportedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+  if (!supportedTypes.has(file.type)) {
+    showToast("Unsupported image", "Choose a valid JPEG, PNG or WebP file.", false);
+    return;
+  }
+  if (file.size <= 0 || file.size > 5 * 1024 * 1024) {
+    showToast("Image is too large", "Campaign images must be 5 MB or smaller.", false);
+    return;
+  }
+  marketingEmailAssetUploadRevision += 1;
+  const uploadRevision = marketingEmailAssetUploadRevision;
+  releaseMarketingEmailImagePreview();
+  marketingEmailImagePreviewUrl = URL.createObjectURL(file);
+  marketingEmailAsset = undefined;
+  marketingEmailPendingFile = file;
+  marketingEmailAssetUploadState = "uploading";
+  renderMarketingEmailImageState();
+  try {
+    const response = await fetch("/api/marketing/assets", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { Accept: "application/json", "Content-Type": file.type, "X-PhaseOne-File-Name": encodeURIComponent(file.name) },
+      body: file,
+    });
+    const payload: unknown = await response.json().catch(() => null);
+    if (uploadRevision !== marketingEmailAssetUploadRevision) return;
+    const candidate = isRecord(payload) && isRecord(payload.asset) ? payload.asset : payload;
+    const candidateFilename = isRecord(candidate) && typeof candidate.filename === "string"
+      ? candidate.filename
+      : isRecord(candidate) && typeof candidate.fileName === "string" ? candidate.fileName : "";
+    if (!response.ok || !isRecord(candidate) || typeof candidate.id !== "string" || typeof candidate.url !== "string" || typeof candidate.mime !== "string" || !candidateFilename || typeof candidate.size !== "number") {
+      throw new Error(isRecord(payload) && typeof payload.error === "string" ? payload.error : "The marketing image could not be uploaded");
+    }
+    marketingEmailAsset = {
+      id: candidate.id,
+      url: candidate.url,
+      mime: candidate.mime,
+      filename: candidateFilename,
+      size: candidate.size,
+    };
+    marketingEmailPendingFile = undefined;
+    marketingEmailAssetUploadState = "ready";
+    releaseMarketingEmailImagePreview();
+    showToast("Campaign image ready", `${marketingEmailAsset.filename} was uploaded successfully.`);
+  } catch (error) {
+    if (uploadRevision !== marketingEmailAssetUploadRevision) return;
+    marketingEmailAssetUploadState = "error";
+    showToast("Image upload failed", error instanceof Error ? error.message : "Try uploading the image again.", false);
+  }
+  renderMarketingEmailImageState();
 }
 
 function emailCatalogProducts(): CommerceProduct[] {
@@ -1939,7 +2122,7 @@ function renderEmailProductSelector(): void {
   const available = emailCatalogProducts().filter((product) => !selectedIds.has(product.id));
   select.innerHTML = `<option value="">Choose a product…</option>${available.map((product) => `<option value="${product.id}">${escapeHtml(product.name)} · ${escapeHtml(formatCurrency(product.price || product.salePrice || product.regularPrice || 0))}</option>`).join("")}`;
   if (available.some((product) => String(product.id) === current)) select.value = current;
-  select.disabled = marketingEmailSelectedProducts.length >= 4 || !available.length;
+  select.disabled = marketingEmailContentMode === "image" || marketingEmailSelectedProducts.length >= 4 || !available.length;
   requiredElement<HTMLButtonElement>("#email-add-product").disabled = select.disabled;
 }
 
@@ -1949,7 +2132,7 @@ function renderEmailSelectedProducts(): void {
     ? marketingEmailSelectedProducts.map((product) => `<article><span>${product.imageUrl ? `<img src="${escapeHtml(product.imageUrl)}" alt="" loading="lazy" />` : "P1"}</span><div><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(formatCurrency(product.price))}${product.sku ? ` · ${escapeHtml(product.sku)}` : ""}</small></div><button type="button" data-email-remove-product="${product.productId}" aria-label="Remove ${escapeHtml(product.name)}">×</button></article>`).join("")
     : "<p>No products added.</p>";
   const previewSection = requiredElement<HTMLElement>("#email-preview-product-section");
-  previewSection.hidden = marketingEmailSelectedProducts.length === 0;
+  previewSection.hidden = marketingEmailContentMode === "image" || marketingEmailSelectedProducts.length === 0;
   requiredElement<HTMLElement>("#email-preview-products").innerHTML = marketingEmailSelectedProducts.map((product, index) => {
     const price = product.regularPrice > product.price && product.price > 0
       ? `<span><del>${escapeHtml(formatCurrency(product.regularPrice))}</del><b>${escapeHtml(formatCurrency(product.price))}</b></span>`
@@ -1973,7 +2156,27 @@ function updateEmailPreview(): void {
   requiredElement<HTMLElement>("#email-preview-message").textContent = message || "Your campaign message will appear here.";
   const button = requiredElement<HTMLElement>("#email-preview-button");
   button.textContent = `${requiredElement<HTMLInputElement>("#email-button-label").value || "EXPLORE NOW"} →`;
-  button.hidden = requiredElement<HTMLInputElement>("#email-button-label").value.trim() === "";
+  const isImage = marketingEmailContentMode === "image";
+  for (const element of document.querySelectorAll<HTMLElement>("[data-email-builder-preview]")) element.hidden = isImage;
+  button.hidden = isImage || requiredElement<HTMLInputElement>("#email-button-label").value.trim() === "";
+  const imagePreview = requiredElement<HTMLElement>("#email-preview-image");
+  const image = requiredElement<HTMLImageElement>("#email-preview-image-src");
+  const imageLink = requiredElement<HTMLAnchorElement>("#email-preview-image-link");
+  const placeholder = requiredElement<HTMLElement>("#email-preview-image-placeholder");
+  const previewUrl = marketingEmailAsset?.url || marketingEmailImagePreviewUrl;
+  imagePreview.hidden = !isImage;
+  image.hidden = !previewUrl;
+  placeholder.hidden = Boolean(previewUrl);
+  if (previewUrl) {
+    image.src = previewUrl;
+    image.alt = emailImageAltInput.value.trim();
+  } else {
+    image.removeAttribute("src");
+    image.alt = "";
+  }
+  const link = emailImageLinkInput.value.trim();
+  if (marketingEmailImageLinkIsValid(link) && link) imageLink.href = link;
+  else imageLink.removeAttribute("href");
   renderEmailSelectedProducts();
 }
 
@@ -1994,6 +2197,14 @@ function openEmailComposer(templateKey?: string): void {
   requiredElement<HTMLInputElement>("#email-button-url").value = template.buttonUrl;
   requiredElement<HTMLSelectElement>("#email-audience-tag").value = "";
   marketingEmailSelectedProducts = [];
+  clearMarketingEmailImage();
+  setMarketingEmailContentMode("template");
+  emailPreviewFrame.classList.remove("is-mobile");
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-email-preview-device]")) {
+    const active = button.dataset.emailPreviewDevice === "desktop";
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
   updateEmailPreview();
   emailComposer.showModal();
 }
@@ -2010,10 +2221,25 @@ function emailCampaignPayload(): Record<string, unknown> {
     buttonUrl: requiredElement<HTMLInputElement>("#email-button-url").value,
     audienceTag: requiredElement<HTMLSelectElement>("#email-audience-tag").value,
     productIds: marketingEmailSelectedProducts.map((product) => product.productId),
+    contentMode: marketingEmailContentMode,
+    imageAssetId: marketingEmailContentMode === "image" ? marketingEmailAsset?.id || "" : "",
+    imageUrl: marketingEmailContentMode === "image" ? marketingEmailAsset?.url || "" : "",
+    imageAlt: marketingEmailContentMode === "image" ? emailImageAltInput.value.trim() : "",
+    imageLink: marketingEmailContentMode === "image" ? emailImageLinkInput.value.trim() : "",
   };
 }
 
 async function saveEmailCampaign(sendTest = false): Promise<void> {
+  const imageLinkValid = marketingEmailImageLinkIsValid(emailImageLinkInput.value);
+  emailImageLinkInput.setCustomValidity(imageLinkValid ? "" : "Use a secure phaseonelabz.com link.");
+  if (marketingEmailContentMode === "image" && marketingEmailAssetUploadState !== "ready") {
+    const detail = marketingEmailAssetUploadState === "uploading"
+      ? "Wait for the image upload to finish before saving."
+      : "Upload the campaign image successfully before saving.";
+    showToast("Campaign image required", detail, false);
+    emailImageStatus.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
   if (!emailComposerForm.reportValidity()) return;
   const saveButton = requiredElement<HTMLButtonElement>(sendTest ? "#email-save-test" : "#email-save-draft");
   let testRecipient = "";
@@ -9111,6 +9337,39 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-marketi
 }
 
 requiredElement<HTMLButtonElement>("#email-new-campaign").addEventListener("click", () => openEmailComposer());
+requiredElement<HTMLButtonElement>("#email-center-retry").addEventListener("click", () => void loadMarketingEmailCenter());
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-email-content-mode]")) {
+  button.addEventListener("click", () => {
+    const mode = button.dataset.emailContentMode;
+    if (mode === "template" || mode === "image") setMarketingEmailContentMode(mode);
+  });
+}
+requiredElement<HTMLButtonElement>("#email-image-choose").addEventListener("click", openMarketingEmailImagePicker);
+requiredElement<HTMLButtonElement>("#email-image-replace").addEventListener("click", openMarketingEmailImagePicker);
+requiredElement<HTMLButtonElement>("#email-image-remove").addEventListener("click", clearMarketingEmailImage);
+requiredElement<HTMLButtonElement>("#email-image-retry").addEventListener("click", () => {
+  if (marketingEmailPendingFile) void uploadMarketingEmailAsset(marketingEmailPendingFile);
+});
+emailImageFileInput.addEventListener("change", () => {
+  const file = emailImageFileInput.files?.[0];
+  if (file) void uploadMarketingEmailAsset(file);
+});
+emailImageLinkInput.addEventListener("input", () => {
+  emailImageLinkInput.setCustomValidity(marketingEmailImageLinkIsValid(emailImageLinkInput.value) ? "" : "Use a secure phaseonelabz.com link.");
+});
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-email-preview-device]")) {
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const mobile = button.dataset.emailPreviewDevice === "mobile";
+    emailPreviewFrame.classList.toggle("is-mobile", mobile);
+    for (const option of document.querySelectorAll<HTMLButtonElement>("[data-email-preview-device]")) {
+      const active = option === button;
+      option.classList.toggle("is-active", active);
+      option.setAttribute("aria-pressed", String(active));
+    }
+  });
+}
 requiredElement<HTMLButtonElement>("#email-add-product").addEventListener("click", () => {
   if (marketingEmailSelectedProducts.length >= 4) return;
   const productId = Number(requiredElement<HTMLSelectElement>("#email-product-select").value);

@@ -79,6 +79,7 @@ function escapeHtml(value: string): string {
 }
 
 export function renderPhaseOneEmail(input: {
+  contentMode?: "template" | "image";
   preheader: string;
   heading: string;
   message: string;
@@ -89,8 +90,24 @@ export function renderPhaseOneEmail(input: {
   accent?: string;
   logoUrl?: string;
   products?: MarketingEmailProduct[];
+  imageUrl?: string;
+  imageAlt?: string;
+  imageLink?: string;
 }): { html: string; text: string } {
   const name = input.recipientName.trim() || "Research partner";
+  const contentMode = input.contentMode === "image" ? "image" : "template";
+  if (contentMode === "image" && input.imageUrl) {
+    const imageUrl = escapeHtml(input.imageUrl);
+    const imageAlt = escapeHtml(input.imageAlt?.trim() || "Phase One Labz research update");
+    const image = `<img src="${imageUrl}" width="680" alt="${imageAlt}" style="display:block;width:100%;max-width:680px;height:auto;border:0;outline:none;text-decoration:none" />`;
+    const linkedImage = input.imageLink
+      ? `<a href="${escapeHtml(input.imageLink)}" style="display:block;text-decoration:none">${image}</a>`
+      : image;
+    const html = `<!doctype html><html><body style="margin:0;background:#05070c;color:#f7fbff"><div style="display:none;max-height:0;overflow:hidden">${escapeHtml(input.preheader)}</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#05070c;padding:24px 10px"><tr><td align="center"><table role="presentation" width="680" cellspacing="0" cellpadding="0" style="max-width:680px;width:100%;background:#07101c;border-collapse:separate;border-spacing:0;overflow:hidden"><tr><td style="padding:0">${linkedImage}</td></tr><tr><td align="center" style="padding:25px 30px;background:#07101c;border-top:1px solid #1f2e42;color:#657b90;font:400 10px/1.7 Arial,sans-serif"><strong style="display:block;color:#e8f0f7;font:800 11px Arial,sans-serif;letter-spacing:.16em;margin-bottom:9px">PHASE ONE LABZ</strong>For research use only · {{PHASEONE_BUSINESS_ADDRESS}}<br />You opted in to Phase One Labz updates. <a href="${escapeHtml(input.unsubscribeUrl)}" style="color:#9fb7cc">Unsubscribe</a>.</td></tr></table></td></tr></table></body></html>`;
+    const destination = input.imageLink || input.imageUrl;
+    const text = `PHASE ONE LABZ\n\nHello ${name},\n\n${input.imageAlt?.trim() || "Phase One Labz research update"}\n${destination ? `\nView this update: ${destination}\n` : ""}\nUnsubscribe: ${input.unsubscribeUrl}`;
+    return { html, text };
+  }
   const message = escapeHtml(input.message).replace(/\r?\n/g, "<br />");
   const products = (input.products || []).slice(0, 4);
   const productRows = products.map((product) => {
