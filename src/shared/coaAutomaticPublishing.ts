@@ -81,22 +81,27 @@ export function exactAutomaticCoaProduct(
   const skuIdentities = new Set((coa.skus || []).map(skuIdentity).filter(Boolean));
   const activeProducts = products.filter((product) => product.status !== "trash");
 
-  // A live catalog SKU is the strongest durable identity. Product names can
-  // be restyled while the sellable SKU remains stable.
-  const skuMatch = uniquePreferredProduct(activeProducts.filter((product) => {
-    const productSku = skuIdentity(product.sku || "");
-    return Boolean(productSku && skuIdentities.has(productSku));
-  }));
-  if (skuMatch) return skuMatch;
+  // An explicit live catalog ID is authoritative. Names and SKUs are only
+  // discovery aids for records that have not been mapped yet.
+  const mappedProduct = activeProducts.find((product) => product.id === coa.matchedProductId);
+  if (mappedProduct) return mappedProduct;
 
-  // Prefer the fields detected directly from the certificate before its
-  // broader aliases. This keeps generic aliases such as "Korean Glutathione"
-  // from overriding a precise name such as "Blue Korean Glutathione".
+  // Prefer the fields detected directly from the certificate. Imported COAs
+  // can contain stale SKUs from an earlier catalog mapping, so a precise
+  // certificate name must win before those durable-but-possibly-wrong values.
   const primaryMatch = uniquePreferredProduct(activeProducts.filter((product) => {
     const productName = automaticCoaProductIdentity(product.name);
     return Boolean(productName && primaryNameIdentities.has(productName));
   }));
   if (primaryMatch) return primaryMatch;
+
+  // A live catalog SKU remains the strongest fallback when the certificate
+  // name has been restyled and no unique direct-name match exists.
+  const skuMatch = uniquePreferredProduct(activeProducts.filter((product) => {
+    const productSku = skuIdentity(product.sku || "");
+    return Boolean(productSku && skuIdentities.has(productSku));
+  }));
+  if (skuMatch) return skuMatch;
 
   return uniquePreferredProduct(activeProducts.filter((product) => {
     const productName = automaticCoaProductIdentity(product.name);
@@ -203,6 +208,18 @@ function uniqueCatalogSkus(values: string[]): string[] {
 }
 
 /**
+ * Returns the complete SKU identity for one exact catalog presentation.
+ * Previous COA SKUs are intentionally excluded: they describe an old mapping
+ * and must not survive when an administrator changes the selected product.
+ */
+export function exactCatalogSkus(
+  product: { sku?: string | null },
+  variation?: { sku?: string | null } | null,
+): string[] {
+  return uniqueCatalogSkus([product.sku || "", variation?.sku || ""]);
+}
+
+/**
  * Builds conservative repairs for untouched WordPress-era COAs. Existing
  * catalog IDs remain authoritative; otherwise only a unique exact name/SKU
  * match and, for variable products, a unique exact strength match are used.
@@ -223,9 +240,7 @@ export function exactLegacyCoaCatalogRepairs(
     const mappedProduct = products.find((product) =>
       product.id === coa.matchedProductId && product.status !== "trash");
     const exactProduct = exactAutomaticCoaProduct(coa, products);
-    const product = exactProduct && mappedProduct && exactProduct.id !== mappedProduct.id
-      ? exactProduct
-      : mappedProduct || exactProduct;
+    const product = mappedProduct || exactProduct;
     if (!product) return [];
 
     const variations = variationsByProduct.get(product.id) || [];
@@ -240,7 +255,7 @@ export function exactLegacyCoaCatalogRepairs(
       product,
       productId: product.id,
       variationId: variation?.id || 0,
-      skus: uniqueCatalogSkus([...(coa.skus || []), product.sku || "", variation?.sku || ""]),
+      skus: exactCatalogSkus(product, variation),
       currentShippingLot: coa.currentShippingLot,
     }];
   });

@@ -64,6 +64,7 @@ import {
   canAutomaticallyPublishCoa,
   exactAutomaticCoaProduct,
   exactAutomaticCoaVariation,
+  exactCatalogSkus,
   exactLegacyCoaCatalogRepairs,
   newestCurrentCoaId,
 } from "../shared/coaAutomaticPublishing.js";
@@ -936,7 +937,7 @@ export function createMonitorServer(
           continue;
         }
       }
-      const skus = [...new Set([...(coa.skus || []), product.sku, variation?.sku || ""].map((sku) => sku.trim()).filter(Boolean))];
+      const skus = exactCatalogSkus(product, variation);
       resolved.push({
         coa,
         product,
@@ -6376,6 +6377,7 @@ export function createMonitorServer(
                 "invalid_input",
               );
             }
+            coaWrite.skus = exactCatalogSkus(catalog.product, catalog.variation);
           }
           let coa = await customCoas.update(coaWrite, currentUser.id);
           if (coa.status === "Available" && coa.currentShippingLot) {

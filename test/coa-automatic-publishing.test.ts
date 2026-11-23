@@ -145,6 +145,32 @@ test("a precise detected name wins over a broader imported alias", () => {
   assert.equal(exactAutomaticCoaProduct(detected, [korean, blue])?.id, 1548);
 });
 
+test("a precise detected product name wins over a stale SKU from another product", () => {
+  const eloralintide = {
+    ...product,
+    id: 1385,
+    name: "Eloralintide",
+    sku: "ELORALINTIDE",
+    type: "simple",
+  };
+  const highDoseBlend = {
+    ...product,
+    id: 3102,
+    name: "High Dose Eloralintide + PL-RT Blend",
+    sku: "HIGH-DOSE-ELORALINTIDE-AND-PL-RT-BLEND",
+    type: "simple",
+  };
+  const detected = {
+    ...coa,
+    productName: "High Dose Eloralintide + PL-RT Blend",
+    familyName: "High Dose Eloralintide + PL-RT Blend",
+    compound: "High Dose Eloralintide + PL-RT Blend",
+    skus: ["ELORALINTIDE", "HIGH-DOSE-ELORALINTIDE-AND-PL-RT-BLEND"],
+  } as unknown as CommerceCoa;
+
+  assert.equal(exactAutomaticCoaProduct(detected, [eloralintide, highDoseBlend])?.id, 3102);
+});
+
 test("an Available current imported COA is eligible for exact self-healing", () => {
   assert.equal(canAutomaticallyPublishCoa({
     ...coa,
@@ -186,7 +212,7 @@ test("an equal-date replay never displaces the certificate already marked curren
   ]), "current");
 });
 
-test("legacy repair replaces a demonstrably wrong product mapping with one exact catalog match", () => {
+test("legacy repair preserves an explicit live product id instead of guessing a replacement", () => {
   const rt30 = {
     ...coa, id: "rt30", source: "wordpress_import", revision: 1, status: "Available",
     productName: "RT30", familyName: "RT30", compound: "RT30", strength: "30mg",
@@ -195,8 +221,9 @@ test("legacy repair replaces a demonstrably wrong product mapping with one exact
   const wrong = { ...product, id: 999, name: "Unrelated product", sku: "WRONG", type: "simple" };
   const reta = { ...product, id: 700, name: "PL-RT 30mg", sku: "RT-30-MG", type: "simple" };
   const repairs = exactLegacyCoaCatalogRepairs([rt30], [wrong, reta], new Map());
-  assert.equal(repairs[0]?.productId, 700);
-  assert.deepEqual(repairs[0]?.skus, ["RT-30-MG"]);
+  assert.equal(exactAutomaticCoaProduct(rt30, [wrong, reta])?.id, 999);
+  assert.equal(repairs[0]?.productId, 999);
+  assert.deepEqual(repairs[0]?.skus, ["WRONG"]);
 });
 
 test("an already available current lot is repaired when its catalog mapping is missing", () => {
@@ -255,7 +282,7 @@ test("legacy variable COAs are separated by exact strength and receive independe
   ]);
 });
 
-test("legacy catalog repair appends the exact live SKU without replacing history", () => {
+test("legacy catalog repair replaces stale SKU history with the exact live identity", () => {
   const deadpool = {
     ...coa,
     id: "deadpool",
@@ -274,8 +301,63 @@ test("legacy catalog repair appends the exact live SKU without replacing history
 
   const repairs = exactLegacyCoaCatalogRepairs([deadpool], [catalog], new Map());
 
-  assert.deepEqual(repairs[0]?.skus, ["CARTALAX-AND-BPC-AND-TB500-BLEND", "DEADPOOL"]);
+  assert.deepEqual(repairs[0]?.skus, ["DEADPOOL"]);
   assert.equal(repairs[0]?.currentShippingLot, true);
+});
+
+test("legacy repair removes all three known cross-product SKU collisions", () => {
+  const cases = [
+    {
+      id: "coa-8f6818af-c4be-4c9b-9714-939035e2bf86",
+      productId: 3741,
+      name: "Encapsulated RAW 5-Amino-1MQ",
+      exactSku: "5-AMINO-1MQ-2",
+      foreignSku: "5-AMINO-1MQ",
+    },
+    {
+      id: "coa-7f3df776-0a15-4a76-94be-b95e36a0de81",
+      productId: 3742,
+      name: "Encapsulated RAW KPV",
+      exactSku: "KPV-2",
+      foreignSku: "KPV",
+    },
+    {
+      id: "coa-33a06c2d-eb66-4e10-b50d-4478b4d1a3a4",
+      productId: 3102,
+      name: "High Dose Eloralintide + PL-RT Blend",
+      exactSku: "HIGH-DOSE-ELORALINTIDE-AND-PL-RT-BLEND",
+      foreignSku: "ELORALINTIDE",
+    },
+  ] as const;
+  const affected = cases.map((item) => ({
+    ...coa,
+    id: item.id,
+    source: "wordpress_import",
+    revision: 2,
+    status: "Available",
+    productName: item.name,
+    familyName: item.name,
+    compound: item.name,
+    matchedProductId: item.productId,
+    matchedVariationId: 0,
+    skus: [item.foreignSku, item.exactSku],
+    currentShippingLot: true,
+  })) as unknown as Array<CommerceCoa & { source: string; revision: number }>;
+  const catalog = cases.map((item) => ({
+    ...product,
+    id: item.productId,
+    name: item.name,
+    sku: item.exactSku,
+    type: "simple",
+  }));
+
+  const repairs = exactLegacyCoaCatalogRepairs(affected, catalog, new Map());
+
+  assert.deepEqual(repairs.map((repair) => ({
+    id: repair.coa.id,
+    productId: repair.productId,
+    skus: repair.skus,
+  })), cases.map((item) => ({ id: item.id, productId: item.productId, skus: [item.exactSku] })));
 });
 
 test("one untouched imported simple-product COA becomes its current storefront certificate", () => {

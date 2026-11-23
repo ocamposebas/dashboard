@@ -33,6 +33,7 @@ import {
 } from "../shared/financeAnalytics";
 import { financePeriod, type FinanceRange } from "../shared/financePeriod";
 import { suggestedCoaVariationId } from "../shared/coaCatalogMapping";
+import { exactCatalogSkus } from "../shared/coaAutomaticPublishing";
 import { productSkuBase, productVariantSku } from "../shared/productSku";
 import {
   initialSiteControlsDraftState,
@@ -10140,11 +10141,7 @@ async function loadCoaProductVariations(productId: number, selectedVariationId =
     const product = details.product;
     const presentation = selected ? coaVariationName(selected) : "All presentations";
     coaProductMatchMeta.textContent = [product.sku, presentation, selected ? `Variation ${selected.id}` : `Product ${product.id}`].filter(Boolean).join(" · ");
-    if (selected?.sku) {
-      const mappedSkus = new Set(coaTextList(coaSkusInput.value));
-      mappedSkus.add(selected.sku);
-      coaSkusInput.value = [...mappedSkus].join("\n");
-    }
+    coaSkusInput.value = exactCatalogSkus(product, selected).join("\n");
   } catch (error) {
     if (requestId !== coaVariationRequest) return;
     coaPresentationMatch.hidden = false;
@@ -10205,12 +10202,9 @@ function openCoaEditor(coa: CommerceCoa): void {
     : coa.matchedProductId
       ? `Connected to product ${coa.matchedProductId}`
       : "No reliable store match was found — choose the correct product below";
-  coaSkusInput.value = (coa.skus || []).join("\n");
-  if (matchedProduct?.sku) {
-    const mappedSkus = new Set(coaTextList(coaSkusInput.value));
-    mappedSkus.add(matchedProduct.sku);
-    coaSkusInput.value = [...mappedSkus].join("\n");
-  }
+  coaSkusInput.value = matchedProduct
+    ? exactCatalogSkus(matchedProduct).join("\n")
+    : (coa.skus || []).join("\n");
   void loadCoaProductVariations(Number(coaProductIdInput.value) || 0, coa.matchedVariationId || 0);
   coaFamilyKeyInput.value = coa.familyKey || "";
   coaAliasesInput.value = (coa.aliases || []).join("\n");
@@ -10255,11 +10249,7 @@ coaProductPicker.addEventListener("change", () => {
     coaProductMatchName.textContent = product.name;
     coaProductMatchMeta.textContent = [product.sku, `Product ${product.id}`].filter(Boolean).join(" · ");
   }
-  if (product?.sku) {
-    const current = new Set(coaTextList(coaSkusInput.value));
-    current.add(product.sku);
-    coaSkusInput.value = [...current].join("\n");
-  }
+  coaSkusInput.value = product ? exactCatalogSkus(product).join("\n") : "";
   void loadCoaProductVariations(productId);
 });
 
@@ -10279,11 +10269,7 @@ coaVariationIdInput.addEventListener("change", () => {
     variation ? coaVariationName(variation) : "All presentations",
     variation ? `Variation ${variation.id}` : `Product ${product.id}`,
   ].filter(Boolean).join(" · ");
-  if (variation?.sku) {
-    const current = new Set(coaTextList(coaSkusInput.value));
-    current.add(variation.sku);
-    coaSkusInput.value = [...current].join("\n");
-  }
+  coaSkusInput.value = exactCatalogSkus(product, variation).join("\n");
 });
 
 requiredElement<HTMLButtonElement>("#coa-change-product").addEventListener("click", () => {
