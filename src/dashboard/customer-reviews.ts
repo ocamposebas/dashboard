@@ -9,24 +9,11 @@ type Invitation = {
   automatic: boolean;
 };
 
-const form = document.querySelector<HTMLFormElement>("#customer-review-invite");
 const list = document.querySelector<HTMLElement>("#customer-review-list");
 const status = document.querySelector<HTMLElement>("#customer-review-status");
-const automationToggle = document.querySelector<HTMLButtonElement>("#customer-review-toggle");
-const automationStatus = document.querySelector<HTMLElement>("#customer-review-automation-status");
-let automationEnabled = false;
 
-function renderAutomation(enabled: boolean) {
-  automationEnabled = enabled;
-  if (automationToggle) {
-    automationToggle.disabled = false;
-    automationToggle.textContent = enabled ? "Pause automatic invitations" : "Enable automatic invitations";
-  }
-  if (automationStatus) automationStatus.textContent = enabled ? "Active for new deliveries." : "Paused.";
-}
-
-async function callReviews(path: string, method = "GET", payload?: object) {
-  const response = await fetch(`/api/customer-reviews${path}`, {
+async function callReviews(method = "GET", payload?: object) {
+  const response = await fetch("/api/customer-reviews", {
     method,
     headers: payload ? { "Content-Type": "application/json" } : {},
     ...(payload ? { body: JSON.stringify(payload) } : {}),
@@ -39,11 +26,7 @@ async function callReviews(path: string, method = "GET", payload?: object) {
 export async function loadCustomerReviews() {
   if (!list) return;
   try {
-    const { invitations, automation } = await callReviews("") as {
-      invitations: Invitation[];
-      automation: { enabled: boolean };
-    };
-    renderAutomation(automation.enabled);
+    const { invitations } = await callReviews() as { invitations: Invitation[] };
     list.replaceChildren();
     if (!invitations.length) list.textContent = "No invitations yet.";
     for (const entry of invitations) {
@@ -70,7 +53,7 @@ export async function loadCustomerReviews() {
         button.addEventListener("click", async () => {
           button.disabled = true;
           try {
-            await callReviews("", "PATCH", { id: entry.id, published: !entry.published_at });
+            await callReviews("PATCH", { id: entry.id, published: !entry.published_at });
             await loadCustomerReviews();
           } catch (error) {
             if (status) status.textContent = (error as Error).message;
@@ -86,38 +69,3 @@ export async function loadCustomerReviews() {
     list.textContent = (error as Error).message;
   }
 }
-
-automationToggle?.addEventListener("click", async () => {
-  if (!automationStatus) return;
-  automationToggle.disabled = true;
-  try {
-    const { enabled } = await callReviews("/automation", "PUT", { enabled: !automationEnabled });
-    renderAutomation(enabled);
-  } catch (error) {
-    automationToggle.disabled = false;
-    automationStatus.textContent = (error as Error).message;
-  }
-});
-
-form?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const button = form.querySelector<HTMLButtonElement>("button[type=submit]");
-  if (!button || !status) return;
-  const orderId = Number(new FormData(form).get("orderId"));
-  button.disabled = true;
-  status.textContent = "Sending invitation…";
-  try {
-    const { state } = await callReviews("/invite", "POST", { orderId });
-    status.textContent = state === "sent"
-      ? "Invitation accepted by the mail provider."
-      : state === "failed"
-        ? "The mail provider rejected the invitation. You can retry."
-        : "Delivery is unconfirmed. Check the mail log before trying again.";
-    if (state === "sent") form.reset();
-  } catch (error) {
-    status.textContent = (error as Error).message;
-  } finally {
-    button.disabled = false;
-    void loadCustomerReviews();
-  }
-});

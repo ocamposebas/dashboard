@@ -604,8 +604,8 @@ export function createMonitorServer(
   const marketingEmailRepository = dependencies.fulfillmentDatabase
     ? new MarketingEmailRepository(dependencies.fulfillmentDatabase)
     : undefined;
-  const customerReviews = dependencies.fulfillmentDatabase && commerce
-    ? new CustomerReviews(dependencies.fulfillmentDatabase, commerce, config.sessionSecret)
+  const customerReviews = dependencies.fulfillmentDatabase
+    ? new CustomerReviews(dependencies.fulfillmentDatabase, config.sessionSecret)
     : undefined;
   const marketingEmails = marketingEmailRepository && commerce
     ? new MarketingEmailService(
@@ -3588,11 +3588,7 @@ export function createMonitorServer(
         return;
       }
 
-      if (
-        url.pathname === "/api/customer-reviews" ||
-        url.pathname === "/api/customer-reviews/invite" ||
-        url.pathname === "/api/customer-reviews/automation"
-      ) {
+      if (url.pathname === "/api/customer-reviews") {
         response.setHeader("Cache-Control", "no-store");
         if (!canAdminister || (request.method !== "GET" && !isLoginOriginAllowed(request, config))) {
           json(response, 403, { error: "Administrator access is required." });
@@ -3603,22 +3599,9 @@ export function createMonitorServer(
           return;
         }
         try {
-          if (url.pathname === "/api/customer-reviews" && request.method === "GET") {
+          if (request.method === "GET") {
             json(response, 200, await customerReviews.dashboard());
-          } else if (url.pathname === "/api/customer-reviews/automation" && request.method === "PUT") {
-            const payload = JSON.parse(await readBody(request)) as { enabled?: boolean } | null;
-            if (typeof payload?.enabled !== "boolean") {
-              throw new CustomerReviewError("Choose whether automatic invitations should be enabled.", 400);
-            }
-            await customerReviews.setAutomation(payload.enabled);
-            json(response, 200, { enabled: payload.enabled });
-          } else if (url.pathname === "/api/customer-reviews/invite" && request.method === "POST") {
-            const payload = JSON.parse(await readBody(request)) as { orderId?: number } | null;
-            if (typeof payload?.orderId !== "number" || !Number.isSafeInteger(payload.orderId) || payload.orderId < 1) {
-              throw new CustomerReviewError("Enter a valid WooCommerce order ID.", 400);
-            }
-            json(response, 200, await customerReviews.sendInvitation(payload.orderId, currentUser.id));
-          } else if (url.pathname === "/api/customer-reviews" && request.method === "PATCH") {
+          } else if (request.method === "PATCH") {
             const payload = JSON.parse(await readBody(request)) as { id?: string; published?: boolean } | null;
             if (typeof payload?.id !== "string" || typeof payload.published !== "boolean") {
               throw new CustomerReviewError("Invalid publication request.", 400);
@@ -7715,7 +7698,5 @@ export function createMonitorServer(
       response.end("Internal server error");
     });
   });
-  const stopReviewAutomation = customerReviews?.startAutomation();
-  if (stopReviewAutomation) server.once("close", stopReviewAutomation);
   return server;
 }
