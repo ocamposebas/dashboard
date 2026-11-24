@@ -27,6 +27,7 @@ import {
 } from "./affiliateManagement.js";
 import type { AppConfig } from "./config.js";
 import type { Database } from "./database.js";
+import { CustomerReviewError, CustomerReviews } from "./customerReviews.js";
 import { InsuranceFundRepository } from "./insuranceFundRepository.js";
 import { BulkOrderRepository } from "./bulkOrderRepository.js";
 import { BulkOrderService, BulkOrderServiceError } from "./bulkOrderService.js";
@@ -602,6 +603,9 @@ export function createMonitorServer(
   const bulkAccessAttempts = new LoginAttemptThrottle();
   const marketingEmailRepository = dependencies.fulfillmentDatabase
     ? new MarketingEmailRepository(dependencies.fulfillmentDatabase)
+    : undefined;
+  const customerReviews = dependencies.fulfillmentDatabase && commerce
+    ? new CustomerReviews(dependencies.fulfillmentDatabase, commerce, config.sessionSecret)
     : undefined;
   const marketingEmails = marketingEmailRepository && commerce
     ? new MarketingEmailService(
@@ -2183,7 +2187,7 @@ export function createMonitorServer(
       });
   }
 
-  return createServer((request, response) => {
+  const server = createServer((request, response) => {
     void (async () => {
       const url = new URL(request.url || "/", config.dashboardOrigin);
       const nonce = randomBytes(16).toString("base64");
@@ -2240,6 +2244,40 @@ export function createMonitorServer(
         response.setHeader("ETag", etag);
         if (request.method === "HEAD") response.end();
         else response.end(asset.content);
+        return;
+      }
+
+      if (url.pathname === "/api/public/customer-reviews" && request.method === "GET") {
+        response.setHeader("Cache-Control", "public, max-age=60");
+        json(response, 200, customerReviews ? await customerReviews.published() : { count: 0, rating: null, reviews: [] });
+        return;
+      }
+
+      if (
+        (url.pathname === "/api/public/customer-reviews/submit" || url.pathname === "/api/public/customer-reviews/unsubscribe")
+        && request.method === "POST"
+      ) {
+        response.setHeader("Cache-Control", "no-store");
+        if (!customerReviews) {
+          json(response, 503, { error: "Reviews are temporarily unavailable." });
+          return;
+        }
+        if (!firstHeaderValue(request.headers["content-type"]).startsWith("application/json")) {
+          json(response, 415, { error: "Invalid request format." });
+          return;
+        }
+        try {
+          const payload = JSON.parse(await readBody(request)) as {
+            token?: unknown; rating?: unknown; body?: unknown;
+          } | null;
+          if (url.pathname.endsWith("/unsubscribe")) await customerReviews.unsubscribe(payload?.token);
+          else await customerReviews.submit(payload?.token, payload?.rating, payload?.body);
+          json(response, 200, { success: true });
+        } catch (error) {
+          if (error instanceof CustomerReviewError) json(response, error.status, { error: error.message });
+          else if (error instanceof SyntaxError) json(response, 400, { error: "Invalid review request." });
+          else throw error;
+        }
         return;
       }
 
@@ -3546,6 +3584,54 @@ export function createMonitorServer(
           json(response, 200, { subscribed: false });
         } catch (error: unknown) {
           json(response, 400, { error: error instanceof Error ? error.message : "Invalid push subscription" });
+        }
+        return;
+      }
+
+      if (
+        url.pathname === "/api/customer-reviews" ||
+        url.pathname === "/api/customer-reviews/invite" ||
+        url.pathname === "/api/customer-reviews/automation"
+      ) {
+        response.setHeader("Cache-Control", "no-store");
+        if (!canAdminister || (request.method !== "GET" && !isLoginOriginAllowed(request, config))) {
+          json(response, 403, { error: "Administrator access is required." });
+          return;
+        }
+        if (!customerReviews) {
+          json(response, 503, { error: "Customer reviews are not configured." });
+          return;
+        }
+        try {
+          if (url.pathname === "/api/customer-reviews" && request.method === "GET") {
+            json(response, 200, await customerReviews.dashboard());
+          } else if (url.pathname === "/api/customer-reviews/automation" && request.method === "PUT") {
+            const payload = JSON.parse(await readBody(request)) as { enabled?: boolean } | null;
+            if (typeof payload?.enabled !== "boolean") {
+              throw new CustomerReviewError("Choose whether automatic invitations should be enabled.", 400);
+            }
+            await customerReviews.setAutomation(payload.enabled);
+            json(response, 200, { enabled: payload.enabled });
+          } else if (url.pathname === "/api/customer-reviews/invite" && request.method === "POST") {
+            const payload = JSON.parse(await readBody(request)) as { orderId?: number } | null;
+            if (typeof payload?.orderId !== "number" || !Number.isSafeInteger(payload.orderId) || payload.orderId < 1) {
+              throw new CustomerReviewError("Enter a valid WooCommerce order ID.", 400);
+            }
+            json(response, 200, await customerReviews.sendInvitation(payload.orderId, currentUser.id));
+          } else if (url.pathname === "/api/customer-reviews" && request.method === "PATCH") {
+            const payload = JSON.parse(await readBody(request)) as { id?: string; published?: boolean } | null;
+            if (typeof payload?.id !== "string" || typeof payload.published !== "boolean") {
+              throw new CustomerReviewError("Invalid publication request.", 400);
+            }
+            await customerReviews.setPublished(payload.id, payload.published);
+            json(response, 200, { success: true });
+          } else {
+            json(response, 405, { error: "Method not allowed." });
+          }
+        } catch (error) {
+          if (error instanceof CustomerReviewError) json(response, error.status, { error: error.message });
+          else if (error instanceof SyntaxError) json(response, 400, { error: "Invalid review request." });
+          else throw error;
         }
         return;
       }
@@ -7629,4 +7715,7 @@ export function createMonitorServer(
       response.end("Internal server error");
     });
   });
+  const stopReviewAutomation = customerReviews?.startAutomation();
+  if (stopReviewAutomation) server.once("close", stopReviewAutomation);
+  return server;
 }

@@ -12,6 +12,7 @@ import { initBulkOrders, loadBulkOrders } from "./bulk-orders";
 import { initAffiliateAdmin, loadAffiliateAdmin } from "./affiliates-admin";
 import { initCouponAdmin, loadCoupons } from "./coupons-admin";
 import { initDeliveryMonitor, loadDeliveryMonitor } from "./delivery-monitor";
+import { loadCustomerReviews } from "./customer-reviews";
 import type { AffiliateCommissionSummary } from "../shared/affiliates";
 import {
   TIKTOK_PIXEL_EVENT_KEYS,
@@ -9312,7 +9313,7 @@ monitorSpecificDateInput.addEventListener("change", () =>
 for (const button of document.querySelectorAll<HTMLButtonElement>("[data-marketing-mode]")) {
   button.addEventListener("click", () => {
     const mode = button.dataset.marketingMode;
-    if (mode !== "email" && mode !== "activity") return;
+    if (mode !== "email" && mode !== "activity" && mode !== "reviews") return;
     for (const option of document.querySelectorAll<HTMLButtonElement>("[data-marketing-mode]")) {
       const active = option === button;
       option.classList.toggle("is-active", active);
@@ -9321,6 +9322,7 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-marketi
     for (const panel of document.querySelectorAll<HTMLElement>("[data-marketing-mode-panel]")) {
       panel.hidden = panel.dataset.marketingModePanel !== mode;
     }
+    if (mode === "reviews") void loadCustomerReviews();
   });
 }
 

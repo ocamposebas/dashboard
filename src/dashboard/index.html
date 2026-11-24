@@ -448,7 +448,27 @@
 
           <section class="view-panel" data-view-panel="marketing" aria-labelledby="marketing-title">
             <div class="page-header marketing-page-header"><div><p class="eyebrow">Customer communication</p><h1 id="marketing-title">Marketing</h1><p class="page-description">Send emails or review customer activity without mixing both workflows.</p></div><div class="page-actions"><button class="button button--secondary" type="button" data-go-view="products">Products</button><button class="button button--primary" type="button" data-go-view="site-controls">Promotion</button></div></div>
-            <nav class="marketing-mode-tabs" aria-label="Marketing sections"><button class="is-active" type="button" data-marketing-mode="email">Emails</button><button type="button" data-marketing-mode="activity">Customer activity</button></nav>
+            <nav class="marketing-mode-tabs" aria-label="Marketing sections"><button class="is-active" type="button" aria-pressed="true" data-marketing-mode="email">Emails</button><button type="button" aria-pressed="false" data-marketing-mode="activity">Customer activity</button><button type="button" aria-pressed="false" data-marketing-mode="reviews">Reviews</button></nav>
+
+            <section data-marketing-mode-panel="reviews" aria-labelledby="customer-review-title" hidden>
+              <article class="surface" style="padding: 16px 20px; margin-bottom: 16px">
+                <h2>Automatic invitations</h2>
+                <p>One email per order, 48 hours after the carrier confirms delivery of every package.</p>
+                <button class="button button--secondary" id="customer-review-toggle" type="button" disabled>Checking status…</button>
+                <p id="customer-review-automation-status" role="status"></p>
+              </article>
+              <article class="surface" style="padding: 16px 20px; margin-bottom: 16px">
+                <h2 id="customer-review-title">Request a review</h2>
+                <p>Send one invitation to the customer on a completed order.</p>
+                <form id="customer-review-invite" style="display:flex; flex-wrap:wrap; align-items:end; gap:12px; margin:12px 0">
+                  <label>WooCommerce order ID <input name="orderId" type="number" min="1" step="1" required /></label>
+                  <button class="button button--primary" type="submit">Send invitation</button>
+                </form>
+                <p id="customer-review-status" role="status"></p>
+              </article>
+              <h2>Invitations and reviews</h2>
+              <div id="customer-review-list" style="display:grid; gap:10px; margin-top:10px" aria-live="polite"></div>
+            </section>
 
             <div class="marketing-signal-banner" id="marketing-signal-banner" data-state="waiting" data-marketing-mode-panel="activity" hidden><span class="marketing-signal-icon" aria-hidden="true">LIVE</span><div><strong>Storefront activity monitor</strong><p id="marketing-signal-copy">Waiting for the first search or cart signal from the storefront.</p></div><span class="marketing-signal-status" id="marketing-signal-status">Waiting for activity</span></div>
 

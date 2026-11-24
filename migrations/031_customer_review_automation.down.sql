@@ -1,0 +1,3 @@
+DROP INDEX customer_reviews_delivered_idx;
+DROP TABLE customer_review_automation_skips;
+DROP TABLE customer_review_automation;
