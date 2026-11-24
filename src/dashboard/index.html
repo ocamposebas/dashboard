@@ -454,6 +454,14 @@
               <article class="surface" style="padding: 16px 20px; margin-bottom: 16px">
                 <h2 id="customer-review-title">Review campaigns</h2>
                 <a class="button button--secondary" href="https://pepreviewpro.com/dashboard/campaigns/configure" target="_blank" rel="noopener noreferrer">Open PepReviewPro campaigns</a>
+                <p id="pep-review-status" role="status"></p>
+                <details id="pep-review-connection" hidden>
+                  <summary>PepReviewPro connection</summary>
+                  <form id="pep-review-key" style="display:flex; flex-wrap:wrap; align-items:end; gap:12px; margin:12px 0">
+                    <label>Store key <input name="key" type="password" autocomplete="off" maxlength="168" required /></label>
+                    <button class="button button--primary" type="submit">Connect PepReviewPro</button>
+                  </form>
+                </details>
                 <p id="customer-review-status" role="status"></p>
               </article>
               <h2>Phase One Labz review history</h2>

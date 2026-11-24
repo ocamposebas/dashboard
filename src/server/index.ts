@@ -24,6 +24,7 @@ import { orderNotificationPayload, type OrderNotificationSource } from "./orderN
 import { WooCommerceGateway } from "./wooCommerceGateway.js";
 import { DeliveryMonitorRepository } from "./deliveryMonitorRepository.js";
 import { DeliveryMonitorService } from "./deliveryMonitorService.js";
+import { PepReviewPro } from "./pepReviewPro.js";
 
 const config = loadConfig();
 if (config.evidenceStorage) {
@@ -56,6 +57,9 @@ const tiktokPixelRepository = fulfillmentDatabase
 const orderPushService = fulfillmentDatabase
   ? await OrderPushService.create(new OrderPushRepository(fulfillmentDatabase))
   : undefined;
+const pepReviews = fulfillmentDatabase && config.wooCommerce
+  ? new PepReviewPro(fulfillmentDatabase, new WooCommerceGateway(config.wooCommerce), config.sessionSecret)
+  : undefined;
 const store = new PresenceStore(
   config.redisUrl,
   config.redisKeyPrefix,
@@ -85,6 +89,7 @@ const server = createMonitorServer(config, store, {
   recordNewOrder,
   shipStationGateway,
   ...(deliveryMonitor ? { deliveryMonitor } : {}),
+  ...(pepReviews ? { pepReviews } : {}),
 });
 const hub = new SocketHub(config, store);
 const upstreamMonitor = config.upstreamMonitor
@@ -201,6 +206,7 @@ hub.attach(server);
 upstreamMonitor?.start();
 orderSync?.start();
 affiliateShadowSync?.start();
+pepReviews?.start();
 
 server.listen(config.port, "0.0.0.0", () => {
   console.log(`Phase One Live Monitor listening on port ${config.port}`);
@@ -215,6 +221,7 @@ async function shutdown(signal: string): Promise<void> {
   await upstreamMonitor?.close();
   await orderSync?.close();
   await affiliateShadowSync?.close();
+  await pepReviews?.close();
   deliveryMonitor?.close();
   await fulfillmentDatabase?.close();
   await hub.close();

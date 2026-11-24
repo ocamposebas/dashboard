@@ -155,6 +155,7 @@ import {
 } from "./shipStationGateway.js";
 import type { ManagedUserRecord, ManagedUserRole, PresenceStore } from "./presenceStore.js";
 import type { DeliveryMonitorService } from "./deliveryMonitorService.js";
+import type { PepReviewPro } from "./pepReviewPro.js";
 import {
   RESEARCHER_TYPES,
   ResearchConsentRepository,
@@ -522,6 +523,7 @@ export interface MonitorServerDependencies {
   tiktokPixelRepository?: TikTokPixelRepository;
   orderPushService?: OrderPushService;
   deliveryMonitor?: DeliveryMonitorService;
+  pepReviews?: PepReviewPro;
   recordNewOrder?: (order: OrderNotificationSource) => Promise<void>;
 }
 
@@ -3600,7 +3602,29 @@ export function createMonitorServer(
         }
         try {
           if (request.method === "GET") {
-            json(response, 200, await customerReviews.dashboard());
+            const [history, pep] = await Promise.all([
+              customerReviews.dashboard(),
+              dependencies.pepReviews?.status(),
+            ]);
+            json(response, 200, { ...history, pep, canConnectPep: Boolean(pep && currentUser.role === "owner") });
+          } else if (request.method === "PUT") {
+            if (currentUser.role !== "owner") {
+              json(response, 403, { error: "Owner access is required to connect PepReviewPro." });
+              return;
+            }
+            if (!dependencies.pepReviews) {
+              json(response, 503, { error: "WooCommerce order sync is unavailable." });
+              return;
+            }
+            const payload = JSON.parse(await readBody(request)) as { key?: unknown } | null;
+            try {
+              await dependencies.pepReviews.connect(payload?.key);
+              json(response, 200, { success: true });
+            } catch (error: unknown) {
+              json(response, 400, { error: error instanceof Error &&
+                /^(Enter the PepReviewPro|This key could not verify|PepReviewPro returned HTTP)/.test(error.message)
+                ? error.message : "Could not connect to PepReviewPro." });
+            }
           } else if (request.method === "PATCH") {
             const payload = JSON.parse(await readBody(request)) as { id?: string; published?: boolean } | null;
             if (typeof payload?.id !== "string" || typeof payload.published !== "boolean") {

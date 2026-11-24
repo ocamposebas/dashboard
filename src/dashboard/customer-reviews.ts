@@ -11,6 +11,9 @@ type Invitation = {
 
 const list = document.querySelector<HTMLElement>("#customer-review-list");
 const status = document.querySelector<HTMLElement>("#customer-review-status");
+const pepStatus = document.querySelector<HTMLElement>("#pep-review-status");
+const pepConnection = document.querySelector<HTMLDetailsElement>("#pep-review-connection");
+const pepForm = document.querySelector<HTMLFormElement>("#pep-review-key");
 
 async function callReviews(method = "GET", payload?: object) {
   const response = await fetch("/api/customer-reviews", {
@@ -26,7 +29,17 @@ async function callReviews(method = "GET", payload?: object) {
 export async function loadCustomerReviews() {
   if (!list) return;
   try {
-    const { invitations } = await callReviews() as { invitations: Invitation[] };
+    const { invitations, pep, canConnectPep } = await callReviews() as {
+      invitations: Invitation[];
+      pep?: { connected: boolean; lastSuccess: string | null; error: string | null };
+      canConnectPep: boolean;
+    };
+    if (pepConnection) pepConnection.hidden = !canConnectPep;
+    if (pepStatus) {
+      pepStatus.textContent = !pep ? "" : pep.error ??
+        (pep.connected ? pep.lastSuccess ? "Connected · WooCommerce sync is active." :
+          "Connected · Waiting for the first WooCommerce scan." : "PepReviewPro is not connected yet.");
+    }
     list.replaceChildren();
     if (!invitations.length) list.textContent = "No invitations yet.";
     for (const entry of invitations) {
@@ -69,3 +82,21 @@ export async function loadCustomerReviews() {
     list.textContent = (error as Error).message;
   }
 }
+
+pepForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = pepForm.querySelector<HTMLButtonElement>("button[type=submit]");
+  if (!pepStatus || !button) return;
+  button.disabled = true;
+  pepStatus.textContent = "Verifying the store…";
+  try {
+    await callReviews("PUT", { key: new FormData(pepForm).get("key") });
+    pepForm.reset();
+    if (pepConnection) pepConnection.open = false;
+    await loadCustomerReviews();
+  } catch (error) {
+    pepStatus.textContent = (error as Error).message;
+  } finally {
+    button.disabled = false;
+  }
+});
