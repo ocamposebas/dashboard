@@ -524,3 +524,38 @@ test("label purchase preserves ShipStation's safe rejection reason for the worke
     },
   );
 });
+
+test("quotes distinguish a rejected recipient address from a rejected warehouse address", async () => {
+  const cases = [
+    { status: 400, body: { errors: [{ message: "Address not found" }] }, code: "invalid_address" },
+    { status: 400, body: { errors: [{ field_name: "ship_from.postal_code", error_code: "invalid_address" }] }, code: "invalid_origin_address" },
+    { status: 200, body: { shipment_id: "se-test", rate_response: {
+      rates: [], invalid_rates: [{ error_messages: ["Recipient address has not been verified"] }],
+    } }, code: "invalid_address" },
+  ];
+  for (const example of cases) {
+    const gateway = new ShipStationGateway({
+      apiKey: "server-only-key", rateMode: "live", labelPurchaseEnabled: false,
+    }, async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path.endsWith("/carriers")) {
+        return Response.json({ carriers: [{ carrier_id: "se-fedex", carrier_code: "fedex" }] });
+      }
+      if (path.endsWith("/warehouses")) {
+        return Response.json({ warehouses: [{
+          warehouse_id: "se-origin", name: "Main warehouse",
+          origin_address: { city_locality: "Miami", state_province: "FL", postal_code: "33101", country_code: "US" },
+        }] });
+      }
+      assert.equal(path, "/v2/rates");
+      return Response.json(example.body, { status: example.status });
+    }, "https://shipstation.example/v2");
+    await assert.rejects(gateway.rates({
+      carrierIds: ["se-fedex"],
+      package: { weightOz: 16, packageCode: "package", lengthIn: 8, widthIn: 6, heightIn: 4 },
+      destination: { name: "Test Customer", address1: "100 Test Street", city: "Miami", state: "FL", postalCode: "33101", countryCode: "US" },
+      externalShipmentId: "p1-address-recovery",
+      orderNumber: "3180",
+    }), { name: "ShipStationGatewayError", code: example.code });
+  }
+});

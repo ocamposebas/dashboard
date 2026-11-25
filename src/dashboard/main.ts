@@ -65,6 +65,8 @@ import type {
 } from "../shared/fulfillment";
 import {
   PHASE_ONE_SHIPPING_POLICY,
+  shippingPolicyForDestination,
+  type ShippingAddressReview,
   type ShippingLabel,
   type ShippingCapabilitiesPayload,
   type ShippingPackageInput,
@@ -1174,11 +1176,11 @@ interface FulfillmentShippingUiState {
   rates?: ShippingRatesPayload;
   label: ShippingLabel | null;
   printUrl: string | null;
-  selectedCarrierId: string;
   selectedRateIndex: number | null;
   package: ShippingPackageInput;
   labelAttemptId: string | null;
   error: string | null;
+  addressReview?: ShippingAddressReview;
 }
 const fulfillmentShippingStates = new Map<string, FulfillmentShippingUiState>();
 let shippingConfirmationAction: "purchase" | "void" | null = null;
@@ -5575,13 +5577,6 @@ function packingSnapshotFromSession(order: FulfillmentQueueEntry): FulfillmentPa
   return value as unknown as FulfillmentPackingSnapshot;
 }
 
-function phaseOneShippingCarrier(capabilities: ShippingCapabilitiesPayload) {
-  return capabilities.carriers.find((carrier) =>
-    carrier.code.trim().toLowerCase() === PHASE_ONE_SHIPPING_POLICY.carrierCode &&
-    carrier.packages.some((item) => item.code === PHASE_ONE_SHIPPING_POLICY.packageCode && item.domestic)
-  ) || null;
-}
-
 function initialShippingState(): FulfillmentShippingUiState {
   return {
     loading: true,
@@ -5589,7 +5584,6 @@ function initialShippingState(): FulfillmentShippingUiState {
     labelBusy: false,
     label: null,
     printUrl: null,
-    selectedCarrierId: "",
     selectedRateIndex: null,
     package: {
       weightOz: 16,
@@ -5662,17 +5656,13 @@ function shippingWorkspaceMarkup(order: FulfillmentQueueEntry, state: Fulfillmen
   }
   const modeLabel = capabilities.dataMode === "live" ? "Live carrier rates" : "Test rates";
   const purchaseUnlocked = capabilities.labelPurchaseMode === "live_enabled";
-  const selectedCarrier = phaseOneShippingCarrier(capabilities);
-  const selectedPackage = selectedCarrier?.packages.find((item) =>
-    item.code === PHASE_ONE_SHIPPING_POLICY.packageCode && item.domestic
-  ) || null;
-  const policyReady = Boolean(selectedCarrier && selectedPackage);
-  const oneRateSelected = true;
+  const review = state.addressReview;
   const destination = state.rates?.destination;
-  const activePolicy = state.rates?.policy;
-  const activeCarrierName = activePolicy?.carrierName || PHASE_ONE_SHIPPING_POLICY.carrierName;
-  const activePackageName = activePolicy?.packageName || PHASE_ONE_SHIPPING_POLICY.packageName;
-  const activeServiceName = activePolicy?.serviceName || PHASE_ONE_SHIPPING_POLICY.serviceName;
+  const activePolicy = state.rates?.policy ?? (review ? shippingPolicyForDestination(review) : PHASE_ONE_SHIPPING_POLICY);
+  const { carrierName: activeCarrierName, packageName: activePackageName, serviceName: activeServiceName } = activePolicy;
+  const oneRateSelected = activeCarrierName === PHASE_ONE_SHIPPING_POLICY.carrierName;
+  const addressLocality = review ? [review.city, [review.state, review.postalCode].filter(Boolean).join(" "), review.countryCode].filter(Boolean).join(", ") : "";
+  const editOrderUrl = review?.sourceOrderUrl?.startsWith("https://") ? review.sourceOrderUrl : "";
   const rateCards = state.rates?.rates.length
     ? `<div class="shipping-rate-list">${state.rates.rates.map((rate, index) => {
       const selected = state.selectedRateIndex === index;
@@ -5700,13 +5690,14 @@ function shippingWorkspaceMarkup(order: FulfillmentQueueEntry, state: Fulfillmen
         ? '<div class="shipping-test-banner is-purchase-live"><span>!</span><p><strong>Live postage enabled</strong> The displayed total is a persistent carrier quote. Final confirmation will charge the connected account and create one real label.</p></div>'
         : '<div class="shipping-test-banner is-live"><span>✓</span><p><strong>Live rates, purchase locked</strong> Prices come from connected carriers, but the server safety flag prevents every label charge.</p></div>'}
     <form class="shipping-rate-form" id="shipping-rate-form">
-      <label class="shipping-carrier-field"><span>Carrier</span><select name="carrierId"${policyReady ? "" : " disabled"}><option value="${escapeHtml(selectedCarrier?.id || "")}" selected>FedEx</option></select><small>Only the approved carrier · ${escapeHtml(capabilities.originName || "Origin ready")}</small></label>
-      <label class="shipping-package-field"><span>Package type</span><select name="packageCode"${policyReady ? "" : " disabled"}><option value="${PHASE_ONE_SHIPPING_POLICY.packageCode}" selected>${PHASE_ONE_SHIPPING_POLICY.packageName}</option></select><small>Only FedEx One Rate Pak is enabled for fulfillment</small></label>
-      <fieldset class="is-carrier-package"><legend>Package</legend><label><span>Weight</span><div><input name="weightOz" type="number" min="0.1" max="2400" step="0.1" value="${state.package.weightOz}" required><b>oz</b></div></label><div class="shipping-carrier-package-note"><strong>${PHASE_ONE_SHIPPING_POLICY.packageName}</strong><small>FedEx supplies the Pak dimensions automatically.</small></div></fieldset>
-      <button class="button button--primary" type="submit"${state.rateLoading || !policyReady ? " disabled" : ""}>${state.rateLoading ? "Connecting to FedEx…" : state.error ? "Retry One Rate" : "Load One Rate"}</button>
+      <label class="shipping-carrier-field"><span>Carrier</span><select aria-label="Approved carrier" disabled><option>${escapeHtml(activeCarrierName)}</option></select><small>${escapeHtml(capabilities.originName || "Origin ready")}</small></label>
+      <label class="shipping-package-field"><span>Package type</span><select aria-label="Approved package type" disabled><option>${escapeHtml(activePackageName)}</option></select></label>
+      <fieldset class="is-carrier-package"><legend>Package</legend><label><span>Weight</span><div><input name="weightOz" type="number" min="0.1" max="2400" step="0.1" value="${state.package.weightOz}" required><b>oz</b></div></label><div class="shipping-carrier-package-note"><strong>${escapeHtml(activePackageName)}</strong><small>${oneRateSelected ? "FedEx supplies the Pak dimensions automatically." : "Uses the standard Phase One shipping box."}</small></div></fieldset>
+      <button class="button button--primary" type="submit"${state.rateLoading ? " disabled" : ""}>${state.rateLoading ? "Checking rates…" : review ? "Recheck address and get rate" : state.error ? "Retry rate" : oneRateSelected ? "Load One Rate" : "Get rate"}</button>
     </form>
     ${destination ? `<div class="shipping-destination"><span>SHIP TO</span><strong>${escapeHtml(destination.city)}, ${escapeHtml(destination.state)} ${escapeHtml(destination.postalCode)}</strong><small>${escapeHtml(destination.countryCode)} · Address remains sourced from the order</small></div>` : ""}
     ${state.error ? `<p class="shipping-error" role="alert"><span>!</span>${escapeHtml(state.error)}</p>` : ""}
+    ${review ? `<div class="shipping-destination shipping-address-review" aria-label="Shipping address to review"><div><strong>Shipping address to review</strong><p>${[review.address1, review.address2, addressLocality].filter(Boolean).map(escapeHtml).join("<br>") || "The order has no shipping address."}</p><small>Confirm the address with the customer, save any correction on the order, then recheck the rate here.</small></div>${editOrderUrl ? `<a class="button button--secondary" href="${escapeHtml(editOrderUrl)}" target="_blank" rel="noopener noreferrer">Edit address on order ↗</a>` : ""}</div>` : ""}
     ${rateCards}
     ${selectedRate ? `<div class="shipping-purchase-review"><div><p class="section-kicker">Approved service</p><h4>${escapeHtml(activeServiceName)}</h4><p>${formatCurrency(selectedRate.amount, selectedRate.currency)}${selectedRate.isEstimate ? " estimated" : " final quoted total"} · ${escapeHtml(activePackageName)} · 4×6 PDF</p></div><div class="shipping-purchase-safety${purchaseUnlocked ? " is-live" : ""}"><span>${capabilities.dataMode === "mock" ? "TEST" : purchaseUnlocked ? "LIVE" : "LOCKED"}</span><p>${capabilities.dataMode === "mock" ? "Creates a local test label only. No postage or source order is changed." : purchaseUnlocked ? "Explicit confirmation purchases this exact rate once and writes tracking back safely." : "Live purchase is disabled on the server. Ask an administrator to complete the launch checklist."}</p></div><button class="button button--primary" type="button" ${capabilities.dataMode === "mock" ? "data-generate-shipping-label" : purchaseUnlocked ? "data-review-live-label" : "disabled"}${state.labelBusy ? " disabled" : ""}>${state.labelBusy ? "Processing safely…" : capabilities.dataMode === "mock" ? "Generate test label" : purchaseUnlocked ? `Review & purchase ${formatCurrency(selectedRate.amount, selectedRate.currency)}` : "Purchase locked"}</button></div>` : ""}
   </section>`;
@@ -5730,6 +5721,7 @@ async function loadFulfillmentShipping(order: FulfillmentQueueEntry, force = fal
   const state = existing || initialShippingState();
   state.loading = true;
   state.error = null;
+  delete state.addressReview;
   fulfillmentShippingStates.set(fulfillmentId, state);
   renderFulfillmentShipping(order);
   try {
@@ -5750,14 +5742,6 @@ async function loadFulfillmentShipping(order: FulfillmentQueueEntry, force = fal
         : "The shipping record could not be loaded.");
     }
     state.capabilities = capabilities as unknown as ShippingCapabilitiesPayload;
-    const policyCarrier = phaseOneShippingCarrier(state.capabilities);
-    if (policyCarrier) {
-      state.selectedCarrierId = policyCarrier.id;
-      state.package.packageCode = PHASE_ONE_SHIPPING_POLICY.packageCode;
-      state.package.packageName = PHASE_ONE_SHIPPING_POLICY.packageName;
-    } else if (!state.label) {
-      state.error = "FedEx One Rate Pak is not enabled on the connected ShipStation account.";
-    }
     state.label = isRecord(labelPayload.label)
       ? labelPayload.label as unknown as ShippingLabel
       : null;
@@ -5778,31 +5762,14 @@ async function compareShippingRates(): Promise<void> {
   const state = fulfillmentShippingStates.get(fulfillmentId);
   if (!state?.capabilities || state.rateLoading) return;
   const data = new FormData(form);
-  const packageCarrier = phaseOneShippingCarrier(state.capabilities);
-  const packageDefinition = packageCarrier?.packages.find(
-    (item) => item.code === PHASE_ONE_SHIPPING_POLICY.packageCode && item.domestic,
-  ) || null;
-  if (!packageCarrier || !packageDefinition) {
-    state.error = "FedEx One Rate Pak is not enabled on the connected ShipStation account.";
-    renderFulfillmentShipping(order);
-    return;
-  }
-  state.package = {
-    weightOz: Number(data.get("weightOz")),
-    lengthIn: state.package.lengthIn,
-    widthIn: state.package.widthIn,
-    heightIn: state.package.heightIn,
-    packageCode: PHASE_ONE_SHIPPING_POLICY.packageCode,
-    packageName: PHASE_ONE_SHIPPING_POLICY.packageName,
-  };
-  state.selectedCarrierId = packageCarrier.id;
-  const carrierIds = [packageCarrier.id];
+  state.package = { ...state.package, weightOz: Number(data.get("weightOz")) };
   state.rateLoading = true;
   state.error = null;
   state.selectedRateIndex = null;
+  delete state.rates;
   renderFulfillmentShipping(order);
   try {
-    const body = JSON.stringify({ fulfillmentId, carrierIds, package: state.package });
+    const body = JSON.stringify({ fulfillmentId, package: state.package });
     let ratesPayload: ShippingRatesPayload | null = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       let response: Response;
@@ -5829,6 +5796,11 @@ async function compareShippingRates(): Promise<void> {
       }
       const retryable = isRecord(payload) && payload.retryable === true;
       if (!retryable || attempt >= 2) {
+        if (isRecord(payload) && payload.code === "invalid_address" && isRecord(payload.addressReview)) {
+          state.addressReview = payload.addressReview as unknown as ShippingAddressReview;
+        } else {
+          delete state.addressReview;
+        }
         throw new Error(isRecord(payload) && typeof payload.error === "string"
           ? payload.error
           : "Rates could not be retrieved.");
@@ -5839,6 +5811,7 @@ async function compareShippingRates(): Promise<void> {
     }
     if (!ratesPayload) throw new Error("FedEx did not return a rate. Nothing was charged; try again in a moment.");
     state.error = null;
+    delete state.addressReview;
     state.rates = ratesPayload;
     state.package = ratesPayload.package;
     state.selectedRateIndex = state.rates.rates.length === 1 ? 0 : null;
@@ -12759,29 +12732,6 @@ function handleFulfillmentClick(event: Event): void {
 requiredElement<HTMLElement>("#fulfillment-queue-view").addEventListener("click", handleFulfillmentClick);
 requiredElement<HTMLElement>("#fulfillment-detail-view").addEventListener("click", handleFulfillmentClick);
 requiredElement<HTMLElement>("#fulfillment-detail-view").addEventListener("change", (event) => {
-  const shippingSelect = event.target instanceof HTMLSelectElement
-    ? event.target.closest<HTMLSelectElement>("#shipping-rate-form select")
-    : null;
-  if (shippingSelect) {
-    const order = selectedFulfillmentOrder();
-    const fulfillmentId = order?.session?.id;
-    const state = fulfillmentId ? fulfillmentShippingStates.get(fulfillmentId) : undefined;
-    if (!order || !state) return;
-    if (shippingSelect.name === "carrierId") {
-      const policyCarrier = state.capabilities ? phaseOneShippingCarrier(state.capabilities) : null;
-      state.selectedCarrierId = policyCarrier?.id || "";
-      state.package.packageCode = PHASE_ONE_SHIPPING_POLICY.packageCode;
-      state.package.packageName = PHASE_ONE_SHIPPING_POLICY.packageName;
-    } else if (shippingSelect.name === "packageCode") {
-      state.package.packageCode = PHASE_ONE_SHIPPING_POLICY.packageCode;
-      state.package.packageName = PHASE_ONE_SHIPPING_POLICY.packageName;
-    }
-    delete state.rates;
-    state.selectedRateIndex = null;
-    state.error = null;
-    renderFulfillmentShipping(order);
-    return;
-  }
   const input = event.target instanceof HTMLInputElement
     ? event.target.closest<HTMLInputElement>("[data-evidence-file]")
     : null;

@@ -144,6 +144,16 @@ export interface ShippingRatesPayload {
   quotedAt: string;
 }
 
+export interface ShippingAddressReview {
+  address1: string;
+  address2: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  countryCode: string;
+  sourceOrderUrl: string | null;
+}
+
 export interface ShippingLabel {
   id: string;
   fulfillmentId: string;

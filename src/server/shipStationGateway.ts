@@ -118,6 +118,8 @@ export class ShipStationGatewayError extends Error {
       | "forbidden"
       | "rate_limited"
       | "invalid_response"
+      | "invalid_address"
+      | "invalid_origin_address"
       | "no_origin"
       | "upstream_unavailable"
       | "label_purchase_disabled"
@@ -141,14 +143,11 @@ function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function providerErrorMessage(body: string): string {
-  if (!body) return "";
-  let payload: unknown;
-  try {
-    payload = JSON.parse(body);
-  } catch {
-    payload = body;
-  }
+function providerErrorPayload(body: string): unknown {
+  try { return JSON.parse(body); } catch { return body; }
+}
+
+function providerErrorMessage(payload: unknown): string {
   const messages: string[] = [];
   const visit = (value: unknown, depth = 0): void => {
     if (depth > 4 || messages.length >= 4) return;
@@ -163,12 +162,52 @@ function providerErrorMessage(body: string): string {
     }
     const source = record(value);
     if (!source) return;
-    for (const key of ["message", "error", "errors", "detail", "exception_message"]) {
+    for (const key of ["message", "error", "errors", "error_messages", "detail", "exception_message"]) {
       if (key in source) visit(source[key], depth + 1);
     }
   };
   visit(payload);
   return [...new Set(messages)].join(" · ").slice(0, 500);
+}
+
+function rateAddressError(payload: unknown): ShipStationGatewayError | null {
+  let destination = false;
+  let origin = false;
+  const visit = (value: unknown, depth = 0): void => {
+    if (depth > 5) return;
+    if (Array.isArray(value)) {
+      value.slice(0, 25).forEach((item) => visit(item, depth + 1));
+      return;
+    }
+    const source = record(value);
+    const code = textValue(source?.error_code) + " " + textValue(source?.detail_code);
+    const field = textValue(source?.field_name);
+    const message = typeof value === "string" ? value : textValue(source?.message);
+    const isAddressError = /invalid_address|address_not_found|address_verification_failed/i.test(code) ||
+      /address (?:was )?not found|address (?:has not been|could not be|is not) (?:verified|validated)|(?:invalid|unverified|missing)\b[^.]{0,45}\b(?:address|postal code|zip)|\baddress\b[^.]{0,30}\b(?:invalid|unverified)|(?:city|state|postal code|zip)[^.]*(?:do not match|does not match)/i.test(message);
+    if (isAddressError) {
+      if (/\b(?:ship[_ -]?from|warehouse|origin|sender|return address)\b/i.test(`${field} ${message}`)) origin = true;
+      else destination = true;
+    }
+    if (source) {
+      for (const key of ["error", "errors", "error_messages", "invalid_rates", "rate_response", "detail", "exception_message"]) {
+        if (key in source) visit(source[key], depth + 1);
+      }
+    }
+  };
+  visit(payload);
+  if (origin) {
+    return new ShipStationGatewayError(
+      "ShipStation could not verify the warehouse address. Check the Ship From location in ShipStation.",
+      "invalid_origin_address",
+    );
+  }
+  return destination
+    ? new ShipStationGatewayError(
+        "ShipStation could not verify the shipping address. Check the street, apartment or suite, city, state and ZIP.",
+        "invalid_address",
+      )
+    : null;
 }
 
 function temporaryCarrierFailure(status: number, message: string): boolean {
@@ -534,7 +573,8 @@ export class ShipStationGateway {
       throw new ShipStationGatewayError("ShipStation returned an oversized response", "invalid_response");
     }
     if (!response.ok) {
-      const providerMessage = providerErrorMessage(body);
+      const failurePayload = providerErrorPayload(body);
+      const providerMessage = providerErrorMessage(failurePayload);
       if (response.status === 401) {
         throw new ShipStationGatewayError("The ShipStation API credential was not accepted", "unauthorized");
       }
@@ -556,6 +596,10 @@ export class ShipStationGateway {
           "The FedEx carrier network is temporarily unavailable. Nothing was charged; the system can retry this quote safely.",
           response.status === 429 ? "rate_limited" : "upstream_unavailable",
         );
+      }
+      if (!outcomeSensitive && (path === "/rates" || (init.method === "PUT" && path.startsWith("/shipments/")))) {
+        const addressError = rateAddressError(failurePayload);
+        if (addressError) throw addressError;
       }
       throw new ShipStationGatewayError(
         outcomeSensitive
@@ -780,6 +824,10 @@ export class ShipStationGateway {
     const rateResponse = record(root?.rate_response);
     const rateItems = rateResponse?.rates;
     const shipmentId = textValue(root?.shipment_id || rateResponse?.shipment_id) || existingShipmentId || null;
+    if (!Array.isArray(rateItems) || rateItems.length === 0) {
+      const addressError = rateAddressError(payload);
+      if (addressError) throw addressError;
+    }
     if (!Array.isArray(rateItems) || !shipmentId) {
       throw new ShipStationGatewayError("ShipStation returned an invalid rate list", "invalid_response");
     }

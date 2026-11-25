@@ -378,6 +378,11 @@ html[data-theme="dark"] .fulfillment-status.is-packed { background: #2a2723; col
 .shipping-destination span { color:var(--muted);font-size:7px;font-weight:850;letter-spacing:.08em; }
 .shipping-destination strong { color:var(--ink);font-size:9px; }
 .shipping-destination small { color:var(--muted);font-size:7px; }
+.shipping-address-review { grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:14px; }
+.shipping-address-review strong { font-size:12px; }
+.shipping-address-review p { margin:5px 0;color:var(--ink);font-size:12px;line-height:1.5;overflow-wrap:anywhere; }
+.shipping-address-review small { display:block;font-size:11px;line-height:1.4; }
+.shipping-address-review a { min-height:40px;align-self:center;text-decoration:none; }
 .shipping-error { display:flex;align-items:center;gap:9px;margin:0 23px 17px;padding:11px 13px;border:1px solid #e7c6c1;border-radius:9px;background:#fbf1ef;color:#984d44;font-size:8px; }
 .shipping-error span { width:20px;height:20px;display:grid;flex:0 0 20px;place-items:center;border-radius:50%;background:#f2deda;font-weight:850; }
 .shipping-rate-list { display:grid;gap:8px;padding:2px 23px 22px; }

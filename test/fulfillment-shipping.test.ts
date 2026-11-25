@@ -81,6 +81,19 @@ test("carrier payload removes a duplicated city, state and postal suffix without
   assert.equal(source.address1, "2740 daybreak dr. Orlando Florida 32825");
 });
 
+test("carrier payload cleans copied address punctuation and a ZIP+4 without dropping the unit", () => {
+  const destination = shippingDestination(address({
+    address1: "100 Test Street, Miami, FL, 33101 0012",
+    address2: "Apt 8",
+    state: "fl",
+    postcode: "33101 0012",
+  }));
+  assert.equal(destination.address1, "100 Test Street");
+  assert.equal(destination.address2, "Apt 8");
+  assert.equal(destination.state, "FL");
+  assert.equal(destination.postalCode, "33101-0012");
+});
+
 test("the warehouse shipping policy accepts only FedEx 2Day One Rate Pak", () => {
   assert.equal(matchesPhaseOneShippingPolicy({
     carrierCode: "fedex",

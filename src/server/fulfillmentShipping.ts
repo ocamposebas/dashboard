@@ -56,7 +56,8 @@ function addressLineWithoutDuplicateLocality(
   const statePattern = state.trim()
     ? `(?:${regexEscape(state.trim())}|[A-Za-z][A-Za-z. ]{1,28})`
     : "[A-Za-z][A-Za-z. ]{1,28}";
-  const duplicate = new RegExp(`\\s+${cityPattern}\\s+${statePattern}\\s+${postalPattern}$`, "i");
+  const separator = "[,\\s]+";
+  const duplicate = new RegExp(`${separator}${cityPattern}${separator}${statePattern}${separator}${postalPattern}$`, "i");
   const normalized = line.replace(duplicate, "").trim().replace(/[,.\s]+$/, "");
   return normalized || line;
 }
@@ -92,16 +93,19 @@ export function shippingPackageInput(value: unknown): ShippingPackageInput {
   };
 }
 
-export function shippingDestination(address: CommerceAddress): ShippingDestination {
+export function shippingDestinationDetails(address: CommerceAddress): ShippingDestination {
   const name = `${address.firstName} ${address.lastName}`.trim();
   const countryCode = address.country.trim().toUpperCase();
   const city = address.city.trim();
-  const state = address.state.trim();
-  const postalCode = address.postcode.trim();
-  const destination = {
+  const state = address.state.trim().toUpperCase();
+  const sourcePostalCode = address.postcode.trim();
+  const postalCode = countryCode === "US"
+    ? sourcePostalCode.replace(/^(\d{5})[\s-]*(\d{4})$/, "$1-$2")
+    : sourcePostalCode;
+  return {
     name,
     company: address.company.trim(),
-    address1: addressLineWithoutDuplicateLocality(address.address1, city, state, postalCode),
+    address1: addressLineWithoutDuplicateLocality(address.address1, city, state, sourcePostalCode),
     address2: address.address2.trim(),
     city,
     state,
@@ -109,13 +113,17 @@ export function shippingDestination(address: CommerceAddress): ShippingDestinati
     countryCode,
     phone: address.phone.trim(),
   };
+}
+
+export function shippingDestination(address: CommerceAddress): ShippingDestination {
+  const destination = shippingDestinationDetails(address);
   if (
     (!destination.name && !destination.company) || !destination.address1 ||
     !destination.city || !destination.state || !destination.postalCode ||
     !/^[A-Z]{2}$/.test(destination.countryCode)
   ) {
     throw new FulfillmentShippingError(
-      "The order shipping address is incomplete. Correct it at the source before comparing rates.",
+      "The shipping address is incomplete. Check the street, city, state, ZIP and country on the order.",
       "invalid_address",
     );
   }

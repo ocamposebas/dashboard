@@ -111,6 +111,7 @@ import {
   FulfillmentShippingError,
   packedOrderStatusBlocker,
   shippingDestination,
+  shippingDestinationDetails,
   shippingExternalShipmentKey,
   shippingDestinationHash,
   shippingDestinationSummary,
@@ -142,6 +143,7 @@ import {
   matchesPhaseOneShippingPolicy,
   shippingPolicyForDestination,
   type ShippingLabel,
+  type ShippingAddressReview,
   type ShippingRateQuote,
 } from "../shared/shipping.js";
 import {
@@ -1880,6 +1882,7 @@ export function createMonitorServer(
     response: ServerResponse,
     error: unknown,
     fallback: string,
+    addressReview?: ShippingAddressReview,
   ): void {
     if (
       error instanceof ProductLocationError ||
@@ -1909,9 +1912,12 @@ export function createMonitorServer(
           : 400;
       const retryable = error instanceof ShipStationGatewayError &&
         ["upstream_unavailable", "rate_limited"].includes(error.code);
+      const needsAddressReview = error.code === "invalid_address" && addressReview;
+      if (needsAddressReview) response.setHeader("Cache-Control", "private, no-store");
       json(response, status, {
         error: error.message,
         ...(error instanceof ShipStationGatewayError ? { code: error.code, retryable } : {}),
+        ...(needsAddressReview ? { code: error.code, addressReview } : {}),
       });
       return;
     }
@@ -1922,7 +1928,6 @@ export function createMonitorServer(
   async function packedShippingOrder(fulfillmentId: string): Promise<{
     session: FulfillmentSession;
     order: CommerceOrder;
-    destination: ReturnType<typeof shippingDestination>;
     sourceShipping: CommerceOrder["shippingOperations"];
   }> {
     if (!commerce || !fulfillmentRepository) {
@@ -1947,7 +1952,6 @@ export function createMonitorServer(
     return {
       session,
       order,
-      destination: shippingDestination(order.shipping),
       sourceShipping: order.shippingOperations,
     };
   }
@@ -4967,10 +4971,16 @@ export function createMonitorServer(
         const input = payload && typeof payload === "object"
           ? payload as Record<string, unknown>
           : {};
+        let addressReview: ShippingAddressReview | undefined;
         try {
           const fulfillmentId = typeof input.fulfillmentId === "string" ? input.fulfillmentId : "";
           let parcel = shippingPackageInput(input.package);
-          const { destination, order } = await packedShippingOrder(fulfillmentId);
+          const { order } = await packedShippingOrder(fulfillmentId);
+          const { address1, address2, city, state, postalCode, countryCode } = shippingDestinationDetails(order.shipping);
+          const orderEditor = commerceConfig ? new URL("/wp-admin/admin.php", commerceConfig.baseUrl) : null;
+          if (orderEditor) orderEditor.search = new URLSearchParams({ page: "wc-orders", action: "edit", id: String(order.id) }).toString();
+          addressReview = { address1, address2, city, state, postalCode, countryCode, sourceOrderUrl: orderEditor?.href ?? null };
+          const destination = shippingDestination(order.shipping);
           const policy = shippingPolicyForDestination(destination);
           const capabilities = await shipStation.capabilities();
           if (!capabilities.rateShoppingAvailable) {
@@ -5044,7 +5054,7 @@ export function createMonitorServer(
             quotedAt: new Date().toISOString(),
           });
         } catch (error: unknown) {
-          fulfillmentError(response, error, "Shipping rates could not be retrieved safely");
+          fulfillmentError(response, error, "Shipping rates could not be retrieved safely", addressReview);
         }
         return;
       }
@@ -5082,7 +5092,8 @@ export function createMonitorServer(
           if (claims.fulfillmentId !== fulfillmentId) {
             throw new ShippingQuoteTokenError("The selected rate belongs to another fulfillment", "invalid");
           }
-          const { destination, order, sourceShipping } = await packedShippingOrder(fulfillmentId);
+          const { order, sourceShipping } = await packedShippingOrder(fulfillmentId);
+          const destination = shippingDestination(order.shipping);
           const policy = shippingPolicyForDestination(destination);
           if (!matchesPhaseOneShippingPolicy({
             carrierCode: claims.rate.carrierCode,
@@ -5166,7 +5177,7 @@ export function createMonitorServer(
           : {};
         try {
           const fulfillmentId = typeof input.fulfillmentId === "string" ? input.fulfillmentId : "";
-          await packedShippingOrder(fulfillmentId);
+          shippingDestination((await packedShippingOrder(fulfillmentId)).order.shipping);
           const reconciled = await fulfillmentShippingWorkflow.reconcile({
             fulfillmentId,
             actorId: currentUser.id,
