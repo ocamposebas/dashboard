@@ -1183,7 +1183,11 @@ interface FulfillmentShippingUiState {
   addressReview?: ShippingAddressReview;
 }
 const fulfillmentShippingStates = new Map<string, FulfillmentShippingUiState>();
-let shippingConfirmationAction: "purchase" | "void" | null = null;
+let shippingConfirmation: {
+  action: "purchase" | "void";
+  fulfillmentId: string;
+  reference: string;
+} | null = null;
 interface FulfillmentEvidenceUiState {
   loading: boolean;
   busyKind: FulfillmentEvidenceKind | null;
@@ -5689,21 +5693,22 @@ function shippingWorkspaceMarkup(order: FulfillmentQueueEntry, state: Fulfillmen
       : purchaseUnlocked
         ? '<div class="shipping-test-banner is-purchase-live"><span>!</span><p><strong>Live postage enabled</strong> The displayed total is a persistent carrier quote. Final confirmation will charge the connected account and create one real label.</p></div>'
         : '<div class="shipping-test-banner is-live"><span>✓</span><p><strong>Live rates, purchase locked</strong> Prices come from connected carriers, but the server safety flag prevents every label charge.</p></div>'}
+    ${state.error ? `<p class="shipping-error" role="alert"><span>!</span>${escapeHtml(state.error)}</p>` : ""}
+    ${review ? `<div class="shipping-destination shipping-address-review" aria-label="Shipping address to review"><div><strong>Shipping address to review</strong><p>${[review.address1, review.address2, addressLocality].filter(Boolean).map(escapeHtml).join("<br>") || "The order has no shipping address."}</p><small>Update the order address, then select Verify.</small></div>${editOrderUrl ? `<a class="button button--secondary" href="${escapeHtml(editOrderUrl)}" target="_blank" rel="noopener noreferrer">Edit address on order ↗</a>` : ""}</div>` : ""}
     <form class="shipping-rate-form" id="shipping-rate-form">
       <label class="shipping-carrier-field"><span>Carrier</span><select aria-label="Approved carrier" disabled><option>${escapeHtml(activeCarrierName)}</option></select><small>${escapeHtml(capabilities.originName || "Origin ready")}</small></label>
       <label class="shipping-package-field"><span>Package type</span><select aria-label="Approved package type" disabled><option>${escapeHtml(activePackageName)}</option></select></label>
       <fieldset class="is-carrier-package"><legend>Package</legend><label><span>Weight</span><div><input name="weightOz" type="number" min="0.1" max="2400" step="0.1" value="${state.package.weightOz}" required><b>oz</b></div></label><div class="shipping-carrier-package-note"><strong>${escapeHtml(activePackageName)}</strong><small>${oneRateSelected ? "FedEx supplies the Pak dimensions automatically." : "Uses the standard Phase One shipping box."}</small></div></fieldset>
-      <button class="button button--primary" type="submit"${state.rateLoading ? " disabled" : ""}>${state.rateLoading ? "Checking rates…" : review ? "Recheck address and get rate" : state.error ? "Retry rate" : oneRateSelected ? "Load One Rate" : "Get rate"}</button>
+      <button class="button button--primary" type="submit"${state.rateLoading || state.labelBusy ? " disabled" : ""}>${state.rateLoading ? "Verifying…" : "Verify"}</button>
     </form>
     ${destination ? `<div class="shipping-destination"><span>SHIP TO</span><strong>${escapeHtml(destination.city)}, ${escapeHtml(destination.state)} ${escapeHtml(destination.postalCode)}</strong><small>${escapeHtml(destination.countryCode)} · Address remains sourced from the order</small></div>` : ""}
-    ${state.error ? `<p class="shipping-error" role="alert"><span>!</span>${escapeHtml(state.error)}</p>` : ""}
-    ${review ? `<div class="shipping-destination shipping-address-review" aria-label="Shipping address to review"><div><strong>Shipping address to review</strong><p>${[review.address1, review.address2, addressLocality].filter(Boolean).map(escapeHtml).join("<br>") || "The order has no shipping address."}</p><small>Confirm the address with the customer, save any correction on the order, then recheck the rate here.</small></div>${editOrderUrl ? `<a class="button button--secondary" href="${escapeHtml(editOrderUrl)}" target="_blank" rel="noopener noreferrer">Edit address on order ↗</a>` : ""}</div>` : ""}
     ${rateCards}
     ${selectedRate ? `<div class="shipping-purchase-review"><div><p class="section-kicker">Approved service</p><h4>${escapeHtml(activeServiceName)}</h4><p>${formatCurrency(selectedRate.amount, selectedRate.currency)}${selectedRate.isEstimate ? " estimated" : " final quoted total"} · ${escapeHtml(activePackageName)} · 4×6 PDF</p></div><div class="shipping-purchase-safety${purchaseUnlocked ? " is-live" : ""}"><span>${capabilities.dataMode === "mock" ? "TEST" : purchaseUnlocked ? "LIVE" : "LOCKED"}</span><p>${capabilities.dataMode === "mock" ? "Creates a local test label only. No postage or source order is changed." : purchaseUnlocked ? "Explicit confirmation purchases this exact rate once and writes tracking back safely." : "Live purchase is disabled on the server. Ask an administrator to complete the launch checklist."}</p></div><button class="button button--primary" type="button" ${capabilities.dataMode === "mock" ? "data-generate-shipping-label" : purchaseUnlocked ? "data-review-live-label" : "disabled"}${state.labelBusy ? " disabled" : ""}>${state.labelBusy ? "Processing safely…" : capabilities.dataMode === "mock" ? "Generate test label" : purchaseUnlocked ? `Review & purchase ${formatCurrency(selectedRate.amount, selectedRate.currency)}` : "Purchase locked"}</button></div>` : ""}
   </section>`;
 }
 
 function renderFulfillmentShipping(order: FulfillmentQueueEntry): void {
+  if (order.session?.id !== selectedFulfillmentOrder()?.session?.id) return;
   const target = document.querySelector<HTMLElement>("#fulfillment-shipping-workspace");
   if (!target || !order.session) return;
   const state = fulfillmentShippingStates.get(order.session.id) || initialShippingState();
@@ -5760,7 +5765,7 @@ async function compareShippingRates(): Promise<void> {
   const form = document.querySelector<HTMLFormElement>("#shipping-rate-form");
   if (!order || !fulfillmentId || !form) return;
   const state = fulfillmentShippingStates.get(fulfillmentId);
-  if (!state?.capabilities || state.rateLoading) return;
+  if (!state?.capabilities || state.rateLoading || state.labelBusy) return;
   const data = new FormData(form);
   state.package = { ...state.package, weightOz: Number(data.get("weightOz")) };
   state.rateLoading = true;
@@ -5825,6 +5830,15 @@ async function compareShippingRates(): Promise<void> {
     state.rateLoading = false;
     renderFulfillmentShipping(order);
   }
+
+  if (state.selectedRateIndex !== null
+      && state.rates?.dataMode === "live"
+      && state.capabilities.labelPurchaseMode === "live_enabled"
+      && !state.label
+      && location.hash === "#fulfillment"
+      && selectedFulfillmentOrder()?.session?.id === fulfillmentId) {
+    openShippingConfirmation("purchase");
+  }
 }
 
 async function generateShippingLabel(): Promise<void> {
@@ -5888,7 +5902,7 @@ function closeShippingConfirmation(): void {
   requiredElement<HTMLElement>("#shipping-confirm-dialog").hidden = true;
   requiredElement<HTMLButtonElement>("#shipping-confirm-backdrop").hidden = true;
   document.body.classList.remove("has-shipping-confirm");
-  shippingConfirmationAction = null;
+  shippingConfirmation = null;
 }
 
 function openShippingConfirmation(action: "purchase" | "void"): void {
@@ -5898,9 +5912,10 @@ function openShippingConfirmation(action: "purchase" | "void"): void {
   const rate = state?.selectedRateIndex === null || state?.selectedRateIndex === undefined
     ? null
     : state.rates?.rates[state.selectedRateIndex] || null;
-  if (!order || !state || (action === "purchase" && !rate) || (action === "void" && !state.label)) return;
-  shippingConfirmationAction = action;
   const isVoid = action === "void";
+  const reference = isVoid ? state?.label?.id : rate?.quoteToken;
+  if (!order || !fulfillmentId || !state || !reference || state.labelBusy) return;
+  shippingConfirmation = { action, fulfillmentId, reference };
   requiredElement<HTMLElement>("#shipping-confirm-icon").textContent = isVoid ? "×" : "$";
   requiredElement<HTMLElement>("#shipping-confirm-eyebrow").textContent = isVoid ? "Carrier refund request" : "Live postage";
   requiredElement<HTMLElement>("#shipping-confirm-title").textContent = isVoid ? "Void this shipping label?" : `Purchase label for order #${order.orderNumber}?`;
@@ -12777,10 +12792,18 @@ requiredElement<HTMLButtonElement>("#packing-confirm-submit").addEventListener("
 requiredElement<HTMLButtonElement>("#shipping-confirm-cancel").addEventListener("click", closeShippingConfirmation);
 requiredElement<HTMLButtonElement>("#shipping-confirm-backdrop").addEventListener("click", closeShippingConfirmation);
 requiredElement<HTMLButtonElement>("#shipping-confirm-submit").addEventListener("click", () => {
-  const action = shippingConfirmationAction;
+  const confirmation = shippingConfirmation;
   closeShippingConfirmation();
-  if (action === "purchase") void generateShippingLabel();
-  if (action === "void") void voidShippingLabel();
+  if (!confirmation || selectedFulfillmentOrder()?.session?.id !== confirmation.fulfillmentId) return;
+  const state = fulfillmentShippingStates.get(confirmation.fulfillmentId);
+  if (confirmation.action === "purchase") {
+    const index = state?.selectedRateIndex;
+    if (index != null && state?.rates?.rates[index]?.quoteToken === confirmation.reference) {
+      void generateShippingLabel();
+    }
+  } else if (state?.label?.id === confirmation.reference) {
+    void voidShippingLabel();
+  }
 });
 
 document.addEventListener("keydown", (event) => {
